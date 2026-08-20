@@ -189,7 +189,7 @@ export default function GalleryPage() {
     }
   }
 
-  // Rút gọn link chia sẻ theo ID Album trực tiếp từ database
+  // Tự động đổi tiêu đề trang theo tên album khi mở link chia sẻ
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
@@ -206,6 +206,7 @@ export default function GalleryPage() {
           }
           setSelectedAlbum(sharedAlbumObj)
           fetchAlbumImages(sharedAlbumObj.driveUrl)
+          document.title = `${data.title} - DinhThong Gallery`
         }
       })
       
@@ -268,12 +269,12 @@ export default function GalleryPage() {
 
   const handleOpenAlbum = (album: Album) => {
     setSelectedAlbum(album)
+    document.title = `${album.title} - DinhThong Gallery`
     fetchAlbumImages(album.driveUrl)
   }
 
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
-    // Tạo link cực ngắn dạng: https://domain.com/gallery?id=123456
     const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(album.id)
@@ -1142,7 +1143,7 @@ export default function GalleryPage() {
           <div className="flex items-center gap-2">
             <span className="text-[11px] uppercase tracking-wider">LIÊN HỆ:</span>
             <a 
-              href="url?id=1" 
+              href="https://facebook.com" 
               target="_blank" 
               rel="noreferrer" 
               className="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition inline-flex items-center cursor-pointer"
