@@ -25,15 +25,6 @@ interface Album {
   driveUrl: string
 }
 
-const DEFAULT_ALBUMS: Album[] = [
-  {
-    id: '1',
-    title: 'Biển Thạch Hải',
-    coverUrl: '', 
-    driveUrl: 'https://drive.google.com/drive/folders/...'
-  }
-]
-
 const preloadedCache = new Set<string>()
 
 export default function GalleryPage() {
@@ -42,7 +33,7 @@ export default function GalleryPage() {
   const [loading, setLoading] = useState(true)
   const [isDarkMode, setIsDarkMode] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
-  const [albums, setAlbums] = useState<Album[]>(DEFAULT_ALBUMS)
+  const [albums, setAlbums] = useState<Album[]>([])
   
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null)
   const [images, setImages] = useState<MediaItem[]>([])
@@ -85,6 +76,19 @@ export default function GalleryPage() {
     return url
   }
 
+  const fetchAlbumsFromSupabase = async () => {
+    const { data, error } = await supabase.from('albums').select('*').order('id', { ascending: false })
+    if (!error && data) {
+      const formatted: Album[] = data.map((item: any) => ({
+        id: item.id,
+        title: item.title,
+        driveUrl: item.drive_url,
+        coverUrl: item.cover_url || ''
+      }))
+      setAlbums(formatted)
+    }
+  }
+
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
@@ -104,7 +108,6 @@ export default function GalleryPage() {
     }
   }
 
-  // 🌟 GIỮ NGUYÊN CƠ CHẾ LẤY ẢNH ĐẦU TIÊN LÀM BÌA ALBUM NHƯ BAN ĐẦU
   useEffect(() => {
     albums.forEach(async (album) => {
       if (!album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
@@ -231,10 +234,8 @@ export default function GalleryPage() {
         }
 
         setUser(data.session.user)
-        const savedAlbums = localStorage.getItem('dinhthong_albums')
-        if (savedAlbums) {
-          try { setAlbums(JSON.parse(savedAlbums)) } catch {}
-        }
+        await fetchAlbumsFromSupabase()
+
         const savedRatings = localStorage.getItem('dinhthong_image_ratings')
         if (savedRatings) {
           try { setRatings(JSON.parse(savedRatings)) } catch {}
@@ -276,39 +277,53 @@ export default function GalleryPage() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  const handleAddAlbum = (e: any) => {
+  const handleAddAlbum = async (e: any) => {
     e.preventDefault()
-    const newAlbum = { 
-      id: Date.now().toString(), 
-      title: e.target.title.value, 
-      driveUrl: e.target.url.value, 
-      coverUrl: e.target.cover.value.trim() ? formatDriveCoverUrl(e.target.cover.value) : '' 
+    const newId = Date.now().toString()
+    const newTitle = e.target.title.value
+    const newDriveUrl = e.target.url.value
+    const newCoverUrl = e.target.cover.value.trim() ? formatDriveCoverUrl(e.target.cover.value) : ''
+
+    const { error } = await supabase.from('albums').insert([
+      { id: newId, title: newTitle, drive_url: newDriveUrl, cover_url: newCoverUrl }
+    ])
+
+    if (!error) {
+      await fetchAlbumsFromSupabase()
+      setIsModalOpen(false)
+    } else {
+      alert('Lỗi khi thêm album lên database: ' + error.message)
     }
-    const updated = [newAlbum, ...albums]
-    setAlbums(updated)
-    localStorage.setItem('dinhthong_albums', JSON.stringify(updated))
-    setIsModalOpen(false)
   }
 
-  const handleUpdateAlbum = (e: any) => {
+  const handleUpdateAlbum = async (e: any) => {
     e.preventDefault()
     if (!editingAlbum) return
-    const formatted = {
-      ...editingAlbum,
-      coverUrl: editingAlbum.coverUrl.trim() ? formatDriveCoverUrl(editingAlbum.coverUrl) : ''
+    const formattedCover = editingAlbum.coverUrl.trim() ? formatDriveCoverUrl(editingAlbum.coverUrl) : ''
+
+    const { error } = await supabase.from('albums').update({
+      title: editingAlbum.title,
+      drive_url: editingAlbum.driveUrl,
+      cover_url: formattedCover
+    }).eq('id', editingAlbum.id)
+
+    if (!error) {
+      await fetchAlbumsFromSupabase()
+      setEditingAlbum(null)
+    } else {
+      alert('Lỗi cập nhật: ' + error.message)
     }
-    const updated = albums.map(item => item.id === formatted.id ? formatted : item)
-    setAlbums(updated)
-    localStorage.setItem('dinhthong_albums', JSON.stringify(updated))
-    setEditingAlbum(null)
   }
 
-  const handleDeleteAlbum = (id: string, e: React.MouseEvent) => {
+  const handleDeleteAlbum = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     if (confirm('Bạn có chắc muốn xóa album này không?')) {
-      const updated = albums.filter(item => item.id !== id)
-      setAlbums(updated)
-      localStorage.setItem('dinhthong_albums', JSON.stringify(updated))
+      const { error } = await supabase.from('albums').delete().eq('id', id)
+      if (!error) {
+        await fetchAlbumsFromSupabase()
+      } else {
+        alert('Lỗi khi xóa: ' + error.message)
+      }
     }
   }
 
@@ -579,7 +594,6 @@ export default function GalleryPage() {
                         <h3 className="font-semibold text-sm hover:text-emerald-600 transition-colors">
                           {album.title}
                         </h3>
-                        {/* 🌟 ĐÃ SỬA: "Nhấp để xem" */}
                         <p className="text-[11px] text-gray-400 mt-0.5">Nhấp để xem</p>
                       </div>
 
@@ -590,7 +604,6 @@ export default function GalleryPage() {
                         className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition"
                       >
                         <Download className="w-3.5 h-3.5" />
-                        {/* 🌟 ĐÃ SỬA: "Tải xuống" */}
                         <span>Tải xuống</span>
                       </a>
                     </div>
