@@ -44,8 +44,8 @@ export default function LoginPage() {
   if (checking) {
     return (
       <div className="min-h-screen bg-[#08170f] flex flex-col items-center justify-center text-white">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
-        <p className="text-xs font-light text-emerald-200/70 tracking-widest uppercase">Đang tải...</p>
+        <Loader2 className="w-8 h-8 animate-spin text-white mb-3" />
+        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang tải...</p>
       </div>
     )
   }
@@ -63,14 +63,14 @@ export default function LoginPage() {
 
       <div className="w-full flex-1 flex items-center justify-center z-10 my-auto">
         {/* Card Đăng Nhập */}
-        <div className="w-full max-w-[360px] sm:max-w-md p-8 sm:p-10 rounded-[32px] bg-[#1d3124]/80 border border-emerald-500/20 backdrop-blur-xl text-center shadow-[0_20px_50px_rgba(0,0,0,0.6)] text-white">
+        <div className="w-full max-w-[360px] sm:max-w-md p-8 sm:p-10 rounded-[32px] bg-[#1d3124]/80 border border-white/10 backdrop-blur-xl text-center shadow-[0_20px_50px_rgba(0,0,0,0.6)] text-white">
           
-          {/* Cả cụm Dinh Thong Photos đẩy lên đẩy xuống */}
+          {/* Cụm chữ DINH THONG PHOTOS màu trắng, chuyển động lên xuống */}
           <div className="inline-block mb-6 animate-[bounce_2.5s_ease-in-out_infinite]">
-            <div className="tracking-[0.3em] text-[12px] font-bold text-emerald-300 uppercase">
+            <div className="tracking-[0.3em] text-[12px] font-bold text-white uppercase">
               DINH THONG
             </div>
-            <div className="tracking-[0.25em] text-[10px] font-medium text-emerald-200/70 uppercase mt-0.5">
+            <div className="tracking-[0.25em] text-[10px] font-medium text-white/80 uppercase mt-0.5">
               PHOTOS
             </div>
           </div>
@@ -79,14 +79,14 @@ export default function LoginPage() {
             DINHTHONG GALLERY
           </h1>
 
-          <div className="inline-block px-4 py-2 rounded-full bg-black/40 border border-emerald-500/20 text-[11px] text-emerald-100/80 mb-8 font-light">
+          <div className="inline-block px-4 py-2 rounded-full bg-black/40 border border-white/10 text-[11px] text-white/90 mb-8 font-light">
             Gallery nội bộ — Vui lòng đăng nhập để tiếp tục
           </div>
 
           <button
             onClick={handleGoogleLogin}
             disabled={loading}
-            className="w-full py-3.5 px-6 rounded-full bg-[#f4f7f4] hover:bg-white text-gray-900 font-semibold text-xs flex items-center justify-center gap-3 shadow-lg shadow-emerald-950/50 transition active:scale-95 disabled:opacity-60 cursor-pointer mb-6"
+            className="w-full py-3.5 px-6 rounded-full bg-[#f4f7f4] hover:bg-white text-gray-900 font-semibold text-xs flex items-center justify-center gap-3 shadow-lg shadow-black/40 transition active:scale-95 disabled:opacity-60 cursor-pointer mb-6"
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin text-gray-900" />
@@ -101,13 +101,13 @@ export default function LoginPage() {
             <span>Đăng nhập với Google</span>
           </button>
 
-          <p className="text-[11px] text-emerald-200/50 font-light">
+          <p className="text-[11px] text-white/60 font-light">
             Chào mừng bạn đến với DinhThong Photos
           </p>
         </div>
       </div>
 
-      <footer className="z-10 text-[11px] text-emerald-100/40 text-center">
+      <footer className="z-10 text-[11px] text-white/50 text-center">
         © 2026 DinhThong Gallery. All rights reserved.
       </footer>
     </div>
