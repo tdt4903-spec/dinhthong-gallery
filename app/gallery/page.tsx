@@ -189,13 +189,21 @@ export default function GalleryPage() {
     }
   }
 
-  // Tự động đổi tiêu đề trang theo tên album khi mở link chia sẻ
+  // Tự động nhận diện tên album từ URL khi khách bấm vào link chia sẻ
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
+    const sharedName = params.get('name')
 
     if (sharedId) {
       setIsSharedGuest(true)
+      
+      // Nếu có tên trên URL thì gán ngay lập tức làm tiêu đề trang
+      if (sharedName) {
+        const decodedTitle = decodeURIComponent(sharedName)
+        document.title = decodedTitle
+      }
+
       supabase.from('albums').select('*').eq('id', sharedId).single().then(({ data }) => {
         if (data) {
           const sharedAlbumObj: Album = {
@@ -206,7 +214,7 @@ export default function GalleryPage() {
           }
           setSelectedAlbum(sharedAlbumObj)
           fetchAlbumImages(sharedAlbumObj.driveUrl)
-          document.title = `${data.title} - DinhThong Gallery`
+          document.title = data.title
         }
       })
       
@@ -269,13 +277,14 @@ export default function GalleryPage() {
 
   const handleOpenAlbum = (album: Album) => {
     setSelectedAlbum(album)
-    document.title = `${album.title} - DinhThong Gallery`
+    document.title = album.title
     fetchAlbumImages(album.driveUrl)
   }
 
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
-    const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
+    // Tạo link chứa cả id và tên album để hiển thị chuẩn xác
+    const shareUrl = `${window.location.origin}/gallery?id=${album.id}&name=${encodeURIComponent(album.title)}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(album.id)
     setTimeout(() => setShareCopiedId(null), 2500)
