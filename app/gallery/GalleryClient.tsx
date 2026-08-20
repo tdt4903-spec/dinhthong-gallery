@@ -184,30 +184,33 @@ export default function GalleryClient() {
     window.open(selectedAlbum.driveUrl, '_blank')
   }
 
-  // Tải file gốc 100% Full Size qua API Proxy
+  // Tải file: Giữ nguyên 100% tên gốc + đuôi mở rộng, không bao giờ tự ý bật sang tab Drive
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    if (downloadingId === item.id) return
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    if (downloadingId) return
 
     setDownloadingId(item.id)
     const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
 
     try {
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
-      const fileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
+      const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
       const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
 
-      const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
+      const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
       const res = await fetch(proxyUrl)
-      if (!res.ok) throw new Error('Proxy fetch failed')
+      if (!res.ok) throw new Error('Fetch failed')
       
       const blob = await res.blob()
-      const file = new File([blob], fileName, { type: mimeType })
+      const file = new File([blob], exactFileName, { type: mimeType })
 
       if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
-          title: item.name,
+          title: exactFileName,
         })
         setDownloadingId(null)
         return
@@ -216,7 +219,7 @@ export default function GalleryClient() {
       const blobUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = blobUrl
-      link.download = fileName
+      link.setAttribute('download', exactFileName)
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
@@ -224,12 +227,28 @@ export default function GalleryClient() {
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
         const ext = item.type === 'video' ? 'mp4' : 'jpg'
-        const fileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
-        window.location.href = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
+        const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
+        // Tải trực tiếp qua API Proxy download, không mở sang Drive
+        const directProxy = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
+        const fallbackLink = document.createElement('a')
+        fallbackLink.href = directProxy
+        fallbackLink.setAttribute('download', exactFileName)
+        document.body.appendChild(fallbackLink)
+        fallbackLink.click()
+        document.body.removeChild(fallbackLink)
       }
     } finally {
       setDownloadingId(null)
     }
+  }
+
+  const handleClosePreview = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    setDownloadingId(null)
+    setPreviewMedia(null)
   }
 
   const handleClearAllSelections = () => {
@@ -314,7 +333,7 @@ export default function GalleryClient() {
       if (!previewMedia) return
       if (e.key === 'ArrowLeft') handlePrevImage()
       if (e.key === 'ArrowRight') handleNextImage()
-      if (e.key === 'Escape') setPreviewMedia(null)
+      if (e.key === 'Escape') handleClosePreview()
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
@@ -905,9 +924,14 @@ export default function GalleryClient() {
 
       {/* Modal Xem Trước Tệp */}
       {previewMedia && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col justify-between p-4 select-none">
-          
-          <div className="flex items-center justify-between text-white/90 z-20 px-4 py-2">
+        <div 
+          onClick={handleClosePreview}
+          className="fixed inset-0 z-50 bg-black/95 flex flex-col justify-between p-4 select-none"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="flex items-center justify-between text-white/90 z-20 px-4 py-2 w-full"
+          >
             <div className="text-xs font-light tracking-wide opacity-80">
               {selectedAlbum?.title}
             </div>
@@ -919,7 +943,7 @@ export default function GalleryClient() {
 
             <div className="flex items-center gap-4">
               <button 
-                onClick={() => handleDownloadMedia(previewMedia)}
+                onClick={(e) => handleDownloadMedia(previewMedia, e)}
                 disabled={downloadingId === previewMedia.id}
                 className="p-2 rounded-full hover:bg-white/10 transition text-white cursor-pointer disabled:opacity-50"
                 title="Lưu tệp về máy"
@@ -931,7 +955,7 @@ export default function GalleryClient() {
                 )}
               </button>
               <button
-                onClick={() => setPreviewMedia(null)}
+                onClick={handleClosePreview}
                 className="p-2 rounded-full hover:bg-white/10 transition text-white cursor-pointer"
                 title="Đóng"
               >
@@ -940,7 +964,10 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          <div className="relative flex-1 flex items-center justify-center px-12 overflow-hidden my-2">
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="relative flex-1 flex items-center justify-center px-12 overflow-hidden my-2"
+          >
             <button
               onClick={handlePrevImage}
               className="absolute left-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer z-20"
@@ -973,7 +1000,10 @@ export default function GalleryClient() {
             )}
           </div>
 
-          <div className="flex flex-col items-center gap-3 pb-2 z-20">
+          <div 
+            onClick={(e) => e.stopPropagation()} 
+            className="flex flex-col items-center gap-3 pb-2 z-20"
+          >
             <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md px-5 py-2 rounded-2xl border border-white/10">
               <span className="text-[11px] text-gray-300 font-medium">Đánh giá sao:</span>
               <div className="flex items-center gap-1.5">

@@ -18,11 +18,15 @@ export async function GET(request: NextRequest) {
     const contentType = response.headers.get('content-type') || 'application/octet-stream'
     const blob = await response.blob()
 
+    // Chuẩn hóa tên file an toàn cho cả ASCII và UTF-8 có dấu tiếng Việt
+    const cleanAsciiName = fileName.replace(/[^\x20-\x7E]/g, '_')
+    const encodedUtf8Name = encodeURIComponent(fileName)
+
     return new NextResponse(blob, {
       status: 200,
       headers: {
         'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+        'Content-Disposition': `attachment; filename="${cleanAsciiName}"; filename*=UTF-8''${encodedUtf8Name}`,
         'Cache-Control': 'public, max-age=3600',
       },
     })
