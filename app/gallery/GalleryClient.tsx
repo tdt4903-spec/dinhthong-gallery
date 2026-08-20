@@ -51,7 +51,6 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  // State theo dõi trạng thái tải từng ảnh
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   const [currentPage, setCurrentPage] = useState(1)
@@ -185,7 +184,7 @@ export default function GalleryClient() {
     window.open(selectedAlbum.driveUrl, '_blank')
   }
 
-  // Xử lý tải ảnh siêu tốc: Lấy từ Cache trình duyệt -> Mở Menu iOS / Tải Android
+  // Tải file gốc 100% Full Size qua API Proxy
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
     if (downloadingId === item.id) return
@@ -198,21 +197,11 @@ export default function GalleryClient() {
       const fileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
       const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
 
-      // Ưu tiên lấy từ cache hiển thị trước để phản hồi ngay lập tức
-      const fastUrl = (item.type === 'image' && (item.fullUrl || item.url)) 
-        ? (item.fullUrl || item.url) 
-        : `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
-
-      let blob: Blob
-      try {
-        const res = await fetch(fastUrl)
-        if (!res.ok) throw new Error('Fetch cache failed')
-        blob = await res.blob()
-      } catch {
-        const proxyRes = await fetch(`/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`)
-        blob = await proxyRes.blob()
-      }
-
+      const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
+      const res = await fetch(proxyUrl)
+      if (!res.ok) throw new Error('Proxy fetch failed')
+      
+      const blob = await res.blob()
       const file = new File([blob], fileName, { type: mimeType })
 
       if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -231,7 +220,7 @@ export default function GalleryClient() {
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 1500)
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000)
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
         const ext = item.type === 'video' ? 'mp4' : 'jpg'
