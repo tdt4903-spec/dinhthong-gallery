@@ -189,7 +189,7 @@ export default function GalleryPage() {
     }
   }
 
-  // Logic xử lý khi vào trang (Kiểm tra xem là khách bấm link chia sẻ ?id=... hay Admin đăng nhập)
+  // Xử lý xác thực và nạp dữ liệu an toàn, không bị kẹt vòng xoay
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
@@ -208,19 +208,21 @@ export default function GalleryPage() {
           fetchAlbumImages(sharedAlbumObj.driveUrl)
           document.title = data.title
         }
+      }).finally(() => {
+        setLoading(false)
       })
       
       const savedRatings = localStorage.getItem('dinhthong_image_ratings')
       if (savedRatings) {
         try { setRatings(JSON.parse(savedRatings)) } catch {}
       }
-      setLoading(false)
       return
     }
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) {
         router.replace('/')
+        return
       } else {
         const loggedInEmail = data.session.user.email
 
@@ -244,10 +246,11 @@ export default function GalleryPage() {
         if (savedRatings) {
           try { setRatings(JSON.parse(savedRatings)) } catch {}
         }
-        setLoading(false)
       }
     }).catch(() => {
       router.replace('/')
+    }).finally(() => {
+      setLoading(false)
     })
   }, [router, supabase])
 
