@@ -2,11 +2,14 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'DinhThong Gallery',
-  description: 'Khoảnh khắc lưu giữ cảm xúc',
+  title: {
+    template: '%s - DinhThong Gallery',
+    default: 'DinhThong Gallery',
+  },
+  description: 'DinhThong Gallery',
   openGraph: {
     title: 'DinhThong Gallery',
-    description: 'Khoảnh khắc lưu giữ cảm xúc',
+    description: 'DinhThong Gallery',
     url: 'https://dinhthong-gallery.vercel.app',
     siteName: 'DinhThong Gallery',
     locale: 'vi_VN',
