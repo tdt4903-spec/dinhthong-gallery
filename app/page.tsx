@@ -43,26 +43,29 @@ export default function LoginPage() {
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-[#151036] flex flex-col items-center justify-center text-white">
+      <div className="min-h-screen bg-[#061c14] flex flex-col items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
-        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang kiểm tra phiên đăng nhập...</p>
+        <p className="text-xs font-light text-emerald-200/70 tracking-widest uppercase">Đang kiểm tra phiên đăng nhập...</p>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-[#151036] flex flex-col items-center justify-center p-4 text-white">
-      <div className="w-full max-w-md p-8 rounded-3xl bg-white/5 border border-white/10 backdrop-blur-xl text-center shadow-2xl">
-        <h1 className="text-3xl font-serif font-bold tracking-tight mb-2">DinhThong Gallery</h1>
-        <p className="text-xs text-white/60 mb-8">Vui lòng đăng nhập để tiếp tục</p>
+    <div className="min-h-screen bg-gradient-to-br from-[#061c14] via-[#0a2e22] to-[#04130d] flex flex-col items-center justify-center p-4 text-white">
+      <div className="w-full max-w-md p-8 rounded-3xl bg-emerald-950/40 border border-emerald-500/20 backdrop-blur-xl text-center shadow-2xl">
+        <div className="flex items-baseline justify-center gap-1 mb-2">
+          <span className="text-3xl font-serif font-bold tracking-tight text-white">DinhThong</span>
+          <span className="font-serif italic text-emerald-400 text-2xl">gallery</span>
+        </div>
+        <p className="text-xs text-emerald-200/60 mb-8">Vui lòng đăng nhập để tiếp tục</p>
 
         <button
           onClick={handleGoogleLogin}
           disabled={loading}
-          className="w-full py-3.5 px-6 rounded-2xl bg-white text-gray-900 font-semibold text-xs flex items-center justify-center gap-3 shadow-lg hover:bg-gray-100 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+          className="w-full py-3.5 px-6 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-semibold text-xs flex items-center justify-center gap-3 shadow-lg shadow-emerald-900/40 transition active:scale-95 disabled:opacity-50 cursor-pointer"
         >
           {loading ? (
-            <Loader2 className="w-4 h-4 animate-spin text-gray-900" />
+            <Loader2 className="w-4 h-4 animate-spin text-gray-950" />
           ) : (
             <svg className="w-4 h-4" viewBox="0 0 24 24">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
