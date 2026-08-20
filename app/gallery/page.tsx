@@ -207,7 +207,9 @@ export default function GalleryPage() {
           fetchAlbumImages(sharedAlbumObj.driveUrl)
           document.title = data.title
         }
-      }).finally(() => {
+      }).catch(() => {
+        // bỏ qua lỗi
+      }).then(() => {
         setLoading(false)
       })
       
