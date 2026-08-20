@@ -189,7 +189,7 @@ export default function GalleryPage() {
     }
   }
 
-  // Tự động tải tên album dựa vào ID trên URL, cập nhật tiêu đề và thẻ Open Graph động
+  // Tự động truy vấn Supabase bằng ID trên URL, thiết lập đồng thời Tiêu đề trang và Thẻ OpenGraph động
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
@@ -207,24 +207,23 @@ export default function GalleryPage() {
           setSelectedAlbum(sharedAlbumObj)
           fetchAlbumImages(sharedAlbumObj.driveUrl)
           
-          // Cập nhật tiêu đề trình duyệt và các thẻ Open Graph động hiển thị khi chia sẻ link
+          // Gán tiêu đề trang và metadata động để preview card hiển thị chuẩn tên album
           document.title = data.title
           
-          let ogTitleMeta = document.querySelector('meta[property="og:title"]')
-          if (!ogTitleMeta) {
-            ogTitleMeta = document.createElement('meta')
-            ogTitleMeta.setAttribute('property', 'og:title')
-            document.head.appendChild(ogTitleMeta)
+          const updateMetaTag = (property: string, content: string) => {
+            let meta = document.querySelector(`meta[property="${property}"]`) || document.querySelector(`meta[name="${property}"]`)
+            if (!meta) {
+              meta = document.createElement('meta')
+              meta.setAttribute('property', property)
+              document.head.appendChild(meta)
+            }
+            meta.setAttribute('content', content)
           }
-          ogTitleMeta.setAttribute('content', data.title)
 
-          let ogDescMeta = document.querySelector('meta[property="og:description"]')
-          if (!ogDescMeta) {
-            ogDescMeta = document.createElement('meta')
-            ogDescMeta.setAttribute('property', 'og:description')
-            document.head.appendChild(ogDescMeta)
-          }
-          ogDescMeta.setAttribute('content', 'DinhThong Gallery')
+          updateMetaTag('og:title', data.title)
+          updateMetaTag('og:description', 'DinhThong Gallery')
+          updateMetaTag('twitter:title', data.title)
+          updateMetaTag('twitter:description', 'DinhThong Gallery')
         }
       })
       
@@ -291,7 +290,7 @@ export default function GalleryPage() {
     fetchAlbumImages(album.driveUrl)
   }
 
-  // Link chia sẻ cực ngắn gọn chỉ chứa ?id=...
+  // Link chia sẻ cực kỳ ngắn gọn, chỉ chứa ID
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
