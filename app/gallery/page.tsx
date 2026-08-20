@@ -189,7 +189,6 @@ export default function GalleryPage() {
     }
   }
 
-  // Xử lý xác thực và nạp dữ liệu an toàn, không bị kẹt vòng xoay
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
