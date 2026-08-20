@@ -108,7 +108,7 @@ export default function LoginPage() {
       </div>
 
       <footer className="z-10 text-[11px] text-white/50 text-center">
-        © 2026 DinhThong Gallery. All rights reserved.
+        © 2026 DinhThong Gallery.
       </footer>
     </div>
   )
