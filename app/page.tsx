@@ -43,45 +43,51 @@ export default function LoginPage() {
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-[#1c2e24] flex flex-col items-center justify-center text-white">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
-        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang tải...</p>
+      <div className="min-h-screen bg-[#08170f] flex flex-col items-center justify-center text-white">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
+        <p className="text-xs font-light text-emerald-200/70 tracking-widest uppercase">Đang tải...</p>
       </div>
     )
   }
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-between p-6 select-none overflow-hidden">
-      {/* Background mờ hình lá cây */}
+    <div className="relative min-h-screen flex flex-col items-center justify-between p-6 select-none overflow-hidden bg-[#07130c]">
+      {/* Background lá xanh có hiệu ứng zoom nhẹ tự nhiên */}
       <div 
-        className="absolute inset-0 z-0 bg-cover bg-center filter blur-sm scale-105"
-        style={{ backgroundImage: "url('/banner.jpg')" }}
+        className="absolute inset-0 z-0 bg-cover bg-center filter brightness-[0.75] contrast-[1.1] scale-105 animate-[pulse_10s_ease-in-out_infinite]"
+        style={{ 
+          backgroundImage: "url('https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?q=80&w=2000&auto=format&fit=crop')" 
+        }}
       />
-      <div className="absolute inset-0 z-0 bg-black/60 backdrop-blur-[2px]" />
+      {/* Lớp phủ màu xanh lá tối tạo chiều sâu */}
+      <div className="absolute inset-0 z-0 bg-gradient-to-b from-[#06150d]/70 via-[#071810]/50 to-[#030c08]/80 backdrop-blur-[3px]" />
 
       <div className="w-full flex-1 flex items-center justify-center z-10 my-auto">
-        {/* Card Đăng Nhập Màu Xanh Rêu */}
-        <div className="w-full max-w-[360px] sm:max-w-md p-8 sm:p-10 rounded-[32px] bg-[#334638]/90 border border-white/10 backdrop-blur-md text-center shadow-2xl text-white">
+        {/* Card Đăng Nhập Xanh Rêu Sang Trọng */}
+        <div className="w-full max-w-[360px] sm:max-w-md p-8 sm:p-10 rounded-[32px] bg-[#1d3124]/80 border border-emerald-500/20 backdrop-blur-xl text-center shadow-[0_20px_50px_rgba(0,0,0,0.6)] text-white">
           
-          <div className="tracking-[0.25em] text-[11px] font-medium text-white/80 uppercase">
-            DINH THONG
-          </div>
-          <div className="tracking-[0.2em] text-[10px] font-light text-white/60 uppercase mt-0.5 mb-6">
-            PHOTOS
+          {/* DINH THONG PHOTOS có hiệu ứng chuyển động nổi bật */}
+          <div className="group cursor-default inline-block mb-6">
+            <div className="tracking-[0.3em] text-[12px] font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-200 via-teal-300 to-emerald-400 uppercase animate-pulse drop-shadow-[0_0_12px_rgba(52,211,153,0.6)] transition-transform duration-500 hover:scale-105">
+              DINH THONG
+            </div>
+            <div className="tracking-[0.25em] text-[10px] font-medium text-emerald-300/80 uppercase mt-0.5 animate-[bounce_3s_ease-in-out_infinite]">
+              PHOTOS
+            </div>
           </div>
 
-          <h1 className="text-xl sm:text-2xl font-sans tracking-[0.15em] font-semibold text-white uppercase mb-6">
+          <h1 className="text-xl sm:text-2xl font-sans tracking-[0.18em] font-bold text-white uppercase mb-6 drop-shadow-md">
             DINHTHONG GALLERY
           </h1>
 
-          <div className="inline-block px-4 py-2 rounded-full bg-black/30 border border-white/5 text-[11px] text-white/80 mb-8 font-light">
+          <div className="inline-block px-4 py-2 rounded-full bg-black/40 border border-emerald-500/20 text-[11px] text-emerald-100/80 mb-8 font-light">
             Gallery nội bộ — Vui lòng đăng nhập để tiếp tục
           </div>
 
           <button
             onClick={handleGoogleLogin}
             disabled={loading}
-            className="w-full py-3.5 px-6 rounded-full bg-[#f4f6f4] text-[#1c1d21] font-semibold text-xs flex items-center justify-center gap-3 shadow-lg hover:bg-white transition active:scale-95 disabled:opacity-60 cursor-pointer mb-6"
+            className="w-full py-3.5 px-6 rounded-full bg-[#f4f7f4] hover:bg-white text-gray-900 font-semibold text-xs flex items-center justify-center gap-3 shadow-lg shadow-emerald-950/50 transition active:scale-95 disabled:opacity-60 cursor-pointer mb-6"
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin text-gray-900" />
@@ -96,15 +102,14 @@ export default function LoginPage() {
             <span>Đăng nhập với Google</span>
           </button>
 
-          <p className="text-[11px] text-white/50 font-light">
+          <p className="text-[11px] text-emerald-200/50 font-light">
             Chào mừng bạn đến với DinhThong Photos
           </p>
         </div>
       </div>
 
-      {/* Footer bản quyền */}
-      <footer className="z-10 text-[11px] text-white/40 text-center">
-        © 2026 DinhThong Gallery. All rights reserved.
+      <footer className="z-10 text-[11px] text-emerald-100/40 text-center">
+        © 2026 DinhThong Gallery
       </footer>
     </div>
   )
