@@ -1142,7 +1142,7 @@ export default function GalleryPage() {
               href="https://facebook.com/cua_ban" 
               target="_blank" 
               rel="noreferrer" 
-              className="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition inline-flex items-center"
+              className="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition inline-flex items-center cursor-pointer"
               title="Facebook"
             >
               <img src="/facebook.png" alt="Facebook" className="w-6 h-6 object-contain" />
