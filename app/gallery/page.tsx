@@ -12,8 +12,8 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
 
   if (!id) {
     return {
-      title: 'DinhThong Gallery',
-      description: 'Xem album ảnh từ DinhThong Gallery.',
+      title: 'Dinh Thong Gallery',
+      description: 'Xem album ảnh từ Dinh Thong Gallery.',
     }
   }
 
@@ -30,13 +30,13 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
 
   if (!album) {
     return {
-      title: 'DinhThong Gallery',
-      description: 'Xem album ảnh từ DinhThong Gallery.',
+      title: 'Dinh Thong Gallery',
+      description: 'Xem album ảnh từ Dinh Thong Gallery.',
     }
   }
 
-  const title = `${album.title} - DinhThong Gallery`
-  const description = `Xem album ảnh ${album.title} từ DinhThong Gallery.`
+  const title = `${album.title} - Dinh Thong Gallery`
+  const description = `Xem album ảnh ${album.title} từ Dinh Thong Gallery.`
   const images = album.cover_url ? [album.cover_url] : []
 
   return {
@@ -46,7 +46,7 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
       title: title,
       description: description,
       images: images,
-      siteName: 'DinhThong Gallery',
+      siteName: 'Dinh Thong Gallery',
       type: 'website',
     },
     twitter: {
