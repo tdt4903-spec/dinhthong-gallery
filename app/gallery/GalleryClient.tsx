@@ -183,7 +183,7 @@ export default function GalleryClient() {
     }
   }
 
-  // Tải nén toàn bộ ảnh trong album thành file .ZIP
+  // Tải và nén ZIP siêu tốc (Đa luồng song song 6 file + STORE mode)
   const handleDownloadAlbumZip = async (albumToDownload?: Album, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -193,7 +193,7 @@ export default function GalleryClient() {
     if (!targetAlbum || isZipping) return
 
     setIsZipping(true)
-    setZipProgress('Đang chuẩn bị danh sách...')
+    setZipProgress('Chuẩn bị...')
 
     try {
       let targetFiles = images
@@ -211,10 +211,11 @@ export default function GalleryClient() {
 
       const zip = new JSZip()
       const total = targetFiles.length
+      let completedCount = 0
 
-      for (let i = 0; i < total; i++) {
-        const file = targetFiles[i]
-        setZipProgress(`Đang tải ${i + 1}/${total}...`)
+      // Chia nhỏ tải đồng thời 6 luồng cùng lúc
+      const CONCURRENCY_LIMIT = 6
+      const downloadFile = async (file: MediaItem) => {
         const ext = file.type === 'video' ? 'mp4' : 'jpg'
         const exactFileName = file.name.includes('.') ? file.name : `${file.name}.${ext}`
         
@@ -222,13 +223,34 @@ export default function GalleryClient() {
           const res = await fetch(`/api/download?url=${encodeURIComponent(file.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
           if (res.ok) {
             const blob = await res.blob()
-            zip.file(exactFileName, blob)
+            zip.file(exactFileName, blob, { compression: 'STORE' })
           }
-        } catch {}
+        } catch (err) {
+          console.error(`Lỗi tải file: ${exactFileName}`, err)
+        } finally {
+          completedCount++
+          setZipProgress(`${completedCount}/${total}`)
+        }
       }
 
-      setZipProgress('Đang nén file zip...')
-      const zipContent = await zip.generateAsync({ type: 'blob' })
+      for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+        const chunk = targetFiles.slice(i, i + CONCURRENCY_LIMIT)
+        await Promise.all(chunk.map(file => downloadFile(file)))
+      }
+
+      setZipProgress('Đóng gói ZIP...')
+      
+      const zipContent = await zip.generateAsync(
+        { 
+          type: 'blob', 
+          compression: 'STORE',
+          streamFiles: true 
+        }, 
+        (metadata) => {
+          setZipProgress(`${Math.floor(metadata.percent)}%`)
+        }
+      )
+
       saveAs(zipContent, `${targetAlbum.title}.zip`)
     } catch (err: any) {
       alert('Có lỗi xảy ra khi nén album: ' + err.message)
