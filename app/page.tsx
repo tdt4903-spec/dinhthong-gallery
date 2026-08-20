@@ -189,7 +189,6 @@ export default function GalleryPage() {
     }
   }
 
-  // Tự động tải tên album từ database dựa vào ID trên URL để làm tiêu đề
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
@@ -273,7 +272,6 @@ export default function GalleryPage() {
     fetchAlbumImages(album.driveUrl)
   }
 
-  // Rút gọn link chia sẻ cực ngắn chỉ chứa id duy nhất
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
@@ -289,7 +287,7 @@ export default function GalleryPage() {
     const newDriveUrl = e.target.url.value
     const newCoverUrl = e.target.cover.value.trim() ? formatDriveCoverUrl(e.target.cover.value) : ''
 
-    const { error } = await supabase.from('albums'].insert([
+    const { error } = await supabase.from('albums').insert([
       { id: newId, title: newTitle, drive_url: newDriveUrl, cover_url: newCoverUrl }
     ])
 
