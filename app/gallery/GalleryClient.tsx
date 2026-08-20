@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { 
@@ -8,6 +8,7 @@ import {
   Trash2, LogOut, User as UserIcon,
   Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3
 } from 'lucide-react'
+
 interface MediaItem {
   id: string
   name: string
@@ -181,7 +182,6 @@ export default function GalleryClient() {
     window.open(selectedAlbum.driveUrl, '_blank')
   }
 
-  // Tối ưu cơ chế tải file phù hợp cho cả iOS (Menu Lưu hình ảnh), Android & PC
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
 
@@ -243,27 +243,8 @@ export default function GalleryClient() {
           }
           setSelectedAlbum(sharedAlbumObj)
           fetchAlbumImages(sharedAlbumObj.driveUrl)
-          
-          const fullTitle = `${data.title} - DinhThong Gallery`
-          document.title = fullTitle
-          
-          const updateMetaTag = (property: string, content: string) => {
-            let meta = document.querySelector(`meta[property="${property}"]`) || document.querySelector(`meta[name="${property}"]`)
-            if (!meta) {
-              meta = document.createElement('meta')
-              meta.setAttribute('property', property)
-              document.head.appendChild(meta)
-            }
-            meta.setAttribute('content', content)
-          }
-
-          updateMetaTag('og:title', fullTitle)
-          updateMetaTag('og:description', `Xem album ảnh ${data.title} từ DinhThong Gallery.`)
-          updateMetaTag('twitter:title', fullTitle)
-          updateMetaTag('twitter:description', `Xem album ảnh ${data.title} từ DinhThong Gallery.`)
+          document.title = `${data.title} - DinhThong Gallery`
         }
-        setLoading(false)
-      }).catch(() => {
         setLoading(false)
       })
       
@@ -274,11 +255,15 @@ export default function GalleryClient() {
       return
     }
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!data.session) {
-        setLoading(false)
-        router.replace('/')
-      } else {
+    const checkAuth = async () => {
+      try {
+        const { data } = await supabase.auth.getSession()
+        if (!data.session) {
+          setLoading(false)
+          router.replace('/')
+          return
+        }
+
         const loggedInEmail = data.session.user.email
 
         const { data: whitelist, error } = await supabase
@@ -303,11 +288,13 @@ export default function GalleryClient() {
           try { setRatings(JSON.parse(savedRatings)) } catch {}
         }
         setLoading(false)
+      } catch {
+        setLoading(false)
+        router.replace('/')
       }
-    }).catch(() => {
-      setLoading(false)
-      router.replace('/')
-    })
+    }
+
+    checkAuth()
   }, [router, supabase])
 
   useEffect(() => {
@@ -340,12 +327,17 @@ export default function GalleryClient() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  const handleAddAlbum = async (e: any) => {
+  const handleAddAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    const form = e.currentTarget
+    const titleInput = form.elements.namedItem('title') as HTMLInputElement
+    const urlInput = form.elements.namedItem('url') as HTMLInputElement
+    const coverInput = form.elements.namedItem('cover') as HTMLInputElement
+
     const newId = Date.now().toString()
-    const newTitle = e.target.title.value
-    const newDriveUrl = e.target.url.value
-    const newCoverUrl = e.target.cover.value.trim() ? formatDriveCoverUrl(e.target.cover.value) : ''
+    const newTitle = titleInput.value
+    const newDriveUrl = urlInput.value
+    const newCoverUrl = coverInput.value.trim() ? formatDriveCoverUrl(coverInput.value) : ''
 
     const { error } = await supabase.from('albums').insert([
       { id: newId, title: newTitle, drive_url: newDriveUrl, cover_url: newCoverUrl }
@@ -359,7 +351,7 @@ export default function GalleryClient() {
     }
   }
 
-  const handleUpdateAlbum = async (e: any) => {
+  const handleUpdateAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!editingAlbum) return
     const formattedCover = editingAlbum.coverUrl.trim() ? formatDriveCoverUrl(editingAlbum.coverUrl) : ''
