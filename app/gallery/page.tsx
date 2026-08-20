@@ -189,7 +189,7 @@ export default function GalleryPage() {
     }
   }
 
-  // Tự động truy vấn Supabase bằng ID trên URL, thiết lập đồng thời Tiêu đề trang và Thẻ OpenGraph động
+  // Logic xử lý khi vào trang (Kiểm tra xem là khách bấm link chia sẻ ?id=... hay Admin đăng nhập)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
@@ -206,24 +206,7 @@ export default function GalleryPage() {
           }
           setSelectedAlbum(sharedAlbumObj)
           fetchAlbumImages(sharedAlbumObj.driveUrl)
-          
-          // Gán tiêu đề trang và metadata động để preview card hiển thị chuẩn tên album
           document.title = data.title
-          
-          const updateMetaTag = (property: string, content: string) => {
-            let meta = document.querySelector(`meta[property="${property}"]`) || document.querySelector(`meta[name="${property}"]`)
-            if (!meta) {
-              meta = document.createElement('meta')
-              meta.setAttribute('property', property)
-              document.head.appendChild(meta)
-            }
-            meta.setAttribute('content', content)
-          }
-
-          updateMetaTag('og:title', data.title)
-          updateMetaTag('og:description', 'DinhThong Gallery')
-          updateMetaTag('twitter:title', data.title)
-          updateMetaTag('twitter:description', 'DinhThong Gallery')
         }
       })
       
@@ -290,7 +273,6 @@ export default function GalleryPage() {
     fetchAlbumImages(album.driveUrl)
   }
 
-  // Link chia sẻ cực kỳ ngắn gọn, chỉ chứa ID
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
@@ -604,7 +586,7 @@ export default function GalleryPage() {
                       <button
                         onClick={(e) => handleShareAlbum(album, e)}
                         className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                        title="Tạo link chia sẻ cực kỳ ngắn gọn"
+                        title="Tạo link chia sẻ gọn gàng"
                       >
                         <Share2 className="w-3.5 h-3.5 text-emerald-400" />
                         <span>{shareCopiedId === album.id ? 'Đã copy link!' : 'Chia sẻ'}</span>
