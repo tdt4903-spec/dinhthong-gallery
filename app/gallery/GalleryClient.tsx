@@ -51,6 +51,9 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
+  // State theo dõi trạng thái tải từng ảnh
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 24
 
@@ -182,22 +185,34 @@ export default function GalleryClient() {
     window.open(selectedAlbum.driveUrl, '_blank')
   }
 
-  // Tải file qua API Proxy: Giải quyết dứt điểm lỗi CORS, chống nhảy tab và mở menu lưu ảnh iOS
+  // Xử lý tải ảnh siêu tốc: Lấy từ Cache trình duyệt -> Mở Menu iOS / Tải Android
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
+    if (downloadingId === item.id) return
 
+    setDownloadingId(item.id)
     const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
 
     try {
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const fileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
-      
-      const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
-      const res = await fetch(proxyUrl)
-      if (!res.ok) throw new Error('Proxy fetch failed')
-      
-      const blob = await res.blob()
       const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
+
+      // Ưu tiên lấy từ cache hiển thị trước để phản hồi ngay lập tức
+      const fastUrl = (item.type === 'image' && (item.fullUrl || item.url)) 
+        ? (item.fullUrl || item.url) 
+        : `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
+
+      let blob: Blob
+      try {
+        const res = await fetch(fastUrl)
+        if (!res.ok) throw new Error('Fetch cache failed')
+        blob = await res.blob()
+      } catch {
+        const proxyRes = await fetch(`/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`)
+        blob = await proxyRes.blob()
+      }
+
       const file = new File([blob], fileName, { type: mimeType })
 
       if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -205,6 +220,7 @@ export default function GalleryClient() {
           files: [file],
           title: item.name,
         })
+        setDownloadingId(null)
         return
       }
 
@@ -215,12 +231,15 @@ export default function GalleryClient() {
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000)
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1500)
     } catch (err: any) {
-      if (err?.name === 'AbortError') return
-      const ext = item.type === 'video' ? 'mp4' : 'jpg'
-      const fileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
-      window.location.href = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
+      if (err?.name !== 'AbortError') {
+        const ext = item.type === 'video' ? 'mp4' : 'jpg'
+        const fileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
+        window.location.href = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
+      }
+    } finally {
+      setDownloadingId(null)
     }
   }
 
@@ -776,10 +795,15 @@ export default function GalleryClient() {
                           </span>
                           <button 
                             onClick={(e) => handleDownloadMedia(item, e)}
-                            className="p-1 text-gray-400 hover:text-emerald-600 transition cursor-pointer"
+                            disabled={downloadingId === item.id}
+                            className="p-1 text-gray-400 hover:text-emerald-600 transition cursor-pointer disabled:opacity-50"
                             title="Lưu tệp về máy"
                           >
-                            <Download className="w-4 h-4" />
+                            {downloadingId === item.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                            ) : (
+                              <Download className="w-4 h-4" />
+                            )}
                           </button>
                         </div>
                       </div>
@@ -907,10 +931,15 @@ export default function GalleryClient() {
             <div className="flex items-center gap-4">
               <button 
                 onClick={() => handleDownloadMedia(previewMedia)}
-                className="p-2 rounded-full hover:bg-white/10 transition text-white cursor-pointer"
+                disabled={downloadingId === previewMedia.id}
+                className="p-2 rounded-full hover:bg-white/10 transition text-white cursor-pointer disabled:opacity-50"
                 title="Lưu tệp về máy"
               >
-                <Download className="w-5 h-5" />
+                {downloadingId === previewMedia.id ? (
+                  <Loader2 className="w-5 h-5 animate-spin text-emerald-400" />
+                ) : (
+                  <Download className="w-5 h-5" />
+                )}
               </button>
               <button
                 onClick={() => setPreviewMedia(null)}
