@@ -182,19 +182,22 @@ export default function GalleryClient() {
     window.open(selectedAlbum.driveUrl, '_blank')
   }
 
+  // Tải file qua API Proxy: Giải quyết dứt điểm lỗi CORS, chống nhảy tab và mở menu lưu ảnh iOS
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
 
     const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
 
     try {
-      const res = await fetch(item.downloadUrl)
-      if (!res.ok) throw new Error('Fetch failed')
-      const blob = await res.blob()
-      
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
-      const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
       const fileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
+      
+      const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
+      const res = await fetch(proxyUrl)
+      if (!res.ok) throw new Error('Proxy fetch failed')
+      
+      const blob = await res.blob()
+      const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
       const file = new File([blob], fileName, { type: mimeType })
 
       if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -212,11 +215,12 @@ export default function GalleryClient() {
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
-      
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 1500)
-    } catch (err) {
-      if ((err as any)?.name === 'AbortError') return
-      window.open(item.downloadUrl, '_blank')
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000)
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return
+      const ext = item.type === 'video' ? 'mp4' : 'jpg'
+      const fileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
+      window.location.href = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
     }
   }
 
