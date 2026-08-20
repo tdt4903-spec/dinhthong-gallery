@@ -30,33 +30,33 @@ const preloadedCache = new Set<string>()
 export default function GalleryPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
-  const [loading, setLoading] = useState<boolean>(true)
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(false)
-  const [searchTerm, setSearchTerm] = useState<string>('')
+  const [loading, setLoading] = useState(true)
+  const [isDarkMode, setIsDarkMode] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
   const [albums, setAlbums] = useState<Album[]>([])
   
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null)
   const [images, setImages] = useState<MediaItem[]>([])
-  const [loadingImages, setLoadingImages] = useState<boolean>(false)
+  const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false)
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
   const [albumCovers, setAlbumCovers] = useState<Record<string, string>>({})
   const [editingAlbum, setEditingAlbum] = useState<Album | null>(null)
 
   const [ratings, setRatings] = useState<Record<string, number>>({})
   const [starFilter, setStarFilter] = useState<number | 'all'>('all')
-  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false)
-  const [copied, setCopied] = useState<boolean>(false)
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
-  const [isSharedGuest, setIsSharedGuest] = useState<boolean>(false)
+  const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  const [currentPage, setCurrentPage] = useState<number>(1)
+  const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 24
 
-  const [useComma, setUseComma] = useState<boolean>(false)
-  const [useSpace, setUseSpace] = useState<boolean>(false)
-  const [useNewline, setUseNewline] = useState<boolean>(true)
+  const [useComma, setUseComma] = useState(false)
+  const [useSpace, setUseSpace] = useState(false)
+  const [useNewline, setUseNewline] = useState(true)
 
   const thumbnailRef = useRef<HTMLDivElement>(null)
 
@@ -65,7 +65,7 @@ export default function GalleryPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  const formatDriveCoverUrl = (url: string): string => {
+  const formatDriveCoverUrl = (url: string) => {
     if (!url) return ''
     if (url.includes('drive.google.com/file/d/')) {
       const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)
@@ -189,6 +189,7 @@ export default function GalleryPage() {
     }
   }
 
+  // Tự động truy vấn Supabase bằng ID trên URL, thiết lập đồng thời Tiêu đề trang và Thẻ OpenGraph động
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
@@ -205,26 +206,38 @@ export default function GalleryPage() {
           }
           setSelectedAlbum(sharedAlbumObj)
           fetchAlbumImages(sharedAlbumObj.driveUrl)
+          
+          // Gán tiêu đề trang và metadata động để preview card hiển thị chuẩn tên album
           document.title = data.title
+          
+          const updateMetaTag = (property: string, content: string) => {
+            let meta = document.querySelector(`meta[property="${property}"]`) || document.querySelector(`meta[name="${property}"]`)
+            if (!meta) {
+              meta = document.createElement('meta')
+              meta.setAttribute('property', property)
+              document.head.appendChild(meta)
+            }
+            meta.setAttribute('content', content)
+          }
+
+          updateMetaTag('og:title', data.title)
+          updateMetaTag('og:description', 'DinhThong Gallery')
+          updateMetaTag('twitter:title', data.title)
+          updateMetaTag('twitter:description', 'DinhThong Gallery')
         }
-      }).catch(() => {
-        // bỏ qua lỗi
-      }).then(() => {
-        setLoading(false)
       })
       
       const savedRatings = localStorage.getItem('dinhthong_image_ratings')
       if (savedRatings) {
         try { setRatings(JSON.parse(savedRatings)) } catch {}
       }
+      setLoading(false)
       return
     }
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) {
-        setLoading(false)
         router.replace('/')
-        return
       } else {
         const loggedInEmail = data.session.user.email
 
@@ -237,7 +250,6 @@ export default function GalleryPage() {
         if (error || !whitelist) {
           alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
           await supabase.auth.signOut()
-          setLoading(false)
           router.replace('/')
           return
         }
@@ -252,7 +264,6 @@ export default function GalleryPage() {
         setLoading(false)
       }
     }).catch(() => {
-      setLoading(false)
       router.replace('/')
     })
   }, [router, supabase])
@@ -279,6 +290,7 @@ export default function GalleryPage() {
     fetchAlbumImages(album.driveUrl)
   }
 
+  // Link chia sẻ cực kỳ ngắn gọn, chỉ chứa ID
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
@@ -287,17 +299,12 @@ export default function GalleryPage() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  const handleAddAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAddAlbum = async (e: any) => {
     e.preventDefault()
-    const form = e.currentTarget
-    const titleInput = form.elements.namedItem('title') as HTMLInputElement
-    const urlInput = form.elements.namedItem('url') as HTMLInputElement
-    const coverInput = form.elements.namedItem('cover') as HTMLInputElement
-
     const newId = Date.now().toString()
-    const newTitle = titleInput.value
-    const newDriveUrl = urlInput.value
-    const newCoverUrl = coverInput.value.trim() ? formatDriveCoverUrl(coverInput.value) : ''
+    const newTitle = e.target.title.value
+    const newDriveUrl = e.target.url.value
+    const newCoverUrl = e.target.cover.value.trim() ? formatDriveCoverUrl(e.target.cover.value) : ''
 
     const { error } = await supabase.from('albums').insert([
       { id: newId, title: newTitle, drive_url: newDriveUrl, cover_url: newCoverUrl }
@@ -311,7 +318,7 @@ export default function GalleryPage() {
     }
   }
 
-  const handleUpdateAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleUpdateAlbum = async (e: any) => {
     e.preventDefault()
     if (!editingAlbum) return
     const formattedCover = editingAlbum.coverUrl.trim() ? formatDriveCoverUrl(editingAlbum.coverUrl) : ''
@@ -597,7 +604,7 @@ export default function GalleryPage() {
                       <button
                         onClick={(e) => handleShareAlbum(album, e)}
                         className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                        title="Tạo link chia sẻ gọn gàng"
+                        title="Tạo link chia sẻ cực kỳ ngắn gọn"
                       >
                         <Share2 className="w-3.5 h-3.5 text-emerald-400" />
                         <span>{shareCopiedId === album.id ? 'Đã copy link!' : 'Chia sẻ'}</span>
