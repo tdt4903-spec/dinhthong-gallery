@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
@@ -52,6 +54,8 @@ export default function GalleryClient() {
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [isZipping, setIsZipping] = useState(false)
+  const [zipProgress, setZipProgress] = useState('')
 
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 24
@@ -179,12 +183,61 @@ export default function GalleryClient() {
     }
   }
 
-  const handleDirectDriveDownload = () => {
-    if (!selectedAlbum) return
-    window.open(selectedAlbum.driveUrl, '_blank')
+  // Tải nén toàn bộ ảnh trong album thành file .ZIP
+  const handleDownloadAlbumZip = async (albumToDownload?: Album, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    const targetAlbum = albumToDownload || selectedAlbum
+    if (!targetAlbum || isZipping) return
+
+    setIsZipping(true)
+    setZipProgress('Đang chuẩn bị danh sách...')
+
+    try {
+      let targetFiles = images
+      if (albumToDownload && albumToDownload.id !== selectedAlbum?.id) {
+        const res = await fetch(`/api/drive?url=${encodeURIComponent(albumToDownload.driveUrl)}`)
+        const data = await res.json()
+        targetFiles = data.files || []
+      }
+
+      if (targetFiles.length === 0) {
+        alert('Album hiện không có tệp nào để tải!')
+        setIsZipping(false)
+        return
+      }
+
+      const zip = new JSZip()
+      const total = targetFiles.length
+
+      for (let i = 0; i < total; i++) {
+        const file = targetFiles[i]
+        setZipProgress(`Đang tải ${i + 1}/${total}...`)
+        const ext = file.type === 'video' ? 'mp4' : 'jpg'
+        const exactFileName = file.name.includes('.') ? file.name : `${file.name}.${ext}`
+        
+        try {
+          const res = await fetch(`/api/download?url=${encodeURIComponent(file.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
+          if (res.ok) {
+            const blob = await res.blob()
+            zip.file(exactFileName, blob)
+          }
+        } catch {}
+      }
+
+      setZipProgress('Đang nén file zip...')
+      const zipContent = await zip.generateAsync({ type: 'blob' })
+      saveAs(zipContent, `${targetAlbum.title}.zip`)
+    } catch (err: any) {
+      alert('Có lỗi xảy ra khi nén album: ' + err.message)
+    } finally {
+      setIsZipping(false)
+      setZipProgress('')
+    }
   }
 
-  // Tải file: Giữ nguyên 100% tên gốc + đuôi mở rộng, không bao giờ tự ý bật sang tab Drive
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -228,7 +281,6 @@ export default function GalleryClient() {
       if (err?.name !== 'AbortError') {
         const ext = item.type === 'video' ? 'mp4' : 'jpg'
         const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
-        // Tải trực tiếp qua API Proxy download, không mở sang Drive
         const directProxy = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
         const fallbackLink = document.createElement('a')
         fallbackLink.href = directProxy
@@ -505,12 +557,13 @@ export default function GalleryClient() {
                 </div>
 
                 <button
-                  onClick={handleDirectDriveDownload}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap"
-                  title="Tải album trực tiếp từ Google Drive"
+                  onClick={(e) => handleDownloadAlbumZip(selectedAlbum, e)}
+                  disabled={isZipping}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap disabled:opacity-60"
+                  title="Nén tất cả ảnh thành file ZIP"
                 >
-                  <Download className="w-4 h-4" />
-                  <span>Tải album</span>
+                  {isZipping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  <span>{isZipping ? zipProgress : 'Tải album'}</span>
                 </button>
 
                 <button
@@ -683,15 +736,14 @@ export default function GalleryClient() {
                         <p className="text-[11px] text-gray-400 mt-0.5">Nhấp để xem</p>
                       </div>
 
-                      <a 
-                        href={album.driveUrl} 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition"
+                      <button 
+                        onClick={(e) => handleDownloadAlbumZip(album, e)}
+                        disabled={isZipping}
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60"
                       >
-                        <Download className="w-3.5 h-3.5" />
+                        {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                         <span>Tải xuống</span>
-                      </a>
+                      </button>
                     </div>
                   </div>
                 )
