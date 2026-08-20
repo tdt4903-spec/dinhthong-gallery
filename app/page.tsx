@@ -52,26 +52,25 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-between p-6 select-none overflow-hidden bg-[#07130c]">
-      {/* Background lá xanh có hiệu ứng zoom nhẹ tự nhiên */}
+      {/* Background lá xanh */}
       <div 
-        className="absolute inset-0 z-0 bg-cover bg-center filter brightness-[0.75] contrast-[1.1] scale-105 animate-[pulse_10s_ease-in-out_infinite]"
+        className="absolute inset-0 z-0 bg-cover bg-center filter brightness-[0.75] contrast-[1.1] scale-105"
         style={{ 
           backgroundImage: "url('https://images.unsplash.com/photo-1518531933037-91b2f5f229cc?q=80&w=2000&auto=format&fit=crop')" 
         }}
       />
-      {/* Lớp phủ màu xanh lá tối tạo chiều sâu */}
       <div className="absolute inset-0 z-0 bg-gradient-to-b from-[#06150d]/70 via-[#071810]/50 to-[#030c08]/80 backdrop-blur-[3px]" />
 
       <div className="w-full flex-1 flex items-center justify-center z-10 my-auto">
-        {/* Card Đăng Nhập Xanh Rêu Sang Trọng */}
+        {/* Card Đăng Nhập */}
         <div className="w-full max-w-[360px] sm:max-w-md p-8 sm:p-10 rounded-[32px] bg-[#1d3124]/80 border border-emerald-500/20 backdrop-blur-xl text-center shadow-[0_20px_50px_rgba(0,0,0,0.6)] text-white">
           
-          {/* DINH THONG PHOTOS có hiệu ứng chuyển động nổi bật */}
-          <div className="group cursor-default inline-block mb-6">
-            <div className="tracking-[0.3em] text-[12px] font-bold text-transparent bg-clip-text bg-gradient-to-r from-emerald-200 via-teal-300 to-emerald-400 uppercase animate-pulse drop-shadow-[0_0_12px_rgba(52,211,153,0.6)] transition-transform duration-500 hover:scale-105">
+          {/* Cả cụm Dinh Thong Photos đẩy lên đẩy xuống */}
+          <div className="inline-block mb-6 animate-[bounce_2.5s_ease-in-out_infinite]">
+            <div className="tracking-[0.3em] text-[12px] font-bold text-emerald-300 uppercase">
               DINH THONG
             </div>
-            <div className="tracking-[0.25em] text-[10px] font-medium text-emerald-300/80 uppercase mt-0.5 animate-[bounce_3s_ease-in-out_infinite]">
+            <div className="tracking-[0.25em] text-[10px] font-medium text-emerald-200/70 uppercase mt-0.5">
               PHOTOS
             </div>
           </div>
@@ -109,7 +108,7 @@ export default function LoginPage() {
       </div>
 
       <footer className="z-10 text-[11px] text-emerald-100/40 text-center">
-        © 2026 DinhThong Gallery
+        © 2026 DinhThong Gallery. All rights reserved.
       </footer>
     </div>
   )
