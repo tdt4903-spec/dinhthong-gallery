@@ -30,33 +30,33 @@ const preloadedCache = new Set<string>()
 export default function GalleryPage() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [isDarkMode, setIsDarkMode] = useState(false)
-  const [searchTerm, setSearchTerm] = useState('')
+  const [loading, setLoading] = useState<boolean>(true)
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(false)
+  const [searchTerm, setSearchTerm] = useState<string>('')
   const [albums, setAlbums] = useState<Album[]>([])
   
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null)
   const [images, setImages] = useState<MediaItem[]>([])
-  const [loadingImages, setLoadingImages] = useState(false)
+  const [loadingImages, setLoadingImages] = useState<boolean>(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
-  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false)
 
   const [albumCovers, setAlbumCovers] = useState<Record<string, string>>({})
   const [editingAlbum, setEditingAlbum] = useState<Album | null>(null)
 
   const [ratings, setRatings] = useState<Record<string, number>>({})
   const [starFilter, setStarFilter] = useState<number | 'all'>('all')
-  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState<boolean>(false)
+  const [copied, setCopied] = useState<boolean>(false)
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
-  const [isSharedGuest, setIsSharedGuest] = useState(false)
+  const [isSharedGuest, setIsSharedGuest] = useState<boolean>(false)
 
-  const [currentPage, setCurrentPage] = useState(1)
+  const [currentPage, setCurrentPage] = useState<number>(1)
   const itemsPerPage = 24
 
-  const [useComma, setUseComma] = useState(false)
-  const [useSpace, setUseSpace] = useState(false)
-  const [useNewline, setUseNewline] = useState(true)
+  const [useComma, setUseComma] = useState<boolean>(false)
+  const [useSpace, setUseSpace] = useState<boolean>(false)
+  const [useNewline, setUseNewline] = useState<boolean>(true)
 
   const thumbnailRef = useRef<HTMLDivElement>(null)
 
@@ -65,7 +65,7 @@ export default function GalleryPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  const formatDriveCoverUrl = (url: string) => {
+  const formatDriveCoverUrl = (url: string): string => {
     if (!url) return ''
     if (url.includes('drive.google.com/file/d/')) {
       const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)
@@ -220,6 +220,7 @@ export default function GalleryPage() {
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) {
+        setLoading(false)
         router.replace('/')
         return
       } else {
@@ -234,6 +235,7 @@ export default function GalleryPage() {
         if (error || !whitelist) {
           alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
           await supabase.auth.signOut()
+          setLoading(false)
           router.replace('/')
           return
         }
@@ -245,11 +247,11 @@ export default function GalleryPage() {
         if (savedRatings) {
           try { setRatings(JSON.parse(savedRatings)) } catch {}
         }
+        setLoading(false)
       }
     }).catch(() => {
-      router.replace('/')
-    }).finally(() => {
       setLoading(false)
+      router.replace('/')
     })
   }, [router, supabase])
 
@@ -283,12 +285,17 @@ export default function GalleryPage() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  const handleAddAlbum = async (e: any) => {
+  const handleAddAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    const form = e.currentTarget
+    const titleInput = form.elements.namedItem('title') as HTMLInputElement
+    const urlInput = form.elements.namedItem('url') as HTMLInputElement
+    const coverInput = form.elements.namedItem('cover') as HTMLInputElement
+
     const newId = Date.now().toString()
-    const newTitle = e.target.title.value
-    const newDriveUrl = e.target.url.value
-    const newCoverUrl = e.target.cover.value.trim() ? formatDriveCoverUrl(e.target.cover.value) : ''
+    const newTitle = titleInput.value
+    const newDriveUrl = urlInput.value
+    const newCoverUrl = coverInput.value.trim() ? formatDriveCoverUrl(coverInput.value) : ''
 
     const { error } = await supabase.from('albums').insert([
       { id: newId, title: newTitle, drive_url: newDriveUrl, cover_url: newCoverUrl }
@@ -302,7 +309,7 @@ export default function GalleryPage() {
     }
   }
 
-  const handleUpdateAlbum = async (e: any) => {
+  const handleUpdateAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!editingAlbum) return
     const formattedCover = editingAlbum.coverUrl.trim() ? formatDriveCoverUrl(editingAlbum.coverUrl) : ''
