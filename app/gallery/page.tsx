@@ -189,6 +189,7 @@ export default function GalleryPage() {
     }
   }
 
+  // Tự động tải tên album dựa vào ID trên URL, cập nhật tiêu đề và thẻ Open Graph động
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
@@ -205,7 +206,25 @@ export default function GalleryPage() {
           }
           setSelectedAlbum(sharedAlbumObj)
           fetchAlbumImages(sharedAlbumObj.driveUrl)
+          
+          // Cập nhật tiêu đề trình duyệt và các thẻ Open Graph động hiển thị khi chia sẻ link
           document.title = data.title
+          
+          let ogTitleMeta = document.querySelector('meta[property="og:title"]')
+          if (!ogTitleMeta) {
+            ogTitleMeta = document.createElement('meta')
+            ogTitleMeta.setAttribute('property', 'og:title')
+            document.head.appendChild(ogTitleMeta)
+          }
+          ogTitleMeta.setAttribute('content', data.title)
+
+          let ogDescMeta = document.querySelector('meta[property="og:description"]')
+          if (!ogDescMeta) {
+            ogDescMeta = document.createElement('meta')
+            ogDescMeta.setAttribute('property', 'og:description')
+            document.head.appendChild(ogDescMeta)
+          }
+          ogDescMeta.setAttribute('content', 'DinhThong Gallery')
         }
       })
       
@@ -272,6 +291,7 @@ export default function GalleryPage() {
     fetchAlbumImages(album.driveUrl)
   }
 
+  // Link chia sẻ cực ngắn gọn chỉ chứa ?id=...
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
@@ -585,7 +605,7 @@ export default function GalleryPage() {
                       <button
                         onClick={(e) => handleShareAlbum(album, e)}
                         className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                        title="Tạo link chia sẻ gọn gàng không cần đăng nhập"
+                        title="Tạo link chia sẻ cực kỳ ngắn gọn"
                       >
                         <Share2 className="w-3.5 h-3.5 text-emerald-400" />
                         <span>{shareCopiedId === album.id ? 'Đã copy link!' : 'Chia sẻ'}</span>
