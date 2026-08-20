@@ -1137,7 +1137,7 @@ export default function GalleryPage() {
         <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="w-full sm:w-auto hidden sm:block"></div>
           
-          <p className="text-center">© 2026 DinhThong Gallery. All rights reserved.</p>
+          <p className="text-center">© 2026 DinhThong Gallery</p>
           
           <div className="flex items-center gap-2">
             <span className="text-[11px] uppercase tracking-wider">LIÊN HỆ:</span>
