@@ -189,22 +189,25 @@ export default function GalleryPage() {
     }
   }
 
+  // Rút gọn link chia sẻ theo ID Album trực tiếp từ database
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const sharedUrl = params.get('sharedUrl')
-    const sharedTitle = params.get('sharedTitle')
-    const sharedCover = params.get('sharedCover')
+    const sharedId = params.get('id')
 
-    if (sharedUrl) {
+    if (sharedId) {
       setIsSharedGuest(true)
-      const sharedAlbumObj: Album = {
-        id: 'shared-album',
-        title: sharedTitle ? decodeURIComponent(sharedTitle) : 'Album chia sẻ',
-        coverUrl: sharedCover ? decodeURIComponent(sharedCover) : '',
-        driveUrl: decodeURIComponent(sharedUrl)
-      }
-      setSelectedAlbum(sharedAlbumObj)
-      fetchAlbumImages(sharedAlbumObj.driveUrl)
+      supabase.from('albums').select('*').eq('id', sharedId).single().then(({ data }) => {
+        if (data) {
+          const sharedAlbumObj: Album = {
+            id: data.id,
+            title: data.title,
+            coverUrl: data.cover_url || '',
+            driveUrl: data.drive_url
+          }
+          setSelectedAlbum(sharedAlbumObj)
+          fetchAlbumImages(sharedAlbumObj.driveUrl)
+        }
+      })
       
       const savedRatings = localStorage.getItem('dinhthong_image_ratings')
       if (savedRatings) {
@@ -270,8 +273,8 @@ export default function GalleryPage() {
 
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
-    const rawCover = album.coverUrl || albumCovers[album.id] || ''
-    const shareUrl = `${window.location.origin}/gallery?sharedUrl=${encodeURIComponent(album.driveUrl)}&sharedTitle=${encodeURIComponent(album.title)}&sharedCover=${encodeURIComponent(rawCover)}`
+    // Tạo link cực ngắn dạng: https://domain.com/gallery?id=123456
+    const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(album.id)
     setTimeout(() => setShareCopiedId(null), 2500)
@@ -582,7 +585,7 @@ export default function GalleryPage() {
                       <button
                         onClick={(e) => handleShareAlbum(album, e)}
                         className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                        title="Tạo link chia sẻ công khai không cần đăng nhập"
+                        title="Tạo link chia sẻ gọn gàng không cần đăng nhập"
                       >
                         <Share2 className="w-3.5 h-3.5 text-emerald-400" />
                         <span>{shareCopiedId === album.id ? 'Đã copy link!' : 'Chia sẻ'}</span>
@@ -1139,7 +1142,7 @@ export default function GalleryPage() {
           <div className="flex items-center gap-2">
             <span className="text-[11px] uppercase tracking-wider">LIÊN HỆ:</span>
             <a 
-              href="https://facebook.com/cua_ban" 
+              href="url?id=1" 
               target="_blank" 
               rel="noreferrer" 
               className="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition inline-flex items-center cursor-pointer"
