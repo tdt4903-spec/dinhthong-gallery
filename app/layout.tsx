@@ -2,10 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: {
-    template: '%s - DinhThong Gallery',
-    default: 'DinhThong Gallery',
-  },
+  title: 'DinhThong Gallery',
   description: 'DinhThong Gallery',
   openGraph: {
     title: 'DinhThong Gallery',
