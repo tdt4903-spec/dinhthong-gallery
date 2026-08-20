@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3
 } from 'lucide-react'
 
 interface MediaItem {
@@ -28,11 +28,13 @@ interface Album {
 const DEFAULT_ALBUMS: Album[] = [
   {
     id: '1',
-    title: 'Biển Kỳ Xuân',
-    coverUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=80',
+    title: 'Biển Thạch Hải',
+    coverUrl: '', 
     driveUrl: 'https://drive.google.com/drive/folders/...'
   }
 ]
+
+const preloadedCache = new Set<string>()
 
 export default function GalleryPage() {
   const router = useRouter()
@@ -48,7 +50,9 @@ export default function GalleryPage() {
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
-  // Đánh giá sao & lọc
+  const [albumCovers, setAlbumCovers] = useState<Record<string, string>>({})
+  const [editingAlbum, setEditingAlbum] = useState<Album | null>(null)
+
   const [ratings, setRatings] = useState<Record<string, number>>({})
   const [starFilter, setStarFilter] = useState<number | 'all'>('all')
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
@@ -56,19 +60,30 @@ export default function GalleryPage() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  // Phân trang (Hiển thị 24 ảnh mỗi trang để không bị nghẽn mạng Drive)
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 24
 
-  // Tùy chọn định dạng danh sách
   const [useComma, setUseComma] = useState(false)
   const [useSpace, setUseSpace] = useState(false)
   const [useNewline, setUseNewline] = useState(true)
+
+  const thumbnailRef = useRef<HTMLDivElement>(null)
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
+
+  const formatDriveCoverUrl = (url: string) => {
+    if (!url) return ''
+    if (url.includes('drive.google.com/file/d/')) {
+      const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)
+      if (match && match[1]) {
+        return `https://lh3.googleusercontent.com/d/${match[1]}`
+      }
+    }
+    return url
+  }
 
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
@@ -77,14 +92,33 @@ export default function GalleryPage() {
     try {
       const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}`)
       const data = await res.json()
-      setImages(data.files || [])
+      const files = data.files || []
+      setImages(files)
+      return files
     } catch (e) {
       console.error(e)
       setImages([])
+      return []
     } finally {
       setLoadingImages(false)
     }
   }
+
+  // 🌟 GIỮ NGUYÊN CƠ CHẾ LẤY ẢNH ĐẦU TIÊN LÀM BÌA ALBUM NHƯ BAN ĐẦU
+  useEffect(() => {
+    albums.forEach(async (album) => {
+      if (!album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
+        try {
+          const res = await fetch(`/api/drive?url=${encodeURIComponent(album.driveUrl)}`)
+          const data = await res.json()
+          const firstImage = data.files?.find((f: MediaItem) => f.type === 'image')
+          if (firstImage) {
+            setAlbumCovers(prev => ({ ...prev, [album.id]: firstImage.url }))
+          }
+        } catch {}
+      }
+    })
+  }, [albums])
 
   const filteredImages = images.filter(img => {
     if (starFilter === 'all') return true
@@ -92,27 +126,63 @@ export default function GalleryPage() {
     return imgStar === starFilter
   })
 
-  // Tính toán phân trang
   const totalPages = Math.ceil(filteredImages.length / itemsPerPage)
   const paginatedImages = filteredImages.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
 
-  const currentIndex = filteredImages.findIndex(img => img.id === previewMedia?.id)
+  const previewSourceList = filteredImages.length > 0 ? filteredImages : images
+  const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
   
+  useEffect(() => {
+    if (currentIndex === -1 || previewSourceList.length === 0) return
+
+    for (let i = 1; i <= 3; i++) {
+      const nextIdx = (currentIndex + i) % previewSourceList.length
+      const item = previewSourceList[nextIdx]
+      if (item.type === 'image') {
+        const targetUrl = item.fullUrl || item.url
+        if (targetUrl && !preloadedCache.has(targetUrl)) {
+          preloadedCache.add(targetUrl)
+          const img = new window.Image()
+          img.src = targetUrl
+        }
+      }
+    }
+
+    if (thumbnailRef.current) {
+      const activeThumb = thumbnailRef.current.children[currentIndex] as HTMLElement
+      if (activeThumb) {
+        activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+      }
+    }
+  }, [currentIndex, previewSourceList])
+
   const handlePrevImage = () => {
-    if (filteredImages.length === 0) return
+    if (previewSourceList.length === 0) return
     if (currentIndex > 0) {
-      setPreviewMedia(filteredImages[currentIndex - 1])
+      setPreviewMedia(previewSourceList[currentIndex - 1])
     } else {
-      setPreviewMedia(filteredImages[filteredImages.length - 1])
+      setPreviewMedia(previewSourceList[previewSourceList.length - 1])
     }
   }
 
   const handleNextImage = () => {
-    if (filteredImages.length === 0) return
-    if (currentIndex < filteredImages.length - 1) {
-      setPreviewMedia(filteredImages[currentIndex + 1])
+    if (previewSourceList.length === 0) return
+    if (currentIndex < previewSourceList.length - 1) {
+      setPreviewMedia(previewSourceList[currentIndex + 1])
     } else {
-      setPreviewMedia(filteredImages[0])
+      setPreviewMedia(previewSourceList[0])
+    }
+  }
+
+  const handleDirectDriveDownload = () => {
+    if (!selectedAlbum) return
+    window.open(selectedAlbum.driveUrl, '_blank')
+  }
+
+  const handleClearAllSelections = () => {
+    if (confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) {
+      setRatings({})
+      localStorage.removeItem('dinhthong_image_ratings')
     }
   }
 
@@ -127,7 +197,7 @@ export default function GalleryPage() {
       const sharedAlbumObj: Album = {
         id: 'shared-album',
         title: sharedTitle ? decodeURIComponent(sharedTitle) : 'Album chia sẻ',
-        coverUrl: sharedCover ? decodeURIComponent(sharedCover) : 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800',
+        coverUrl: sharedCover ? decodeURIComponent(sharedCover) : '',
         driveUrl: decodeURIComponent(sharedUrl)
       }
       setSelectedAlbum(sharedAlbumObj)
@@ -141,10 +211,25 @@ export default function GalleryPage() {
       return
     }
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) {
         router.replace('/')
       } else {
+        const loggedInEmail = data.session.user.email
+
+        const { data: whitelist, error } = await supabase
+          .from('allowed_emails')
+          .select('email')
+          .eq('email', loggedInEmail)
+          .single()
+
+        if (error || !whitelist) {
+          alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
+          await supabase.auth.signOut()
+          router.replace('/')
+          return
+        }
+
         setUser(data.session.user)
         const savedAlbums = localStorage.getItem('dinhthong_albums')
         if (savedAlbums) {
@@ -170,7 +255,7 @@ export default function GalleryPage() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [previewMedia, filteredImages])
+  }, [previewMedia, previewSourceList])
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -184,7 +269,8 @@ export default function GalleryPage() {
 
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
-    const shareUrl = `${window.location.origin}/gallery?sharedUrl=${encodeURIComponent(album.driveUrl)}&sharedTitle=${encodeURIComponent(album.title)}&sharedCover=${encodeURIComponent(album.coverUrl)}`
+    const rawCover = album.coverUrl || albumCovers[album.id] || ''
+    const shareUrl = `${window.location.origin}/gallery?sharedUrl=${encodeURIComponent(album.driveUrl)}&sharedTitle=${encodeURIComponent(album.title)}&sharedCover=${encodeURIComponent(rawCover)}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(album.id)
     setTimeout(() => setShareCopiedId(null), 2500)
@@ -196,12 +282,25 @@ export default function GalleryPage() {
       id: Date.now().toString(), 
       title: e.target.title.value, 
       driveUrl: e.target.url.value, 
-      coverUrl: e.target.cover.value || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800' 
+      coverUrl: e.target.cover.value.trim() ? formatDriveCoverUrl(e.target.cover.value) : '' 
     }
     const updated = [newAlbum, ...albums]
     setAlbums(updated)
     localStorage.setItem('dinhthong_albums', JSON.stringify(updated))
     setIsModalOpen(false)
+  }
+
+  const handleUpdateAlbum = (e: any) => {
+    e.preventDefault()
+    if (!editingAlbum) return
+    const formatted = {
+      ...editingAlbum,
+      coverUrl: editingAlbum.coverUrl.trim() ? formatDriveCoverUrl(editingAlbum.coverUrl) : ''
+    }
+    const updated = albums.map(item => item.id === formatted.id ? formatted : item)
+    setAlbums(updated)
+    localStorage.setItem('dinhthong_albums', JSON.stringify(updated))
+    setEditingAlbum(null)
   }
 
   const handleDeleteAlbum = (id: string, e: React.MouseEvent) => {
@@ -242,7 +341,7 @@ export default function GalleryPage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = 'danh-sach-anh-chon.txt'
+    link.download = 'danh-sach-tieu-de-chon.txt'
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -254,7 +353,7 @@ export default function GalleryPage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#151036] flex flex-col items-center justify-center text-white">
-        <Loader2 className="w-8 h-8 animate-spin text-amber-500 mb-3" />
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
         <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang tải Gallery...</p>
       </div>
     )
@@ -282,39 +381,82 @@ export default function GalleryPage() {
 
             <div onClick={() => !isSharedGuest && setSelectedAlbum(null)} className={`flex items-baseline gap-1 ${!isSharedGuest ? 'cursor-pointer' : ''}`}>
               <span className="text-2xl font-serif font-bold tracking-tight">DinhThong</span>
-              <span className="font-serif italic text-amber-500 text-lg">gallery</span>
+              <span className="font-serif italic text-emerald-600 text-lg">gallery</span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {selectedAlbum && (
-              <button
-                onClick={() => setIsAdminPanelOpen(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer"
-                title="Danh sách ảnh đã chọn"
-              >
-                <ClipboardList className="w-4 h-4" />
-                <span className="hidden sm:inline">Danh sách ảnh chọn</span>
-                <span className="bg-emerald-800 px-2 py-0.5 rounded-full text-[10px]">
-                  {selectedImagesList.length}
-                </span>
-              </button>
-            )}
+            {selectedAlbum ? (
+              <>
+                <div className="relative w-40 sm:w-60">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input 
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Tìm kiếm tệp..."
+                    className={`w-full pl-9 pr-3 py-1.5 rounded-full text-xs border outline-none transition ${
+                      isDarkMode 
+                        ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
+                        : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-sm'
+                    }`}
+                  />
+                </div>
 
-            {!selectedAlbum && !isSharedGuest && (
-              <button
-                onClick={() => setIsModalOpen(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition active:scale-95 cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Thêm album</span>
-              </button>
+                <button
+                  onClick={handleDirectDriveDownload}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap"
+                  title="Tải album trực tiếp từ Google Drive"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Tải album</span>
+                </button>
+
+                <button
+                  onClick={() => setIsAdminPanelOpen(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap"
+                  title="Danh sách tệp đã chọn"
+                >
+                  <ClipboardList className="w-4 h-4" />
+                  <span className="hidden sm:inline">Danh sách ảnh chọn</span>
+                  <span className="bg-emerald-800 px-2 py-0.5 rounded-full text-[10px]">
+                    {selectedImagesList.length}
+                  </span>
+                </button>
+              </>
+            ) : (
+              !isSharedGuest && (
+                <div className="flex items-center gap-3">
+                  <div className="relative w-44 sm:w-64">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input 
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Tìm kiếm album..."
+                      className={`w-full pl-10 pr-4 py-2 rounded-full text-xs border outline-none transition ${
+                        isDarkMode 
+                          ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
+                          : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-sm'
+                      }`}
+                    />
+                  </div>
+
+                  <button
+                    onClick={() => setIsModalOpen(true)}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Thêm album</span>
+                  </button>
+                </div>
+              )
             )}
 
             <button
               onClick={() => setIsDarkMode(!isDarkMode)}
               className={`p-2.5 rounded-full border transition cursor-pointer ${
-                isDarkMode ? 'border-white/10 hover:bg-white/10 text-amber-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
+                isDarkMode ? 'border-white/10 hover:bg-white/10 text-emerald-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
               }`}
             >
               {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
@@ -326,11 +468,11 @@ export default function GalleryPage() {
                   <img 
                     src={user.user_metadata.avatar_url} 
                     alt="Avatar" 
-                    className="w-8 h-8 rounded-full object-cover border border-amber-500/50"
+                    className="w-8 h-8 rounded-full object-cover border border-emerald-500/50"
                     title={user.email}
                   />
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center text-xs font-bold">
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center text-xs font-bold">
                     <UserIcon className="w-4 h-4" />
                   </div>
                 )}
@@ -353,22 +495,28 @@ export default function GalleryPage() {
         
         {!selectedAlbum ? (
           <div>
-            <section className="relative rounded-3xl overflow-hidden bg-gradient-to-r from-black via-black/85 to-transparent border border-black/5 shadow-2xl min-h-[385px] flex items-center mb-16">
+            <section className="relative rounded-3xl overflow-hidden shadow-2xl min-h-[385px] flex items-center mb-12 group">
               <img 
-                src="https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1600&auto=format&fit=crop&q=80" 
+                src="/banner.jpg" 
                 alt="Hero Banner" 
-                className="absolute inset-0 w-full h-full object-cover mix-blend-overlay"
+                className="absolute inset-0 w-full h-full object-cover transition-transform duration-1000 ease-out group-hover:scale-105"
               />
-              <div className="relative z-10 p-8 sm:p-14 max-w-xl text-white">
-                <span className="text-[11px] font-bold tracking-[0.25em] text-amber-400 uppercase">
+              
+              <div className="absolute inset-y-0 left-0 w-full sm:w-2/3 lg:w-1/2 bg-gradient-to-r from-white/95 via-white/60 to-transparent pointer-events-none z-[5]" />
+              <div className="absolute inset-y-0 left-0 w-full sm:w-2/3 lg:w-1/2 bg-gradient-to-r from-[#0f1115]/95 via-[#0f1115]/60 to-transparent pointer-events-none z-[5] opacity-0 dark:opacity-100 transition-opacity duration-500" />
+
+              <div className="relative z-10 p-8 sm:p-14 max-w-xl text-gray-900 dark:text-white transform transition-all duration-700 ease-out translate-y-0 opacity-100 hover:-translate-y-1">
+                <span className="text-[11px] font-bold tracking-[0.25em] text-emerald-600 dark:text-emerald-400 uppercase drop-shadow-sm block transition-transform duration-300 hover:translate-x-1">
                   DINHTHONG GALLERY
                 </span>
-                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-serif font-medium tracking-tight mt-3 leading-tight">
+                <h1 className="text-3xl sm:text-4xl lg:text-5xl font-serif font-medium tracking-tight mt-3 leading-tight drop-shadow-sm">
                   Khoảnh khắc <br />
-                  Lưu giữ <span className="italic font-normal text-amber-300">cảm xúc</span>
+                  Lưu giữ <span className="italic font-normal text-emerald-600 dark:text-emerald-300 inline-block transition-transform duration-300 hover:scale-105">cảm xúc</span>
                 </h1>
               </div>
             </section>
+
+            <div className={`w-full h-[1px] mb-12 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
             <div className="flex items-center justify-between mb-8">
               <h2 className="text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
@@ -376,61 +524,79 @@ export default function GalleryPage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-              {filteredAlbums.map((album) => (
-                <div 
-                  key={album.id}
-                  className={`rounded-2xl overflow-hidden border transition-all duration-300 hover:shadow-lg ${
-                    isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
-                  }`}
-                >
+              {filteredAlbums.map((album) => {
+                const displayCover = album.coverUrl || albumCovers[album.id] || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=80'
+                return (
                   <div 
-                    onClick={() => handleOpenAlbum(album)}
-                    className="h-64 bg-gray-100 relative cursor-pointer overflow-hidden group"
+                    key={album.id}
+                    className={`rounded-2xl overflow-hidden border transition-all duration-300 hover:shadow-lg group ${
+                      isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
+                    }`}
                   >
-                    <img 
-                      src={album.coverUrl} 
-                      alt={album.title} 
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    />
-                    
-                    <button
-                      onClick={(e) => handleDeleteAlbum(album.id, e)}
-                      className="absolute top-3 right-3 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                      title="Xóa album"
+                    <div 
+                      onClick={() => handleOpenAlbum(album)}
+                      className="h-64 bg-gray-100 relative cursor-pointer overflow-hidden flex items-center justify-center"
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      <img 
+                        src={displayCover} 
+                        alt={album.title} 
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=80'
+                        }}
+                      />
+                      
+                      <div className="absolute inset-0 bg-white/0 group-hover:bg-white/20 transition-all duration-300 z-10" />
 
-                    <button
-                      onClick={(e) => handleShareAlbum(album, e)}
-                      className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity z-10"
-                      title="Tạo link chia sẻ công khai không cần đăng nhập"
-                    >
-                      <Share2 className="w-3.5 h-3.5 text-amber-400" />
-                      <span>{shareCopiedId === album.id ? 'Đã copy link!' : 'Chia sẻ'}</span>
-                    </button>
-                  </div>
+                      <button
+                        onClick={(e) => handleDeleteAlbum(album.id, e)}
+                        className="absolute top-3 right-3 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                        title="Xóa album"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
 
-                  <div className="p-4 flex items-center justify-between">
-                    <div onClick={() => handleOpenAlbum(album)} className="cursor-pointer">
-                      <h3 className="font-semibold text-sm hover:text-amber-500 transition-colors">
-                        {album.title}
-                      </h3>
-                      <p className="text-[11px] text-gray-400 mt-0.5">Nhấp để xem ảnh từ Drive</p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setEditingAlbum(album); }}
+                        className="absolute top-3 right-14 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                        title="Chỉnh sửa thông tin album"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        onClick={(e) => handleShareAlbum(album, e)}
+                        className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                        title="Tạo link chia sẻ công khai không cần đăng nhập"
+                      >
+                        <Share2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>{shareCopiedId === album.id ? 'Đã copy link!' : 'Chia sẻ'}</span>
+                      </button>
                     </div>
 
-                    <a 
-                      href={album.driveUrl} 
-                      target="_blank" 
-                      rel="noreferrer"
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 hover:bg-blue-100 transition"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Drive</span>
-                    </a>
+                    <div className="p-4 flex items-center justify-between">
+                      <div onClick={() => handleOpenAlbum(album)} className="cursor-pointer">
+                        <h3 className="font-semibold text-sm hover:text-emerald-600 transition-colors">
+                          {album.title}
+                        </h3>
+                        {/* 🌟 ĐÃ SỬA: "Nhấp để xem" */}
+                        <p className="text-[11px] text-gray-400 mt-0.5">Nhấp để xem</p>
+                      </div>
+
+                      <a 
+                        href={album.driveUrl} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        {/* 🌟 ĐÃ SỬA: "Tải xuống" */}
+                        <span>Tải xuống</span>
+                      </a>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         ) : (
@@ -439,49 +605,61 @@ export default function GalleryPage() {
               <div>
                 <h2 className="text-2xl font-bold font-serif">{selectedAlbum.title}</h2>
                 <p className="text-xs text-gray-400 mt-1">
-                  {loadingImages ? 'Đang tải danh sách ảnh...' : `Hiển thị ${(currentPage - 1) * itemsPerPage + 1} - ${Math.min(currentPage * itemsPerPage, filteredImages.length)} / ${filteredImages.length} tệp`}
+                  {loadingImages ? 'Đang tải danh sách tệp...' : `Hiển thị ${(currentPage - 1) * itemsPerPage + 1} - ${Math.min(currentPage * itemsPerPage, paginatedImages.length)} / ${images.length} tệp`}
                 </p>
               </div>
 
-              {/* Thanh lọc theo số sao */}
-              <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-white/5 p-1 rounded-xl border border-gray-200 dark:border-white/10 text-xs">
-                <span className="px-2.5 py-1 font-semibold text-gray-500">Lọc sao:</span>
-                <button
-                  onClick={() => { setStarFilter('all'); setCurrentPage(1); }}
-                  className={`px-3 py-1 rounded-lg transition font-medium cursor-pointer ${
-                    starFilter === 'all' ? 'bg-amber-500 text-white shadow' : 'hover:bg-gray-200 dark:hover:bg-white/10'
-                  }`}
-                >
-                  Tất cả
-                </button>
-                {[0, 1, 2, 3, 4, 5].map((star) => (
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-white/5 p-1 rounded-xl border border-gray-200 dark:border-white/10 text-xs">
+                  <span className="px-2.5 py-1 font-semibold text-gray-500">Lọc sao:</span>
                   <button
-                    key={star}
-                    onClick={() => { setStarFilter(star); setCurrentPage(1); }}
-                    className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer ${
-                      starFilter === star ? 'bg-amber-500 text-white shadow' : 'hover:bg-gray-200 dark:hover:bg-white/10'
+                    onClick={() => { setStarFilter('all'); setCurrentPage(1); }}
+                    className={`px-3 py-1 rounded-lg transition font-medium cursor-pointer ${
+                      starFilter === 'all' ? 'bg-emerald-600 text-white shadow' : 'hover:bg-gray-200 dark:hover:bg-white/10'
                     }`}
                   >
-                    <Star className="w-3 h-3 fill-current text-amber-400" />
-                    <span>{star}</span>
+                    Tất cả
                   </button>
-                ))}
+                  {[0, 1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      onClick={() => { setStarFilter(star); setCurrentPage(1); }}
+                      className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer ${
+                        starFilter === star ? 'bg-emerald-600 text-white shadow' : 'hover:bg-gray-200 dark:hover:bg-white/10'
+                      }`}
+                    >
+                      <Star className="w-3 h-3 fill-current text-emerald-400" />
+                      <span>{star}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {selectedImagesList.length > 0 && (
+                  <button
+                    onClick={handleClearAllSelections}
+                    className="flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 transition cursor-pointer"
+                    title="Xóa tất cả đánh giá sao của các tệp đã chọn"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Xóa tất cả đã chọn ({selectedImagesList.length})</span>
+                  </button>
+                )}
               </div>
             </div>
 
             {loadingImages ? (
               <div className="flex flex-col items-center justify-center py-24 text-gray-400">
-                <Loader2 className="w-8 h-8 animate-spin text-amber-500 mb-3" />
-                <p className="text-xs">Đang quét toàn bộ ảnh từ Google Drive...</p>
+                <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
+                <p className="text-xs">Đang quét toàn bộ tệp từ Google Drive...</p>
               </div>
             ) : paginatedImages.length === 0 ? (
               <div className="text-center py-20 text-gray-400 text-xs">
-                Không tìm thấy ảnh nào phù hợp với bộ lọc sao này.
+                Không tìm thấy tệp nào phù hợp với bộ lọc.
               </div>
             ) : (
               <div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                  {paginatedImages.map((item) => {
+                  {paginatedImages.filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase())).map((item) => {
                     const currentStar = ratings[item.id] || 0
                     return (
                       <div 
@@ -495,9 +673,12 @@ export default function GalleryPage() {
                           className="h-56 bg-gray-100 relative cursor-pointer overflow-hidden flex items-center justify-center"
                         >
                           {item.type === 'video' ? (
-                            <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white">
-                              <span className="absolute top-2 left-2 bg-black/60 text-[9px] px-2 py-0.5 rounded flex items-center gap-1">
-                                <Film className="w-2.5 h-2.5" /> VIDEO
+                            <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white relative">
+                              <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
+                                <Film className="w-10 h-10 text-emerald-400 drop-shadow-md" />
+                              </div>
+                              <span className="absolute top-2 left-2 bg-black/60 text-[9px] px-2 py-0.5 rounded flex items-center gap-1 z-20">
+                                VIDEO
                               </span>
                             </div>
                           ) : (
@@ -510,7 +691,7 @@ export default function GalleryPage() {
                           )}
 
                           {currentStar > 0 && (
-                            <div className="absolute top-2 right-2 bg-amber-500 text-white px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md">
+                            <div className="absolute top-2 right-2 bg-emerald-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md z-20">
                               <Star className="w-3 h-3 fill-current" />
                               <span>{currentStar}</span>
                             </div>
@@ -518,15 +699,15 @@ export default function GalleryPage() {
                         </div>
 
                         <div className="p-3 flex items-center justify-between text-xs">
-                          <span className="truncate font-medium text-gray-700 dark:text-gray-200" title={item.name}>
+                          <span className={`truncate font-medium transition-colors ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={item.name}>
                             {item.name}
                           </span>
                           <a 
                             href={item.downloadUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="p-1 text-gray-400 hover:text-blue-600 transition"
-                            title="Tải ảnh gốc"
+                            className="p-1 text-gray-400 hover:text-emerald-600 transition"
+                            title="Tải tệp gốc"
                           >
                             <Download className="w-4 h-4" />
                           </a>
@@ -536,7 +717,6 @@ export default function GalleryPage() {
                   })}
                 </div>
 
-                {/* Thanh chuyển trang (Pagination) */}
                 {totalPages > 1 && (
                   <div className="flex items-center justify-center gap-2 mt-10">
                     <button
@@ -564,46 +744,153 @@ export default function GalleryPage() {
         )}
       </main>
 
-      {/* Modal Phóng To Ảnh */}
+      {/* Modal Chỉnh Sửa Album */}
+      {editingAlbum && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <h3 className="font-serif font-bold text-base">Chỉnh Sửa Thông Tin Album</h3>
+              <button 
+                onClick={() => setEditingAlbum(null)}
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateAlbum} className="mt-4 space-y-4 text-xs">
+              <div>
+                <label className="block font-medium mb-1 text-gray-600 dark:text-gray-300">Tên Album</label>
+                <input 
+                  type="text" 
+                  value={editingAlbum.title}
+                  onChange={(e) => setEditingAlbum({ ...editingAlbum, title: e.target.value })}
+                  required
+                  className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium mb-1 text-gray-600 dark:text-gray-300">Link Google Drive</label>
+                <input 
+                  type="text" 
+                  value={editingAlbum.driveUrl}
+                  onChange={(e) => setEditingAlbum({ ...editingAlbum, driveUrl: e.target.value })}
+                  required
+                  className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
+                  }`}
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium mb-1 text-gray-600 dark:text-gray-300">Link Ảnh Bìa (Để trống để tự động lấy ảnh đầu tiên trong Drive)</label>
+                <input 
+                  type="text" 
+                  value={editingAlbum.coverUrl}
+                  onChange={(e) => setEditingAlbum({ ...editingAlbum, coverUrl: e.target.value })}
+                  placeholder="https://..."
+                  className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
+                  }`}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setEditingAlbum(null)}
+                  className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10 transition font-medium cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md transition cursor-pointer"
+                >
+                  Lưu thay đổi
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Xem Trước Tệp */}
       {previewMedia && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4">
-          <button
-            onClick={() => setPreviewMedia(null)}
-            className="absolute top-5 right-5 text-white/70 hover:text-white p-2.5 rounded-full bg-white/10 hover:bg-white/20 transition cursor-pointer z-20"
-          >
-            <X className="w-6 h-6" />
-          </button>
-
-          <button
-            onClick={handlePrevImage}
-            className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer z-20"
-            title="Ảnh trước"
-          >
-            <ChevronLeft className="w-8 h-8" />
-          </button>
-
-          <button
-            onClick={handleNextImage}
-            className="absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer z-20"
-            title="Ảnh sau"
-          >
-            <ChevronRight className="w-8 h-8" />
-          </button>
+        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col justify-between p-4 select-none">
           
-          <div className="max-w-4xl max-h-[85vh] w-full flex flex-col items-center">
+          <div className="flex items-center justify-between text-white/90 z-20 px-4 py-2">
+            <div className="text-xs font-light tracking-wide opacity-80">
+              {selectedAlbum?.title}
+            </div>
+
+            <div className="text-center">
+              <p className="text-sm font-semibold">{previewMedia.name}</p>
+              <p className="text-[11px] text-white/60">{currentIndex + 1} / {previewSourceList.length}</p>
+            </div>
+
+            <div className="flex items-center gap-4">
+              <a 
+                href={previewMedia.downloadUrl} 
+                target="_blank" 
+                rel="noreferrer" 
+                className="p-2 rounded-full hover:bg-white/10 transition text-white"
+                title="Tải tệp gốc"
+              >
+                <Download className="w-5 h-5" />
+              </a>
+              <button
+                onClick={() => setPreviewMedia(null)}
+                className="p-2 rounded-full hover:bg-white/10 transition text-white cursor-pointer"
+                title="Đóng"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+
+          <div className="relative flex-1 flex items-center justify-center px-12 overflow-hidden my-2">
+            <button
+              onClick={handlePrevImage}
+              className="absolute left-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer z-20"
+              title="Tệp trước"
+            >
+              <ChevronLeft className="w-7 h-7" />
+            </button>
+
+            <button
+              onClick={handleNextImage}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer z-20"
+              title="Tệp sau"
+            >
+              <ChevronRight className="w-7 h-7" />
+            </button>
+            
             {previewMedia.type === 'video' ? (
-              <iframe src={previewMedia.url} className="w-full aspect-video rounded-xl shadow-2xl" allow="autoplay" />
+              <iframe 
+                src={`https://drive.google.com/file/d/${previewMedia.id}/preview`}
+                className="max-h-[68vh] w-full max-w-4xl aspect-video rounded-lg shadow-2xl border-0" 
+                allow="autoplay; encrypted-media"
+                allowFullScreen
+              />
             ) : (
               <img 
                 src={previewMedia.fullUrl || previewMedia.url} 
                 alt={previewMedia.name} 
-                className="max-h-[70vh] max-w-full rounded-xl object-contain shadow-2xl"
+                className="max-h-[68vh] max-w-full rounded-lg object-contain shadow-2xl"
               />
             )}
+          </div>
 
-            <div className="mt-4 flex flex-col items-center bg-white/10 backdrop-blur-md px-6 py-2.5 rounded-2xl border border-white/10">
-              <span className="text-[11px] text-gray-300 mb-1.5 font-medium">Đánh giá / Chọn mức sao cho ảnh này:</span>
-              <div className="flex items-center gap-2">
+          <div className="flex flex-col items-center gap-3 pb-2 z-20">
+            <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md px-5 py-2 rounded-2xl border border-white/10">
+              <span className="text-[11px] text-gray-300 font-medium">Đánh giá sao:</span>
+              <div className="flex items-center gap-1.5">
                 {[1, 2, 3, 4, 5].map((star) => {
                   const currentRating = ratings[previewMedia.id] || 0
                   const isSelected = star <= currentRating
@@ -611,40 +898,50 @@ export default function GalleryPage() {
                     <button
                       key={star}
                       onClick={() => handleRateImage(previewMedia.id, star)}
-                      className="p-1 transition transform hover:scale-125 cursor-pointer"
+                      className="p-0.5 transition transform hover:scale-125 cursor-pointer"
                       title={`${star} sao`}
                     >
-                      <Star className={`w-5 h-5 ${isSelected ? 'fill-amber-400 text-amber-400' : 'text-gray-400'}`} />
+                      <Star className={`w-4 h-4 ${isSelected ? 'fill-emerald-400 text-emerald-400' : 'text-gray-400'}`} />
                     </button>
                   )
                 })}
                 <button
                   onClick={() => handleRateImage(previewMedia.id, 0)}
-                  className="ml-2 px-2 py-0.5 rounded-lg bg-red-500/20 text-red-300 text-[10px] hover:bg-red-500/30 transition cursor-pointer"
-                  title="Xóa đánh giá"
+                  className="ml-2 px-2 py-0.5 rounded bg-red-500/20 text-red-300 text-[10px] hover:bg-red-500/30 transition cursor-pointer"
                 >
                   Xóa sao
                 </button>
               </div>
             </div>
 
-            <div className="mt-3 flex items-center gap-4">
-              <span className="text-white text-xs font-medium">{previewMedia.name} ({currentIndex + 1} / {filteredImages.length})</span>
-              <a 
-                href={previewMedia.downloadUrl} 
-                target="_blank" 
-                rel="noreferrer" 
-                className="flex items-center gap-1.5 px-3 py-1 bg-white text-black rounded-full text-xs font-semibold hover:bg-gray-200 transition"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Tải ảnh gốc</span>
-              </a>
+            {/* Băng chuyền thumbnail */}
+            <div ref={thumbnailRef} className="flex items-center gap-2 overflow-x-auto max-w-2xl px-4 py-2 scrollbar-none">
+              {previewSourceList.map((item) => {
+                const isActive = item.id === previewMedia.id
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => setPreviewMedia(item)}
+                    className={`w-14 h-14 relative rounded-md overflow-hidden cursor-pointer transition-all duration-150 flex-shrink-0 ${
+                      isActive ? 'border-2 border-emerald-400 scale-105 opacity-100 shadow-md' : 'opacity-40 hover:opacity-80 border border-transparent'
+                    }`}
+                  >
+                    {item.type === 'video' ? (
+                      <div className="w-full h-full bg-gray-900 flex items-center justify-center text-white">
+                        <Film className="w-5 h-5 text-emerald-400" />
+                      </div>
+                    ) : (
+                      <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal Quản Lý Danh Sách Ảnh Đã Chọn */}
+      {/* Modal Quản Lý Danh Sách Tệp Đã Chọn */}
       {isAdminPanelOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-lg rounded-2xl p-6 shadow-2xl border transition-all ${
@@ -653,7 +950,7 @@ export default function GalleryPage() {
             <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
               <div className="flex items-center gap-2">
                 <ClipboardList className="w-5 h-5 text-emerald-500" />
-                <h3 className="font-serif font-bold text-base">Danh sách ảnh đã chọn ({selectedImagesList.length})</h3>
+                <h3 className="font-serif font-bold text-base">Danh sách tệp đã chọn ({selectedImagesList.length})</h3>
               </div>
               <button 
                 onClick={() => setIsAdminPanelOpen(false)}
@@ -702,7 +999,7 @@ export default function GalleryPage() {
               <textarea
                 readOnly
                 value={textFileContent}
-                placeholder="Chưa có ảnh nào được chọn (chấm sao)..."
+                placeholder="Chưa có tệp nào được chọn (chấm sao)..."
                 className={`w-full h-40 p-3 rounded-xl font-mono text-xs border outline-none resize-none ${
                   isDarkMode 
                     ? 'bg-black/40 border-white/10 text-emerald-400' 
@@ -724,7 +1021,7 @@ export default function GalleryPage() {
 
                 <button
                   onClick={handleCopyText}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow transition cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow transition cursor-pointer"
                 >
                   {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copied ? 'Đã sao chép!' : 'Sao chép'}</span>
@@ -767,32 +1064,32 @@ export default function GalleryPage() {
                   required
                   placeholder="Ví dụ: Kỷ yếu lớp 12A1"
                   className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-amber-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-amber-500'
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
                   }`}
                 />
               </div>
 
               <div>
-                <label className="block font-medium mb-1 text-gray-600 dark:text-gray-300">Link Google Drive của thư mục ảnh</label>
+                <label className="block font-medium mb-1 text-gray-600 dark:text-gray-300">Link Google Drive của thư mục tệp</label>
                 <input 
                   type="text" 
                   name="url"
                   required
                   placeholder="https://drive.google.com/drive/folders/..."
                   className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-amber-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-amber-500'
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
                   }`}
                 />
               </div>
 
               <div>
-                <label className="block font-medium mb-1 text-gray-600 dark:text-gray-300">Link ảnh bìa hiển thị bên ngoài (tùy chọn)</label>
+                <label className="block font-medium mb-1 text-gray-600 dark:text-gray-300">Link ảnh bìa (Để trống để tự động lấy ảnh đầu tiên trong Drive)</label>
                 <input 
                   type="text" 
                   name="cover"
-                  placeholder="https://images.unsplash.com/... (để trống dùng ảnh mặc định)"
+                  placeholder="https://..."
                   className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-amber-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-amber-500'
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
                   }`}
                 />
               </div>
@@ -807,7 +1104,7 @@ export default function GalleryPage() {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold shadow-md transition cursor-pointer"
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md transition cursor-pointer"
                 >
                   Tạo Album
                 </button>
@@ -817,10 +1114,28 @@ export default function GalleryPage() {
         </div>
       )}
 
-      <footer className={`border-t py-8 text-center text-xs transition-colors ${
+      {/* Footer */}
+      <footer className={`border-t py-8 text-xs transition-colors ${
         isDarkMode ? 'border-white/10 text-gray-500' : 'border-gray-100 text-gray-400'
       }`}>
-        <p>© 2026 DinhThong Gallery</p>
+        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="w-full sm:w-auto hidden sm:block"></div>
+          
+          <p className="text-center">© 2026 DinhThong Gallery. All rights reserved.</p>
+          
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wider">LIÊN HỆ:</span>
+            <a 
+              href="https://facebook.com/cua_ban" 
+              target="_blank" 
+              rel="noreferrer" 
+              className="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition inline-flex items-center"
+              title="Facebook"
+            >
+              <img src="/facebook.png" alt="Facebook" className="w-6 h-6 object-contain" />
+            </a>
+          </div>
+        </div>
       </footer>
 
     </div>
