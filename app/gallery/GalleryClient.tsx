@@ -8,7 +8,6 @@ import {
   Trash2, LogOut, User as UserIcon,
   Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3
 } from 'lucide-react'
-
 interface MediaItem {
   id: string
   name: string
@@ -27,7 +26,7 @@ interface Album {
 
 const preloadedCache = new Set<string>()
 
-export default function GalleryPage() {
+export default function GalleryClient() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -182,6 +181,45 @@ export default function GalleryPage() {
     window.open(selectedAlbum.driveUrl, '_blank')
   }
 
+  // Tối ưu cơ chế tải file phù hợp cho cả iOS (Menu Lưu hình ảnh), Android & PC
+  const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+
+    const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+
+    try {
+      const res = await fetch(item.downloadUrl)
+      if (!res.ok) throw new Error('Fetch failed')
+      const blob = await res.blob()
+      
+      const ext = item.type === 'video' ? 'mp4' : 'jpg'
+      const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
+      const fileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
+      const file = new File([blob], fileName, { type: mimeType })
+
+      if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: item.name,
+        })
+        return
+      }
+
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1500)
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') return
+      window.open(item.downloadUrl, '_blank')
+    }
+  }
+
   const handleClearAllSelections = () => {
     if (confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) {
       setRatings({})
@@ -189,7 +227,6 @@ export default function GalleryPage() {
     }
   }
 
-  // Tự động truy vấn Supabase bằng ID trên URL, thiết lập đồng thời Tiêu đề trang và Thẻ OpenGraph động
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
@@ -207,8 +244,8 @@ export default function GalleryPage() {
           setSelectedAlbum(sharedAlbumObj)
           fetchAlbumImages(sharedAlbumObj.driveUrl)
           
-          // Gán tiêu đề trang và metadata động để preview card hiển thị chuẩn tên album
-          document.title = data.title
+          const fullTitle = `${data.title} - DinhThong Gallery`
+          document.title = fullTitle
           
           const updateMetaTag = (property: string, content: string) => {
             let meta = document.querySelector(`meta[property="${property}"]`) || document.querySelector(`meta[name="${property}"]`)
@@ -220,23 +257,26 @@ export default function GalleryPage() {
             meta.setAttribute('content', content)
           }
 
-          updateMetaTag('og:title', data.title)
-          updateMetaTag('og:description', 'DinhThong Gallery')
-          updateMetaTag('twitter:title', data.title)
-          updateMetaTag('twitter:description', 'DinhThong Gallery')
+          updateMetaTag('og:title', fullTitle)
+          updateMetaTag('og:description', `Xem album ảnh ${data.title} từ DinhThong Gallery.`)
+          updateMetaTag('twitter:title', fullTitle)
+          updateMetaTag('twitter:description', `Xem album ảnh ${data.title} từ DinhThong Gallery.`)
         }
+        setLoading(false)
+      }).catch(() => {
+        setLoading(false)
       })
       
       const savedRatings = localStorage.getItem('dinhthong_image_ratings')
       if (savedRatings) {
         try { setRatings(JSON.parse(savedRatings)) } catch {}
       }
-      setLoading(false)
       return
     }
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) {
+        setLoading(false)
         router.replace('/')
       } else {
         const loggedInEmail = data.session.user.email
@@ -250,6 +290,7 @@ export default function GalleryPage() {
         if (error || !whitelist) {
           alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
           await supabase.auth.signOut()
+          setLoading(false)
           router.replace('/')
           return
         }
@@ -264,6 +305,7 @@ export default function GalleryPage() {
         setLoading(false)
       }
     }).catch(() => {
+      setLoading(false)
       router.replace('/')
     })
   }, [router, supabase])
@@ -286,11 +328,10 @@ export default function GalleryPage() {
 
   const handleOpenAlbum = (album: Album) => {
     setSelectedAlbum(album)
-    document.title = album.title
+    document.title = `${album.title} - DinhThong Gallery`
     fetchAlbumImages(album.driveUrl)
   }
 
-  // Link chia sẻ cực kỳ ngắn gọn, chỉ chứa ID
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
@@ -389,7 +430,7 @@ export default function GalleryPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#151036] flex flex-col items-center justify-center text-white">
+      <div className="min-h-screen bg-[#07130c] flex flex-col items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
         <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang tải Gallery...</p>
       </div>
@@ -737,15 +778,13 @@ export default function GalleryPage() {
                           <span className={`truncate font-medium transition-colors ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={item.name}>
                             {item.name}
                           </span>
-                          <a 
-                            href={item.downloadUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="p-1 text-gray-400 hover:text-emerald-600 transition"
-                            title="Tải tệp gốc"
+                          <button 
+                            onClick={(e) => handleDownloadMedia(item, e)}
+                            className="p-1 text-gray-400 hover:text-emerald-600 transition cursor-pointer"
+                            title="Lưu tệp về máy"
                           >
                             <Download className="w-4 h-4" />
-                          </a>
+                          </button>
                         </div>
                       </div>
                     )
@@ -870,15 +909,13 @@ export default function GalleryPage() {
             </div>
 
             <div className="flex items-center gap-4">
-              <a 
-                href={previewMedia.downloadUrl} 
-                target="_blank" 
-                rel="noreferrer" 
-                className="p-2 rounded-full hover:bg-white/10 transition text-white"
-                title="Tải tệp gốc"
+              <button 
+                onClick={() => handleDownloadMedia(previewMedia)}
+                className="p-2 rounded-full hover:bg-white/10 transition text-white cursor-pointer"
+                title="Lưu tệp về máy"
               >
                 <Download className="w-5 h-5" />
-              </a>
+              </button>
               <button
                 onClick={() => setPreviewMedia(null)}
                 className="p-2 rounded-full hover:bg-white/10 transition text-white cursor-pointer"
@@ -1153,23 +1190,8 @@ export default function GalleryPage() {
       <footer className={`border-t py-8 text-xs transition-colors ${
         isDarkMode ? 'border-white/10 text-gray-500' : 'border-gray-100 text-gray-400'
       }`}>
-        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="w-full sm:w-auto hidden sm:block"></div>
-          
-          <p className="text-center">© 2026 DinhThong Gallery.</p>
-          
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] uppercase tracking-wider">LIÊN HỆ:</span>
-            <a 
-              href="https://facebook.com" 
-              target="_blank" 
-              rel="noreferrer" 
-              className="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-white/10 transition inline-flex items-center cursor-pointer"
-              title="Facebook"
-            >
-              <img src="/facebook.png" alt="Facebook" className="w-6 h-6 object-contain" />
-            </a>
-          </div>
+        <div className="max-w-7xl mx-auto px-6 text-center">
+          <p>© 2026 DinhThong Gallery</p>
         </div>
       </footer>
 
