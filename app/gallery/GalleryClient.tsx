@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
-import { downloadZip } from 'client-zip'
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
@@ -182,7 +183,7 @@ export default function GalleryClient() {
     }
   }
 
-  // TẢI TOÀN BỘ ẢNH GỐC FULL DUNG LƯỢNG + NÉN TỐC ĐỘ CAO (20 LUỒNG SONG SONG)
+  // TẢI VÀ NÉN 1000 ẢNH GỐC SIÊU TỐC VỚI JSZIP (16 LUỒNG SONG SONG + STORE MODE)
   const handleDownloadAlbumZip = async (albumToDownload?: Album, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -208,22 +209,22 @@ export default function GalleryClient() {
         return
       }
 
+      const zip = new JSZip()
       const total = targetFiles.length
       let completedCount = 0
-      const downloadedFiles: { name: string; input: Blob }[] = []
 
-      // Bật 20 luồng tải song song để tận dụng tối đa băng thông mạng
-      const CONCURRENCY_LIMIT = 20
+      // Chạy 16 luồng tải song song tối đa
+      const CONCURRENCY_LIMIT = 16
       const fetchRawOriginalFile = async (file: MediaItem) => {
         const ext = file.type === 'video' ? 'mp4' : 'jpg'
         const exactFileName = file.name.includes('.') ? file.name : `${file.name}.${ext}`
         
         try {
-          // Kéo trực tiếp file gốc qua API download để giữ nguyên byte data
           const res = await fetch(`/api/download?url=${encodeURIComponent(file.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
           if (res.ok) {
             const blob = await res.blob()
-            downloadedFiles.push({ name: exactFileName, input: blob })
+            // STORE mode: Không tốn CPU nén lại các file ảnh/video đã nén sẵn, giữ nguyên dung lượng gốc
+            zip.file(exactFileName, blob, { compression: 'STORE' })
           }
         } catch (err) {
           console.error(`Lỗi tải: ${exactFileName}`, err)
@@ -240,18 +241,18 @@ export default function GalleryClient() {
 
       setZipProgress('Đang nén ZIP...')
       
-      // client-zip đóng gói container nhị phân không tốn CPU nén lại (xử lý xong trong 1-2s)
-      const zipBlob = await downloadZip(downloadedFiles).blob()
-      
-      // Kích hoạt tải về máy
-      const blobUrl = URL.createObjectURL(zipBlob)
-      const link = document.createElement('a')
-      link.href = blobUrl
-      link.setAttribute('download', `${targetAlbum.title}.zip`)
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 3000)
+      const zipContent = await zip.generateAsync(
+        { 
+          type: 'blob', 
+          compression: 'STORE',
+          streamFiles: true 
+        }, 
+        (metadata) => {
+          setZipProgress(`${Math.floor(metadata.percent)}%`)
+        }
+      )
+
+      saveAs(zipContent, `${targetAlbum.title}.zip`)
     } catch (err: any) {
       alert('Có lỗi xảy ra khi tải album: ' + err.message)
     } finally {
