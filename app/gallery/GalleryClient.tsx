@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import JSZip from 'jszip'
@@ -47,7 +47,6 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
-// Icon Thư Mục chuẩn
 function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }) {
   return (
     <div className={`flex items-center justify-center p-3 rounded-2xl bg-[#FFF6EB] dark:bg-[#2A2016] shadow-sm ${className}`}>
@@ -127,6 +126,8 @@ export default function GalleryClient() {
   const [useNewline, setUseNewline] = useState(true)
 
   const thumbnailRef = useRef<HTMLDivElement>(null)
+  const touchStartX = useRef<number | null>(null)
+  const touchEndX = useRef<number | null>(null)
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -138,7 +139,7 @@ export default function GalleryClient() {
     if (url.includes('drive.google.com/file/d/')) {
       const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)
       if (match && match[1]) {
-        return `https://lh3.googleusercontent.com/d/${match[1]}`
+        return `https://lh3.googleusercontent.com/d/${match[1]}=w1000`
       }
     }
     return url
@@ -239,7 +240,6 @@ export default function GalleryClient() {
     }
   }, [isKeyGenOpen])
 
-  // Lấy nội dung tệp và thư mục con từ Drive URL[cite: 1]
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
@@ -311,22 +311,30 @@ export default function GalleryClient() {
 
   const previewSourceList = filteredMediaFiles
   const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
-  
+
+  // BỘ TẢI TRƯỚC (PRELOAD BUFFER) ĐA HƯỚNG ±3 ẢNH ĐỂ LOẠI BỎ HOÀN TOÀN ĐỘ TRỄ
   useEffect(() => {
     if (currentIndex === -1 || previewSourceList.length === 0) return
 
-    for (let i = 1; i <= 3; i++) {
-      const nextIdx = (currentIndex + i) % previewSourceList.length
-      const item = previewSourceList[nextIdx]
+    const indicesToPreload = [
+      (currentIndex + 1) % previewSourceList.length,
+      (currentIndex + 2) % previewSourceList.length,
+      (currentIndex + 3) % previewSourceList.length,
+      (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
+      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
+    ]
+
+    indicesToPreload.forEach(idx => {
+      const item = previewSourceList[idx]
       if (item && item.type === 'image') {
-        const targetUrl = item.fullUrl || item.url
-        if (targetUrl && !preloadedCache.has(targetUrl)) {
-          preloadedCache.add(targetUrl)
+        const previewUrl = `https://lh3.googleusercontent.com/d/${item.id}=w1600`
+        if (!preloadedCache.has(previewUrl)) {
+          preloadedCache.add(previewUrl)
           const img = new window.Image()
-          img.src = targetUrl
+          img.src = previewUrl
         }
       }
-    }
+    })
 
     if (thumbnailRef.current) {
       const activeThumb = thumbnailRef.current.children[currentIndex] as HTMLElement
@@ -336,25 +344,50 @@ export default function GalleryClient() {
     }
   }, [currentIndex, previewSourceList])
 
-  const handlePrevImage = () => {
+  const handlePrevImage = useCallback(() => {
     if (previewSourceList.length === 0) return
     if (currentIndex > 0) {
       setPreviewMedia(previewSourceList[currentIndex - 1])
     } else {
       setPreviewMedia(previewSourceList[previewSourceList.length - 1])
     }
-  }
+  }, [currentIndex, previewSourceList])
 
-  const handleNextImage = () => {
+  const handleNextImage = useCallback(() => {
     if (previewSourceList.length === 0) return
     if (currentIndex < previewSourceList.length - 1) {
       setPreviewMedia(previewSourceList[currentIndex + 1])
     } else {
       setPreviewMedia(previewSourceList[0])
     }
+  }, [currentIndex, previewSourceList])
+
+  // Xử lý vuốt trái / phải trên điện thoại mượt mà không delay
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.targetTouches[0].clientX
   }
 
-  // Tải ZIP cho cả Album chính lẫn Thư mục con[cite: 1]
+  const handleTouchMove = (e: React.TouchEvent) => {
+    touchEndX.current = e.targetTouches[0].clientX
+  }
+
+  const handleTouchEnd = () => {
+    if (!touchStartX.current || !touchEndX.current) return
+    const distance = touchStartX.current - touchEndX.current
+    const isLeftSwipe = distance > 45
+    const isRightSwipe = distance < -45
+
+    if (isLeftSwipe) {
+      handleNextImage()
+    }
+    if (isRightSwipe) {
+      handlePrevImage()
+    }
+
+    touchStartX.current = null
+    touchEndX.current = null
+  }
+
   const handleDownloadAlbumZip = async (targetInfo?: { title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -365,7 +398,7 @@ export default function GalleryClient() {
     if (!target || isZipping) return
 
     setIsZipping(true)
-    setZipProgress('Chuẩn bị...')
+    setZipProgress('Vui lòng đợi...')
 
     try {
       let targetFiles = items.filter(f => f.type !== 'folder')
@@ -410,7 +443,7 @@ export default function GalleryClient() {
         await Promise.all(chunk.map(file => fetchRawOriginalFile(file)))
       }
 
-      setZipProgress('Đang nén ZIP...')
+      setZipProgress('Vui lòng đợi...')
       
       const zipContent = await zip.generateAsync(
         { 
@@ -432,15 +465,28 @@ export default function GalleryClient() {
     }
   }
 
-  // Xóa thư mục con khỏi giao diện[cite: 1]
+  const handleDeleteMediaItem = (itemId: string, itemName: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    if (isSharedGuest) return
+    if (confirm(`Bạn có chắc muốn xóa tệp "${itemName}" khỏi danh sách hiển thị không?`)) {
+      setItems(prev => prev.filter(item => item.id !== itemId))
+      if (previewMedia?.id === itemId) {
+        setPreviewMedia(null)
+      }
+    }
+  }
+
   const handleDeleteSubFolder = (folderId: string, folderName: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (confirm(`Bạn có chắc muốn ẩn thư mục "${folderName}" khỏi danh sách hiển thị không?`)) {
+    if (isSharedGuest) return
+    if (confirm(`Bạn có chắc muốn xóa thư mục "${folderName}" khỏi danh sách hiển thị không?`)) {
       setItems(prev => prev.filter(item => item.id !== folderId))
     }
   }
 
-  // TẤT CẢ LINK CHIA SẺ ĐỀU LÀ LINK WEB ALBUM[cite: 1]
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
@@ -449,7 +495,6 @@ export default function GalleryClient() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // CHIA SẺ THƯ MỤC CON BẰNG LINK WEB ALBUM[cite: 1]
   const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!selectedAlbum) return
@@ -631,7 +676,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Tự động nhận diện Link chia sẻ Album hoặc Thư mục con từ URL[cite: 1]
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
@@ -650,7 +694,6 @@ export default function GalleryClient() {
           }
           setSelectedAlbum(sharedAlbumObj)
 
-          // Nếu link chia sẻ là thư mục con bên trong[cite: 1]
           if (sharedFolderId) {
             const folderDriveUrl = `https://drive.google.com/drive/folders/${sharedFolderId}`
             const folderName = sharedFolderName ? decodeURIComponent(sharedFolderName) : 'Thư mục'
@@ -725,7 +768,7 @@ export default function GalleryClient() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [previewMedia, previewSourceList])
+  }, [previewMedia, handlePrevImage, handleNextImage])
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -748,7 +791,9 @@ export default function GalleryClient() {
       setFolderHistory([])
       fetchAlbumImages(selectedAlbum.driveUrl)
     } else {
-      setSelectedAlbum(null)
+      if (!isSharedGuest) {
+        setSelectedAlbum(null)
+      }
     }
   }
 
@@ -797,6 +842,7 @@ export default function GalleryClient() {
 
   const handleDeleteAlbum = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
+    if (isSharedGuest) return
     if (confirm('Bạn có chắc muốn xóa album này không?')) {
       const { error } = await supabase.from('albums').delete().eq('id', id)
       if (!error) {
@@ -849,7 +895,7 @@ export default function GalleryClient() {
     return (
       <div className="min-h-screen bg-[#07130c] flex flex-col items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
-        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang tải Gallery...</p>
+        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Vui lòng đợi</p>
       </div>
     )
   }
@@ -1041,7 +1087,7 @@ export default function GalleryClient() {
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow transition cursor-pointer disabled:opacity-60"
               >
                 {isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                <span>{isSyncing ? 'Đang thêm...' : 'Đồng bộ ngay'}</span>
+                <span>{isSyncing ? 'Vui lòng đợi...' : 'Đồng bộ ngay'}</span>
               </button>
               <button
                 onClick={() => setHideSyncBanner(true)}
@@ -1106,7 +1152,7 @@ export default function GalleryClient() {
                           alt={album.title} 
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                           onError={(e) => {
-                            (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${album.id}`
+                            (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${album.id}=w1000`
                           }}
                         />
                       ) : (
@@ -1120,30 +1166,34 @@ export default function GalleryClient() {
                       
                       <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
-                      <button
-                        onClick={(e) => handleDeleteAlbum(album.id, e)}
-                        className="absolute top-3 right-3 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                        title="Xóa album"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {!isSharedGuest && (
+                        <>
+                          <button
+                            onClick={(e) => handleDeleteAlbum(album.id, e)}
+                            className="absolute top-3 right-3 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                            title="Xóa album"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
 
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setEditingAlbum(album); }}
-                        className="absolute top-3 right-12 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-emerald-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                        title="Chỉnh sửa thông tin album"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                      </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setEditingAlbum(album); }}
+                            className="absolute top-3 right-12 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-emerald-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                            title="Chỉnh sửa thông tin album"
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
 
-                      <button
-                        onClick={(e) => handleShareAlbum(album, e)}
-                        className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                        title="Tạo link chia sẻ web"
-                      >
-                        <Share2 className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>{shareCopiedId === album.id ? 'Đã copy link!' : 'Chia sẻ'}</span>
-                      </button>
+                          <button
+                            onClick={(e) => handleShareAlbum(album, e)}
+                            className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                            title="Tạo link chia sẻ web"
+                          >
+                            <Share2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>{shareCopiedId === album.id ? 'Đã copy link!' : 'Chia sẻ'}</span>
+                          </button>
+                        </>
+                      )}
                     </div>
 
                     <div className="p-4 flex items-center justify-between">
@@ -1170,7 +1220,6 @@ export default function GalleryClient() {
           </div>
         ) : (
           <div>
-            {/* Breadcrumb điều hướng thư mục[cite: 1] */}
             <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3 flex-wrap">
               <button 
                 onClick={() => handleNavigateBreadcrumb(-1)}
@@ -1199,7 +1248,7 @@ export default function GalleryClient() {
                   {folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : selectedAlbum.title}
                 </h2>
                 <p className="text-xs text-gray-400 mt-1">
-                  {loadingImages ? 'Đang tải danh sách...' : `${subFolders.length} thư mục, ${mediaFiles.length} hình ảnh`}
+                  {loadingImages ? 'Vui lòng đợi' : `${subFolders.length} thư mục, ${mediaFiles.length} hình ảnh`}
                 </p>
               </div>
 
@@ -1246,7 +1295,7 @@ export default function GalleryClient() {
             {loadingImages ? (
               <div className="flex flex-col items-center justify-center py-24 text-gray-400">
                 <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
-                <p className="text-xs">Đang quét toàn bộ thư mục và tệp từ Google Drive...</p>
+                <p className="text-xs">Vui lòng đợi</p>
               </div>
             ) : items.length === 0 ? (
               <div className="text-center py-20 text-gray-400 text-xs">
@@ -1254,7 +1303,7 @@ export default function GalleryClient() {
               </div>
             ) : (
               <div className="space-y-10">
-                {/* 1. KHU VỰC THƯ MỤC CON[cite: 1] */}
+                {/* 1. KHU VỰC THƯ MỤC CON */}
                 {subFolders.length > 0 && (
                   <div>
                     <div className="flex items-center gap-2 mb-4">
@@ -1289,7 +1338,7 @@ export default function GalleryClient() {
                                     alt={folder.name} 
                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                                     onError={(e) => {
-                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${folder.id}`
+                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${folder.id}=w1000`
                                     }}
                                   />
                                 ) : (
@@ -1303,23 +1352,26 @@ export default function GalleryClient() {
 
                                 <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
-                                <button
-                                  onClick={(e) => handleDeleteSubFolder(folder.id, folder.name, e)}
-                                  className="absolute top-2.5 right-2.5 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                                  title="Ẩn thư mục khỏi danh sách"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                {!isSharedGuest && (
+                                  <>
+                                    <button
+                                      onClick={(e) => handleDeleteSubFolder(folder.id, folder.name, e)}
+                                      className="absolute top-2.5 right-2.5 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                      title="Xóa thư mục"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
 
-                                {/* Nút chia sẻ tạo link Web Album[cite: 1] */}
-                                <button
-                                  onClick={(e) => handleShareSubFolder(folder, e)}
-                                  className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-[11px] font-semibold hover:bg-black/80 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                                  title="Sao chép link chia sẻ web"
-                                >
-                                  <Share2 className="w-3 h-3 text-emerald-400" />
-                                  <span>{shareCopiedId === folder.id ? 'Đã chép link web!' : 'Chia sẻ'}</span>
-                                </button>
+                                    <button
+                                      onClick={(e) => handleShareSubFolder(folder, e)}
+                                      className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-[11px] font-semibold hover:bg-black/80 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                      title="Sao chép link thư mục"
+                                    >
+                                      <Share2 className="w-3 h-3 text-emerald-400" />
+                                      <span>{shareCopiedId === folder.id ? 'Đã chép!' : 'Chia sẻ'}</span>
+                                    </button>
+                                  </>
+                                )}
                               </div>
 
                               <div className="p-3.5 flex items-center justify-between gap-2">
@@ -1338,7 +1390,7 @@ export default function GalleryClient() {
                                   className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
                                   title="Tải nén toàn bộ thư mục này"
                                 >
-                                  {isZipping ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                                  {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                                   <span>Tải xuống</span>
                                 </button>
                               </div>
@@ -1366,6 +1418,8 @@ export default function GalleryClient() {
                         .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map((item) => {
                           const currentStar = ratings[item.id] || 0
+                          const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w600`
+
                           return (
                             <div 
                               key={item.id}
@@ -1375,7 +1429,7 @@ export default function GalleryClient() {
                             >
                               <div 
                                 onClick={() => setPreviewMedia(item)}
-                                className="h-44 sm:h-56 bg-gray-100 relative cursor-pointer overflow-hidden flex items-center justify-center"
+                                className="h-44 sm:h-56 bg-gray-100 dark:bg-gray-800 relative cursor-pointer overflow-hidden flex items-center justify-center"
                               >
                                 {item.type === 'video' ? (
                                   <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white relative">
@@ -1388,14 +1442,24 @@ export default function GalleryClient() {
                                   </div>
                                 ) : (
                                   <img 
-                                    src={item.url} 
+                                    src={fastDisplayUrl} 
                                     alt={item.name} 
                                     loading="lazy"
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                                     onError={(e) => {
-                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}`
+                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}=w1000`
                                     }}
                                   />
+                                )}
+
+                                {!isSharedGuest && (
+                                  <button
+                                    onClick={(e) => handleDeleteMediaItem(item.id, item.name, e)}
+                                    className="absolute top-2 left-2 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                    title="Xóa tệp này"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
                                 )}
 
                                 {currentStar > 0 && (
@@ -1764,10 +1828,13 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Xem Trước Tệp */}
+      {/* Modal Xem Trước Tệp - ZERO DELAY PREVIEW */}
       {previewMedia && (
         <div 
           onClick={handleClosePreview}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
           className="fixed inset-0 z-50 bg-black/95 flex flex-col justify-between p-3 sm:p-4 select-none"
         >
           <div 
@@ -1784,6 +1851,16 @@ export default function GalleryClient() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+              {!isSharedGuest && (
+                <button 
+                  onClick={(e) => handleDeleteMediaItem(previewMedia.id, previewMedia.name, e)}
+                  className="p-1.5 sm:p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-red-400 transition cursor-pointer"
+                  title="Xóa tệp này"
+                >
+                  <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                </button>
+              )}
+
               <button 
                 onClick={(e) => handleDownloadMedia(previewMedia, e)}
                 disabled={downloadingId === previewMedia.id}
@@ -1812,7 +1889,7 @@ export default function GalleryClient() {
           >
             <button
               onClick={handlePrevImage}
-              className="absolute left-1 sm:left-2 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer z-20"
+              className="absolute left-1 sm:left-2 top-1/2 -translate-y-1/2 p-2.5 sm:p-3.5 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 text-white transition cursor-pointer z-20"
               title="Tệp trước"
             >
               <ChevronLeft className="w-6 h-6 sm:w-7 sm:h-7" />
@@ -1820,7 +1897,7 @@ export default function GalleryClient() {
 
             <button
               onClick={handleNextImage}
-              className="absolute right-1 sm:right-2 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer z-20"
+              className="absolute right-1 sm:right-2 top-1/2 -translate-y-1/2 p-2.5 sm:p-3.5 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 text-white transition cursor-pointer z-20"
               title="Tệp sau"
             >
               <ChevronRight className="w-6 h-6 sm:w-7 sm:h-7" />
@@ -1835,9 +1912,13 @@ export default function GalleryClient() {
               />
             ) : (
               <img 
-                src={previewMedia.fullUrl || previewMedia.url} 
+                src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
                 alt={previewMedia.name} 
-                className="max-h-[68vh] max-w-full rounded-lg object-contain shadow-2xl"
+                decoding="async"
+                className="max-h-[68vh] max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-150"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${previewMedia.id}`
+                }}
               />
             )}
           </div>
@@ -1879,7 +1960,7 @@ export default function GalleryClient() {
                   <div
                     key={item.id}
                     onClick={() => setPreviewMedia(item)}
-                    className={`w-12 h-12 sm:w-14 sm:h-14 relative rounded-md overflow-hidden cursor-pointer transition-all duration-150 flex-shrink-0 ${
+                    className={`w-12 h-12 sm:w-14 sm:h-14 relative rounded-md overflow-hidden cursor-pointer transition-all duration-100 flex-shrink-0 ${
                       isActive ? 'border-2 border-emerald-400 scale-105 opacity-100 shadow-md' : 'opacity-40 hover:opacity-80 border border-transparent'
                     }`}
                   >
@@ -1888,7 +1969,11 @@ export default function GalleryClient() {
                         <Film className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
                       </div>
                     ) : (
-                      <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                      <img 
+                        src={`https://lh3.googleusercontent.com/d/${item.id}=w200`} 
+                        alt={item.name} 
+                        className="w-full h-full object-cover" 
+                      />
                     )}
                   </div>
                 )
