@@ -47,6 +47,7 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
+// Icon Thư Mục chuẩn
 function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }) {
   return (
     <div className={`flex items-center justify-center p-3 rounded-2xl bg-[#FFF6EB] dark:bg-[#2A2016] shadow-sm ${className}`}>
@@ -238,6 +239,7 @@ export default function GalleryClient() {
     }
   }, [isKeyGenOpen])
 
+  // Lấy nội dung tệp và thư mục con từ Drive URL[cite: 1]
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
@@ -368,7 +370,6 @@ export default function GalleryClient() {
     try {
       let targetFiles = items.filter(f => f.type !== 'folder')
       
-      // Nếu tải một thư mục con riêng biệt chưa được mở
       if (targetInfo && targetInfo.driveUrl !== (currentFolder?.driveUrl || selectedAlbum?.driveUrl)) {
         const res = await fetch(`/api/drive?url=${encodeURIComponent(targetInfo.driveUrl)}`)
         const data = await res.json()
@@ -431,7 +432,7 @@ export default function GalleryClient() {
     }
   }
 
-  // Xóa thư mục con khỏi giao diện hiện tại[cite: 1]
+  // Xóa thư mục con khỏi giao diện[cite: 1]
   const handleDeleteSubFolder = (folderId: string, folderName: string, e: React.MouseEvent) => {
     e.stopPropagation()
     if (confirm(`Bạn có chắc muốn ẩn thư mục "${folderName}" khỏi danh sách hiển thị không?`)) {
@@ -439,11 +440,21 @@ export default function GalleryClient() {
     }
   }
 
-  // Chia sẻ thư mục con[cite: 1]
+  // TẤT CẢ LINK CHIA SẺ ĐỀU LÀ LINK WEB ALBUM[cite: 1]
+  const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
+    navigator.clipboard.writeText(shareUrl)
+    setShareCopiedId(album.id)
+    setTimeout(() => setShareCopiedId(null), 2500)
+  }
+
+  // CHIA SẺ THƯ MỤC CON BẰNG LINK WEB ALBUM[cite: 1]
   const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
     e.stopPropagation()
-    const folderDriveUrl = `https://drive.google.com/drive/folders/${folder.id}`
-    navigator.clipboard.writeText(folderDriveUrl)
+    if (!selectedAlbum) return
+    const shareUrl = `${window.location.origin}/gallery?id=${selectedAlbum.id}&folder=${folder.id}&folderName=${encodeURIComponent(folder.name)}`
+    navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(folder.id)
     setTimeout(() => setShareCopiedId(null), 2500)
   }
@@ -620,9 +631,12 @@ export default function GalleryClient() {
     }
   }
 
+  // Tự động nhận diện Link chia sẻ Album hoặc Thư mục con từ URL[cite: 1]
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
+    const sharedFolderId = params.get('folder')
+    const sharedFolderName = params.get('folderName')
 
     if (sharedId) {
       setIsSharedGuest(true)
@@ -635,9 +649,19 @@ export default function GalleryClient() {
             driveUrl: data.drive_url
           }
           setSelectedAlbum(sharedAlbumObj)
-          setFolderHistory([])
-          fetchAlbumImages(sharedAlbumObj.driveUrl)
-          document.title = `${data.title} - DinhThong Gallery`
+
+          // Nếu link chia sẻ là thư mục con bên trong[cite: 1]
+          if (sharedFolderId) {
+            const folderDriveUrl = `https://drive.google.com/drive/folders/${sharedFolderId}`
+            const folderName = sharedFolderName ? decodeURIComponent(sharedFolderName) : 'Thư mục'
+            setFolderHistory([{ id: sharedFolderId, title: folderName, driveUrl: folderDriveUrl }])
+            fetchAlbumImages(folderDriveUrl)
+            document.title = `${folderName} - DinhThong Gallery`
+          } else {
+            setFolderHistory([])
+            fetchAlbumImages(sharedAlbumObj.driveUrl)
+            document.title = `${data.title} - DinhThong Gallery`
+          }
         }
         setLoading(false)
       })
@@ -726,14 +750,6 @@ export default function GalleryClient() {
     } else {
       setSelectedAlbum(null)
     }
-  }
-
-  const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
-    navigator.clipboard.writeText(shareUrl)
-    setShareCopiedId(album.id)
-    setTimeout(() => setShareCopiedId(null), 2500)
   }
 
   const handleAddAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -1123,7 +1139,7 @@ export default function GalleryClient() {
                       <button
                         onClick={(e) => handleShareAlbum(album, e)}
                         className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                        title="Tạo link chia sẻ"
+                        title="Tạo link chia sẻ web"
                       >
                         <Share2 className="w-3.5 h-3.5 text-emerald-400" />
                         <span>{shareCopiedId === album.id ? 'Đã copy link!' : 'Chia sẻ'}</span>
@@ -1238,7 +1254,7 @@ export default function GalleryClient() {
               </div>
             ) : (
               <div className="space-y-10">
-                {/* 1. KHU VỰC THƯ MỤC CON ĐẦY ĐỦ NÚT XÓA, CHIA SẺ, TẢI XUỐNG[cite: 1] */}
+                {/* 1. KHU VỰC THƯ MỤC CON[cite: 1] */}
                 {subFolders.length > 0 && (
                   <div>
                     <div className="flex items-center gap-2 mb-4">
@@ -1287,23 +1303,22 @@ export default function GalleryClient() {
 
                                 <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
-                                {/* Nút Xóa Thư Mục Con[cite: 1] */}
                                 <button
                                   onClick={(e) => handleDeleteSubFolder(folder.id, folder.name, e)}
                                   className="absolute top-2.5 right-2.5 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                                  title="Xóa thư mục khỏi web"
+                                  title="Ẩn thư mục khỏi danh sách"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
 
-                                {/* Nút Chia Sẻ Thư Mục Con[cite: 1] */}
+                                {/* Nút chia sẻ tạo link Web Album[cite: 1] */}
                                 <button
                                   onClick={(e) => handleShareSubFolder(folder, e)}
                                   className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-[11px] font-semibold hover:bg-black/80 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                                  title="Sao chép link thư mục"
+                                  title="Sao chép link chia sẻ web"
                                 >
                                   <Share2 className="w-3 h-3 text-emerald-400" />
-                                  <span>{shareCopiedId === folder.id ? 'Đã chép!' : 'Chia sẻ'}</span>
+                                  <span>{shareCopiedId === folder.id ? 'Đã chép link web!' : 'Chia sẻ'}</span>
                                 </button>
                               </div>
 
@@ -1317,7 +1332,6 @@ export default function GalleryClient() {
                                   </p>
                                 </div>
 
-                                {/* Nút Tải Xuống Thư Mục Con[cite: 1] */}
                                 <button
                                   onClick={(e) => handleDownloadAlbumZip({ title: folder.name, driveUrl: folderDriveUrl }, e)}
                                   disabled={isZipping}
