@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon
 } from 'lucide-react'
 
 interface MediaItem {
@@ -18,6 +18,7 @@ interface MediaItem {
   url: string
   fullUrl: string
   downloadUrl: string
+  coverUrl?: string
 }
 
 interface Album {
@@ -260,14 +261,12 @@ export default function GalleryClient() {
     }
   }
 
-  // Mở thư mục con[cite: 1]
   const handleOpenSubFolder = (folderItem: MediaItem) => {
     const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
     setFolderHistory(prev => [...prev, { id: folderItem.id, title: folderItem.name, driveUrl: folderDriveUrl }])
     fetchAlbumImages(folderDriveUrl)
   }
 
-  // Quay lại cấp thư mục cha qua Breadcrumb[cite: 1]
   const handleNavigateBreadcrumb = (index: number) => {
     if (index === -1) {
       if (selectedAlbum) {
@@ -281,7 +280,7 @@ export default function GalleryClient() {
     }
   }
 
-  // Tự động kiểm tra và lấy ảnh đầu tiên làm ảnh bìa Album[cite: 1]
+  // Tự động quét và lấy ảnh đầu tiên làm ảnh bìa cho Album chính[cite: 1]
   useEffect(() => {
     albums.forEach(async (album) => {
       if (!album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
@@ -292,7 +291,6 @@ export default function GalleryClient() {
           if (firstImage) {
             setAlbumCovers(prev => ({ ...prev, [album.id]: firstImage.url }))
           } else {
-            // Đánh dấu là thư mục không chứa ảnh trực tiếp
             setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
           }
         } catch {
@@ -302,7 +300,7 @@ export default function GalleryClient() {
     })
   }, [albums])
 
-  // Tách biệt Thư mục con và Ảnh/Video[cite: 1]
+  // Phân loại: Thư mục con & Hình ảnh/Video[cite: 1]
   const subFolders = items.filter(item => item.type === 'folder')
   const mediaFiles = items.filter(item => item.type !== 'folder')
 
@@ -1081,7 +1079,6 @@ export default function GalleryClient() {
                           }}
                         />
                       ) : (
-                        // THƯ MỤC KHÔNG ĐỰNG ẢNH TRỰC TIẾP -> HIỂN THỊ ICON FOLDER ĐÚNG MẪU[cite: 1]
                         <div className="flex flex-col items-center justify-center p-6 text-center group-hover:scale-105 transition-transform duration-300">
                           <CustomFolderGraphic className="w-20 h-20 sm:w-24 sm:h-24 mb-3" />
                           <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
@@ -1226,7 +1223,7 @@ export default function GalleryClient() {
               </div>
             ) : (
               <div className="space-y-10">
-                {/* 1. KHU VỰC THƯ MỤC CON (FOLDER) VỚI ICON ĐÚNG MẪU[cite: 1] */}
+                {/* 1. KHU VỰC THƯ MỤC CON: TỰ ĐỘNG PHÂN BIỆT THƯ MỤC CÓ ẢNH VÀ THƯ MỤC CHỨA ALBUM[cite: 1] */}
                 {subFolders.length > 0 && (
                   <div>
                     <div className="flex items-center gap-2 mb-4">
@@ -1238,23 +1235,52 @@ export default function GalleryClient() {
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
                       {subFolders
                         .filter(f => f.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                        .map((folder) => (
-                          <div
-                            key={folder.id}
-                            onClick={() => handleOpenSubFolder(folder)}
-                            className={`rounded-2xl border transition-all cursor-pointer group p-4 flex flex-col items-center justify-center text-center h-40 sm:h-48 ${
-                              isDarkMode 
-                                ? 'bg-[#16181e] border-white/10 hover:border-amber-500/50 hover:bg-[#1e222b]' 
-                                : 'bg-white border-gray-100 shadow-sm hover:border-amber-500/40 hover:shadow-md'
-                            }`}
-                          >
-                            <CustomFolderGraphic className="w-14 h-14 sm:w-16 sm:h-16 mb-2.5 group-hover:scale-110 transition-transform" />
-                            <span className={`font-semibold text-xs sm:text-sm truncate w-full px-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={folder.name}>
-                              {folder.name}
-                            </span>
-                            <span className="text-[10px] text-gray-400 mt-1">Bấm để mở</span>
-                          </div>
-                        ))}
+                        .map((folder) => {
+                          const hasCover = Boolean(folder.coverUrl)
+
+                          return (
+                            <div
+                              key={folder.id}
+                              onClick={() => handleOpenSubFolder(folder)}
+                              className={`rounded-2xl overflow-hidden border transition-all cursor-pointer group flex flex-col justify-between ${
+                                isDarkMode 
+                                  ? 'bg-[#16181e] border-white/10 hover:border-emerald-500/50 hover:bg-[#1e222b]' 
+                                  : 'bg-white border-gray-100 shadow-sm hover:border-emerald-500/40 hover:shadow-md'
+                              }`}
+                            >
+                              {hasCover ? (
+                                /* THƯ MỤC CÓ ẢNH -> HIỂN THỊ ẢNH ĐẦU TIÊN LÀM BÌA ALBUM[cite: 1] */
+                                <div className="h-32 sm:h-36 bg-gray-100 dark:bg-gray-800 relative overflow-hidden flex items-center justify-center">
+                                  <img 
+                                    src={folder.coverUrl} 
+                                    alt={folder.name} 
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${folder.id}`
+                                    }}
+                                  />
+                                  <span className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[9px] px-2 py-0.5 rounded flex items-center gap-1 font-medium">
+                                    <FolderIcon className="w-2.5 h-2.5 text-amber-400" /> Album
+                                  </span>
+                                </div>
+                              ) : (
+                                /* THƯ MỤC CHỈ CHỨA THƯ MỤC TIẾP THEO -> HIỂN THỊ ICON THƯ MỤC[cite: 1] */
+                                <div className="h-32 sm:h-36 bg-gray-50 dark:bg-[#14161d] flex flex-col items-center justify-center p-3">
+                                  <CustomFolderGraphic className="w-12 h-12 sm:w-14 sm:h-14 group-hover:scale-110 transition-transform" />
+                                </div>
+                              )}
+
+                              <div className="p-3 text-center">
+                                <span className={`font-semibold text-xs sm:text-sm truncate block ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={folder.name}>
+                                  {folder.name}
+                                </span>
+                                <span className="text-[10px] text-gray-400 mt-0.5 block">
+                                  {hasCover ? 'Xem hình ảnh' : 'Mở thư mục'}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })}
                     </div>
                   </div>
                 )}

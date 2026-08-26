@@ -8,7 +8,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing drive URL' }, { status: 400 })
   }
 
-  // Tách Folder ID từ URL
   const match = driveUrl.match(/folders\/([a-zA-Z0-9_-]+)/)
   const folderId = match ? match[1] : driveUrl.trim()
   const apiKey = process.env.GOOGLE_DRIVE_API_KEY
@@ -19,8 +18,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`)
-    // Lấy mimeType và tên tệp
-    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,thumbnailLink)&pageSize=1000&orderBy=folder,name&key=${apiKey}`
+    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType)&pageSize=1000&orderBy=folder,name&key=${apiKey}`
     
     const res = await fetch(url, { cache: 'no-store' })
     if (!res.ok) {
@@ -29,7 +27,10 @@ export async function GET(request: NextRequest) {
     }
 
     const data = await res.json()
-    const files = (data.files || []).map((f: any) => {
+    const rawFiles = data.files || []
+
+    // Quét song song để lấy ảnh bìa cho các thư mục con có chứa ảnh
+    const files = await Promise.all(rawFiles.map(async (f: any) => {
       const isFolder = f.mimeType === 'application/vnd.google-apps.folder'
       const isVideo = f.mimeType?.startsWith('video/')
 
@@ -37,15 +38,33 @@ export async function GET(request: NextRequest) {
       if (isFolder) type = 'folder'
       else if (isVideo) type = 'video'
 
+      let coverUrl = ''
+
+      if (isFolder) {
+        try {
+          // Tìm ảnh đầu tiên trực tiếp bên trong thư mục con này
+          const childQuery = encodeURIComponent(`'${f.id}' in parents and mimeType contains 'image/' and trashed = false`)
+          const childUrl = `https://www.googleapis.com/drive/v3/files?q=${childQuery}&fields=files(id)&pageSize=1&key=${apiKey}`
+          const childRes = await fetch(childUrl, { next: { revalidate: 300 } })
+          if (childRes.ok) {
+            const childData = await childRes.json()
+            if (childData.files && childData.files.length > 0) {
+              coverUrl = `https://lh3.googleusercontent.com/d/${childData.files[0].id}=w1000`
+            }
+          }
+        } catch {}
+      }
+
       return {
         id: f.id,
         name: f.name,
         type,
+        coverUrl, // Có ảnh -> URL ảnh bìa; Không có ảnh trực tiếp -> rỗng (hiện icon thư mục)
         url: isFolder ? '' : `https://lh3.googleusercontent.com/d/${f.id}=w1000`,
         fullUrl: isFolder ? '' : `https://lh3.googleusercontent.com/d/${f.id}=s0`,
         downloadUrl: `https://drive.google.com/uc?export=download&id=${f.id}`
       }
-    })
+    }))
 
     return NextResponse.json({ files })
   } catch (error: any) {
