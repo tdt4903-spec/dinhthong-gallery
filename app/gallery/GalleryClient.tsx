@@ -231,14 +231,14 @@ export default function GalleryClient() {
     }
   }
 
-  // Mở thư mục con bên trong Album[cite: 1]
+  // Mở thư mục con[cite: 1]
   const handleOpenSubFolder = (folderItem: MediaItem) => {
     const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
     setFolderHistory(prev => [...prev, { id: folderItem.id, title: folderItem.name, driveUrl: folderDriveUrl }])
     fetchAlbumImages(folderDriveUrl)
   }
 
-  // Quay lại cấp thư mục trước đó bằng Breadcrumb[cite: 1]
+  // Quay lại cấp thư mục cha qua Breadcrumb[cite: 1]
   const handleNavigateBreadcrumb = (index: number) => {
     if (index === -1) {
       if (selectedAlbum) {
@@ -267,7 +267,7 @@ export default function GalleryClient() {
     })
   }, [albums])
 
-  // PHÂN BIỆT RÕ RÀNG GIỮA THƯ MỤC CON VÀ HÌNH ẢNH/VIDEO
+  // Tách biệt Thư mục con và Ảnh/Video
   const subFolders = items.filter(item => item.type === 'folder')
   const mediaFiles = items.filter(item => item.type !== 'folder')
 

@@ -1,56 +1,54 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
-function extractFolderId(url: string): string | null {
-  if (!url) return null
-  const match = url.match(/[-\w]{25,}/)
-  return match ? match[0] : null
-}
+export const dynamic = 'force-dynamic'
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  const driveUrl = request.nextUrl.searchParams.get('url')
+  if (!driveUrl) {
+    return NextResponse.json({ error: 'Missing drive URL' }, { status: 400 })
+  }
+
+  // Tách Folder ID từ URL
+  const match = driveUrl.match(/folders\/([a-zA-Z0-9_-]+)/)
+  const folderId = match ? match[1] : driveUrl.trim()
+  const apiKey = process.env.GOOGLE_DRIVE_API_KEY
+
+  if (!apiKey) {
+    return NextResponse.json({ error: 'Missing GOOGLE_DRIVE_API_KEY' }, { status: 500 })
+  }
+
   try {
-    const { searchParams } = new URL(request.url)
-    const folderUrl = searchParams.get('url')
-
-    if (!folderUrl) {
-      return NextResponse.json({ files: [], error: 'Thiếu link' }, { status: 400 })
-    }
-
-    const folderId = extractFolderId(folderUrl)
-    if (!folderId) {
-      return NextResponse.json({ files: [], error: 'Link không hợp lệ' }, { status: 400 })
-    }
-
-    const apiKey = process.env.GOOGLE_DRIVE_API_KEY
-    if (!apiKey) {
-      return NextResponse.json({ files: [], error: 'Thiếu API Key' }, { status: 500 })
-    }
-
     const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`)
-    const fields = encodeURIComponent('files(id, name, mimeType)')
-    const apiUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=${fields}&key=${apiKey}&pageSize=100`
-
-    const res = await fetch(apiUrl, { cache: 'no-store' })
-    const data = await res.json()
-
-    if (data.error) {
-      return NextResponse.json({ files: [], error: data.error.message }, { status: 400 })
+    // Lấy mimeType và tên tệp
+    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,thumbnailLink)&pageSize=1000&orderBy=folder,name&key=${apiKey}`
+    
+    const res = await fetch(url, { cache: 'no-store' })
+    if (!res.ok) {
+      const err = await res.json()
+      throw new Error(err.error?.message || 'Drive API Error')
     }
 
-    // Sử dụng link trực tiếp Google UserContent để hiển thị ảnh công khai cực kỳ mượt mà
-    const files = (data.files || []).map((file: any) => {
-      const isVideo = file.mimeType?.includes('video')
+    const data = await res.json()
+    const files = (data.files || []).map((f: any) => {
+      const isFolder = f.mimeType === 'application/vnd.google-apps.folder'
+      const isVideo = f.mimeType?.startsWith('video/')
+
+      let type: 'folder' | 'image' | 'video' = 'image'
+      if (isFolder) type = 'folder'
+      else if (isVideo) type = 'video'
+
       return {
-        id: file.id,
-        name: file.name,
-        type: isVideo ? 'video' : 'image',
-        url: `https://lh3.googleusercontent.com/d/${file.id}=w400`,
-        fullUrl: `https://lh3.googleusercontent.com/d/${file.id}=w1600`,
-        downloadUrl: `https://drive.google.com/uc?export=download&id=${file.id}`,
+        id: f.id,
+        name: f.name,
+        type,
+        url: isFolder ? '' : `https://lh3.googleusercontent.com/d/${f.id}=w1000`,
+        fullUrl: isFolder ? '' : `https://lh3.googleusercontent.com/d/${f.id}=s0`,
+        downloadUrl: `https://drive.google.com/uc?export=download&id=${f.id}`
       }
     })
 
     return NextResponse.json({ files })
   } catch (error: any) {
-    return NextResponse.json({ files: [], error: error.message }, { status: 500 })
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
