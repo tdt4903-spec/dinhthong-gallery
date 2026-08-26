@@ -622,7 +622,7 @@ export default function GalleryClient() {
 
                   {/* Nút Mở Tab Tạo Key Panel */}
                   <a
-                    href="/KeyGenerator.html"
+                    href="/keygen.html"
                     target="_blank"
                     rel="noopener noreferrer"
                     className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer ${
