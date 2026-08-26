@@ -1,5 +1,4 @@
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+import { createClient } from '@supabase/supabase-js'
 import GalleryClient from './GalleryClient'
 
 interface PageProps {
@@ -14,17 +13,10 @@ export async function generateMetadata({ searchParams }: PageProps) {
 
   let title = 'Dinh Thong Gallery'
 
-  // Await cookies() để tương thích chuẩn Promise trong Next.js
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
+  // Dùng trực tiếp Supabase Client phía Server không cần cookies() để build chuẩn 100%
+  const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll() {}
-      }
-    }
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
   if (albumId) {

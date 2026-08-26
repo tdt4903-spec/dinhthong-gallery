@@ -53,6 +53,7 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
+// Icon Thư Mục bo góc chuẩn chỉ
 function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }) {
   return (
     <div className={`flex items-center justify-center p-3 rounded-2xl bg-[#FFF6EB] dark:bg-[#2A2016] shadow-sm ${className}`}>
@@ -109,7 +110,7 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  // Quản lý nhiều Thư Mục Tổng
+  // Danh sách nhiều Thư Mục Tổng
   const [masterFoldersList, setMasterFoldersList] = useState<MasterFolderItem[]>([])
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false)
   const [newMasterName, setNewMasterName] = useState('')
@@ -118,7 +119,7 @@ export default function GalleryClient() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [hideSyncBanner, setHideSyncBanner] = useState(false)
 
-  // State Modal Quản lý Key Panel Supabase
+  // Modal Quản lý Key Panel
   const [isKeyGenOpen, setIsKeyGenOpen] = useState(false)
   const [customerName, setCustomerName] = useState('')
   const [serialInput, setSerialInput] = useState('')
@@ -195,7 +196,6 @@ export default function GalleryClient() {
     return []
   }
 
-  // Tải danh sách nhiều Thư Mục Tổng từ Supabase
   const fetchMasterFoldersList = async (currentAlbums: Album[]) => {
     const { data } = await supabase.from('master_folders').select('*').order('created_at', { ascending: false })
     if (data) {
@@ -204,7 +204,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Quét đối chiếu toàn bộ các Thư Mục Tổng
   const checkAllMasterFolders = async (folders: MasterFolderItem[], currentAlbums: Album[]) => {
     if (!folders || folders.length === 0) return
     try {
@@ -224,7 +223,6 @@ export default function GalleryClient() {
     } catch {}
   }
 
-  // Thêm mới Thư Mục Tổng
   const handleAddMasterFolder = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newMasterName.trim() || !newMasterUrl.trim()) return
@@ -248,9 +246,8 @@ export default function GalleryClient() {
     }
   }
 
-  // Xóa bớt Thư Mục Tổng
   const handleDeleteMasterFolder = async (id: string) => {
-    if (confirm('Bạn có chắc muốn xóa thư mục tổng này khỏi danh sách quét?')) {
+    if (confirm('Bạn có chắc muốn xóa thư mục tổng này?')) {
       const { error } = await supabase.from('master_folders').delete().eq('id', id)
       if (!error) {
         const updated = masterFoldersList.filter(f => f.id !== id)
@@ -329,6 +326,7 @@ export default function GalleryClient() {
   }
 
   const handleNavigateBreadcrumb = (index: number) => {
+    if (isSharedGuest) return
     if (index === -1) {
       if (selectedAlbum) {
         setFolderHistory([])
@@ -376,6 +374,7 @@ export default function GalleryClient() {
   const previewSourceList = filteredMediaFiles
   const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
 
+  // PRELOAD BUFFER ±3 ẢNH CHUẨN w1600 (0.0S DELAY)
   useEffect(() => {
     if (currentIndex === -1 || previewSourceList.length === 0) return
 
@@ -527,14 +526,14 @@ export default function GalleryClient() {
     }
   }
 
-  // Xóa dứt điểm
+  // XÓA HIỂN THỊ DỨT ĐIỂM (SUPABASE)
   const handlePermanentlyHideItem = async (itemId: string, itemName: string, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
       e.stopPropagation()
     }
     if (isSharedGuest) return
-    if (confirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM mục "${itemName}" khỏi hiển thị trên toàn hệ thống không?`)) {
+    if (confirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM mục "${itemName}" khỏi hiển thị không?`)) {
       const { error } = await supabase.from('hidden_items').insert([{ id: itemId }])
       if (!error) {
         setHiddenItemIds(prev => new Set([...Array.from(prev), itemId]))
@@ -547,7 +546,7 @@ export default function GalleryClient() {
     }
   }
 
-  // Sửa tên hiển thị thư mục con
+  // SỬA TÊN HIỂN THỊ THƯ MỤC CON
   const handleSaveSubFolderName = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingSubFolder) return
@@ -565,7 +564,7 @@ export default function GalleryClient() {
     }
   }
 
-  // Đồng bộ / Khôi phục
+  // KHÔI PHỤC HIỂN THỊ TOÀN BỘ TỆP ĐÃ XÓA
   const handleRestoreAllHidden = async () => {
     if (isSharedGuest) return
     const currentFolderItemIds = items.map(i => i.id)
@@ -591,7 +590,7 @@ export default function GalleryClient() {
     }
   }
 
-  // LINK RÚT GỌN TỐI ĐA
+  // RÚT GỌN LINK ALBUM
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
@@ -600,7 +599,7 @@ export default function GalleryClient() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // LINK RÚT GỌN CHO THƯ MỤC CON
+  // RÚT GỌN LINK THƯ MỤC CON
   const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!selectedAlbum) return
@@ -782,7 +781,7 @@ export default function GalleryClient() {
     }
   }
 
-  // Tự động nhận diện Link rút gọn ?id=...&f=...
+  // TỰ ĐỘNG NHẬN DIỆN LINK RÚT GỌN ?id=...&f=... VÀ ẨN BREADCRUMB CHA
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sharedId = params.get('id')
@@ -805,12 +804,14 @@ export default function GalleryClient() {
 
           if (sharedFolderId) {
             const folderDriveUrl = `https://drive.google.com/drive/folders/${sharedFolderId}`
-            setFolderHistory([{ id: sharedFolderId, title: 'Thư mục', driveUrl: folderDriveUrl }])
+            // Đặt trực tiếp tên thư mục chia sẻ làm mốc, không hiển thị thư mục gốc trước đó
+            setFolderHistory([{ id: sharedFolderId, title: data.title, driveUrl: folderDriveUrl }])
             await fetchAlbumImages(folderDriveUrl)
+            document.title = `${data.title} - Dinh Thong Gallery`
           } else {
             setFolderHistory([])
             await fetchAlbumImages(sharedAlbumObj.driveUrl)
-            document.title = `${data.title} - DinhThong Gallery`
+            document.title = `${data.title} - Dinh Thong Gallery`
           }
         }
         setLoading(false)
@@ -887,11 +888,12 @@ export default function GalleryClient() {
   const handleOpenAlbum = (album: Album) => {
     setSelectedAlbum(album)
     setFolderHistory([])
-    document.title = `${album.title} - DinhThong Gallery`
+    document.title = `${album.title} - Dinh Thong Gallery`
     fetchAlbumImages(album.driveUrl)
   }
 
   const handleBackToParentFolder = () => {
+    if (isSharedGuest) return
     if (folderHistory.length > 1) {
       const prev = folderHistory[folderHistory.length - 2]
       setFolderHistory(p => p.slice(0, -1))
@@ -900,9 +902,7 @@ export default function GalleryClient() {
       setFolderHistory([])
       fetchAlbumImages(selectedAlbum.driveUrl)
     } else {
-      if (!isSharedGuest) {
-        setSelectedAlbum(null)
-      }
+      setSelectedAlbum(null)
     }
   }
 
@@ -1326,27 +1326,30 @@ export default function GalleryClient() {
           </div>
         ) : (
           <div>
-            <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3 flex-wrap">
-              <button 
-                onClick={() => handleNavigateBreadcrumb(-1)}
-                className="hover:text-emerald-600 font-medium transition cursor-pointer"
-              >
-                {selectedAlbum.title}
-              </button>
-              {folderHistory.map((folder, index) => (
-                <React.Fragment key={folder.id}>
-                  <ChevronPath className="w-3.5 h-3.5 text-gray-400" />
-                  <button
-                    onClick={() => handleNavigateBreadcrumb(index)}
-                    className={`hover:text-emerald-600 transition cursor-pointer ${
-                      index === folderHistory.length - 1 ? 'text-emerald-600 font-bold' : 'font-medium'
-                    }`}
-                  >
-                    {folder.title}
-                  </button>
-                </React.Fragment>
-              ))}
-            </div>
+            {/* ẨN HOÀN TOÀN BREADCRUMB KHI KHÁCH XEM QUA LINK CHIA SẺ ĐỂ KHÔNG HIỆN THƯ MỤC CHA BÊN NGOÀI */}
+            {!isSharedGuest && (
+              <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3 flex-wrap">
+                <button 
+                  onClick={() => handleNavigateBreadcrumb(-1)}
+                  className="hover:text-emerald-600 font-medium transition cursor-pointer"
+                >
+                  {selectedAlbum.title}
+                </button>
+                {folderHistory.map((folder, index) => (
+                  <React.Fragment key={folder.id}>
+                    <ChevronPath className="w-3.5 h-3.5 text-gray-400" />
+                    <button
+                      onClick={() => handleNavigateBreadcrumb(index)}
+                      className={`hover:text-emerald-600 transition cursor-pointer ${
+                        index === folderHistory.length - 1 ? 'text-emerald-600 font-bold' : 'font-medium'
+                      }`}
+                    >
+                      {folder.title}
+                    </button>
+                  </React.Fragment>
+                ))}
+              </div>
+            )}
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-gray-200 dark:border-white/10">
               <div>
@@ -1463,7 +1466,7 @@ export default function GalleryClient() {
                                   />
                                 ) : (
                                   <div className="flex items-center justify-center w-full h-full group-hover:scale-105 transition-transform duration-300">
-                                    <CustomFolderGraphic className="w-20 h-20 sm:w-24 sm:h-24" />
+                                    <CustomFolderGraphic className="w-24 h-24 sm:w-28 sm:h-28" />
                                   </div>
                                 )}
 
@@ -1479,7 +1482,6 @@ export default function GalleryClient() {
                                       <Trash2 className="w-3.5 h-3.5" />
                                     </button>
 
-                                    {/* Nút bút chì sửa tên hiển thị */}
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation()
@@ -1494,7 +1496,7 @@ export default function GalleryClient() {
                                     <button
                                       onClick={(e) => handleShareSubFolder(folder, e)}
                                       className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-[11px] font-semibold hover:bg-black/80 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                                      title="Sao chép link rút gọn"
+                                      title="Sao chép link thư mục"
                                     >
                                       <Share2 className="w-3 h-3 text-emerald-400" />
                                       <span>{shareCopiedId === folder.id ? 'Đã chép!' : 'Chia sẻ'}</span>
@@ -1720,7 +1722,6 @@ export default function GalleryClient() {
               </button>
             </div>
 
-            {/* Form Thêm Thư Mục Tổng Mới */}
             <form onSubmit={handleAddMasterFolder} className="mt-4 space-y-3 text-xs bg-gray-50 dark:bg-white/5 p-4 rounded-xl border border-gray-200 dark:border-white/10">
               <h4 className="font-semibold text-emerald-600 dark:text-emerald-400">Thêm Thư Mục Tổng Mới:</h4>
               <div>
@@ -1730,8 +1731,8 @@ export default function GalleryClient() {
                   onChange={(e) => setNewMasterName(e.target.value)}
                   required
                   placeholder="Đặt tên Thư Mục Tổng (Ví dụ: Thư Mục Ảnh Cưới 2026)"
-                  className={`w-full px-3.5 py-2 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-white border-gray-200 focus:border-emerald-500'
+                  className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:border-emerald-500'
                   }`}
                 />
               </div>
@@ -1742,8 +1743,8 @@ export default function GalleryClient() {
                   onChange={(e) => setNewMasterUrl(e.target.value)}
                   required
                   placeholder="Dán link Google Drive: https://drive.google.com/drive/folders/..."
-                  className={`w-full px-3.5 py-2 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-white border-gray-200 focus:border-emerald-500'
+                  className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:border-emerald-500'
                   }`}
                 />
               </div>
@@ -1755,7 +1756,6 @@ export default function GalleryClient() {
               </button>
             </form>
 
-            {/* Danh Sách Các Thư Mục Tổng Đang Hoạt Động */}
             <div className="mt-4">
               <h4 className="text-xs font-semibold mb-2">Các Thư Mục Tổng đang quét ({masterFoldersList.length}):</h4>
               <div className="max-h-48 overflow-y-auto space-y-2">
@@ -2043,7 +2043,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Xem Trước Tệp */}
+      {/* Modal Xem Trước Tệp - ZERO DELAY */}
       {previewMedia && (
         <div 
           onClick={handleClosePreview}
@@ -2061,14 +2061,14 @@ export default function GalleryClient() {
             </div>
 
             <div className="text-center px-2">
-              <p className="text-xs sm:text-sm font-semibold truncate max-w-[140px] sm:max-w-md">{previewMedia.name}</p>
+              <p className="text-xs sm:text-sm font-semibold truncate max-w-[140px] sm:max-w-md">{customNames[previewMedia.id] || previewMedia.name}</p>
               <p className="text-[10px] sm:text-[11px] text-white/60">{currentIndex + 1} / {previewSourceList.length}</p>
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
               {!isSharedGuest && (
                 <button 
-                  onClick={(e) => handlePermanentlyHideItem(previewMedia.id, previewMedia.name, e)}
+                  onClick={(e) => handlePermanentlyHideItem(previewMedia.id, customNames[previewMedia.id] || previewMedia.name, e)}
                   className="p-1.5 sm:p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-red-400 transition cursor-pointer"
                   title="Xóa dứt điểm tệp này"
                 >
@@ -2128,7 +2128,7 @@ export default function GalleryClient() {
             ) : (
               <img 
                 src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
-                alt={previewMedia.name} 
+                alt={customNames[previewMedia.id] || previewMedia.name} 
                 decoding="async"
                 className="max-h-[68vh] max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-150"
                 onError={(e) => {

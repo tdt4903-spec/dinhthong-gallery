@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     const data = await res.json()
     const rawFiles = data.files || []
 
-    // Quét song song để lấy ảnh bìa cho các thư mục con có chứa ảnh
+    // Quét song song lấy ảnh đầu tiên làm cover cho các thư mục con có ảnh
     const files = await Promise.all(rawFiles.map(async (f: any) => {
       const isFolder = f.mimeType === 'application/vnd.google-apps.folder'
       const isVideo = f.mimeType?.startsWith('video/')
@@ -42,7 +42,6 @@ export async function GET(request: NextRequest) {
 
       if (isFolder) {
         try {
-          // Tìm ảnh đầu tiên trực tiếp bên trong thư mục con này
           const childQuery = encodeURIComponent(`'${f.id}' in parents and mimeType contains 'image/' and trashed = false`)
           const childUrl = `https://www.googleapis.com/drive/v3/files?q=${childQuery}&fields=files(id)&pageSize=1&key=${apiKey}`
           const childRes = await fetch(childUrl, { next: { revalidate: 300 } })
@@ -59,7 +58,7 @@ export async function GET(request: NextRequest) {
         id: f.id,
         name: f.name,
         type,
-        coverUrl, // Có ảnh -> URL ảnh bìa; Không có ảnh trực tiếp -> rỗng (hiện icon thư mục)
+        coverUrl,
         url: isFolder ? '' : `https://lh3.googleusercontent.com/d/${f.id}=w1000`,
         fullUrl: isFolder ? '' : `https://lh3.googleusercontent.com/d/${f.id}=s0`,
         downloadUrl: `https://drive.google.com/uc?export=download&id=${f.id}`
