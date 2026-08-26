@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, Folder, ChevronRight as ChevronPath, Image as ImageIcon
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon
 } from 'lucide-react'
 
 interface MediaItem {
@@ -45,6 +45,35 @@ interface KeyRecord {
 
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
+
+// Component Icon Thư Mục chuẩn theo giao diện yêu cầu
+function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }) {
+  return (
+    <div className={`flex items-center justify-center p-3 rounded-2xl bg-[#FFF6EB] dark:bg-[#2A2016] shadow-sm ${className}`}>
+      <svg 
+        viewBox="0 0 100 80" 
+        className="w-full h-full drop-shadow-sm" 
+        fill="none" 
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path 
+          d="M12 18C12 11.3726 17.3726 6 24 6H38.5858C41.7684 6 44.8208 7.26428 47.0711 9.51472L53.5147 15.9583C55.765 18.2087 58.8174 19.473 62 19.473H76C82.6274 19.473 88 24.8456 88 31.473V62C88 68.6274 82.6274 74 76 74H24C17.3726 74 12 68.6274 12 62V18Z" 
+          fill="#FDE4BA" 
+          stroke="#F59E0B" 
+          strokeWidth="7" 
+          strokeLinejoin="round" 
+        />
+        <path 
+          d="M14 31H86" 
+          stroke="#F59E0B" 
+          strokeWidth="5" 
+          strokeLinecap="round" 
+          opacity="0.3" 
+        />
+      </svg>
+    </div>
+  )
+}
 
 export default function GalleryClient() {
   const router = useRouter()
@@ -211,7 +240,7 @@ export default function GalleryClient() {
     }
   }, [isKeyGenOpen])
 
-  // Lấy nội dung tệp và thư mục con từ Drive URL
+  // Lấy nội dung tệp và thư mục con từ Drive URL[cite: 1]
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
@@ -252,6 +281,7 @@ export default function GalleryClient() {
     }
   }
 
+  // Tự động kiểm tra và lấy ảnh đầu tiên làm ảnh bìa Album[cite: 1]
   useEffect(() => {
     albums.forEach(async (album) => {
       if (!album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
@@ -261,13 +291,18 @@ export default function GalleryClient() {
           const firstImage = data.files?.find((f: MediaItem) => f.type === 'image')
           if (firstImage) {
             setAlbumCovers(prev => ({ ...prev, [album.id]: firstImage.url }))
+          } else {
+            // Đánh dấu là thư mục không chứa ảnh trực tiếp
+            setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
           }
-        } catch {}
+        } catch {
+          setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
+        }
       }
     })
   }, [albums])
 
-  // Tách biệt Thư mục con và Ảnh/Video
+  // Tách biệt Thư mục con và Ảnh/Video[cite: 1]
   const subFolders = items.filter(item => item.type === 'folder')
   const mediaFiles = items.filter(item => item.type !== 'folder')
 
@@ -1022,7 +1057,9 @@ export default function GalleryClient() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5 sm:gap-6">
               {filteredAlbums.map((album) => {
-                const displayCover = album.coverUrl || albumCovers[album.id] || 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=80'
+                const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
+                const hasImageCover = Boolean(coverImage)
+
                 return (
                   <div 
                     key={album.id}
@@ -1032,18 +1069,28 @@ export default function GalleryClient() {
                   >
                     <div 
                       onClick={() => handleOpenAlbum(album)}
-                      className="h-56 sm:h-64 bg-gray-100 relative cursor-pointer overflow-hidden flex items-center justify-center"
+                      className="h-56 sm:h-64 bg-gray-50 dark:bg-[#12141a] relative cursor-pointer overflow-hidden flex items-center justify-center"
                     >
-                      <img 
-                        src={displayCover} 
-                        alt={album.title} 
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=80'
-                        }}
-                      />
+                      {hasImageCover ? (
+                        <img 
+                          src={coverImage} 
+                          alt={album.title} 
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${album.id}`
+                          }}
+                        />
+                      ) : (
+                        // THƯ MỤC KHÔNG ĐỰNG ẢNH TRỰC TIẾP -> HIỂN THỊ ICON FOLDER ĐÚNG MẪU[cite: 1]
+                        <div className="flex flex-col items-center justify-center p-6 text-center group-hover:scale-105 transition-transform duration-300">
+                          <CustomFolderGraphic className="w-20 h-20 sm:w-24 sm:h-24 mb-3" />
+                          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                            Thư mục chứa Album
+                          </span>
+                        </div>
+                      )}
                       
-                      <div className="absolute inset-0 bg-white/0 group-hover:bg-white/20 transition-all duration-300 z-10" />
+                      <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
                       <button
                         onClick={(e) => handleDeleteAlbum(album.id, e)}
@@ -1179,11 +1226,10 @@ export default function GalleryClient() {
               </div>
             ) : (
               <div className="space-y-10">
-                {/* 1. KHU VỰC THƯ MỤC CON (FOLDER) */}
+                {/* 1. KHU VỰC THƯ MỤC CON (FOLDER) VỚI ICON ĐÚNG MẪU[cite: 1] */}
                 {subFolders.length > 0 && (
                   <div>
                     <div className="flex items-center gap-2 mb-4">
-                      <Folder className="w-4 h-4 text-amber-500" />
                       <h3 className="font-semibold text-sm text-gray-800 dark:text-gray-200">
                         Thư mục con ({subFolders.length})
                       </h3>
@@ -1196,19 +1242,17 @@ export default function GalleryClient() {
                           <div
                             key={folder.id}
                             onClick={() => handleOpenSubFolder(folder)}
-                            className={`rounded-2xl border transition-all cursor-pointer group p-4 flex flex-col items-center justify-center text-center h-36 sm:h-44 ${
+                            className={`rounded-2xl border transition-all cursor-pointer group p-4 flex flex-col items-center justify-center text-center h-40 sm:h-48 ${
                               isDarkMode 
                                 ? 'bg-[#16181e] border-white/10 hover:border-amber-500/50 hover:bg-[#1e222b]' 
                                 : 'bg-white border-gray-100 shadow-sm hover:border-amber-500/40 hover:shadow-md'
                             }`}
                           >
-                            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-                              <Folder className="w-6 h-6 sm:w-8 sm:h-8 fill-amber-500/30 text-amber-500" />
-                            </div>
+                            <CustomFolderGraphic className="w-14 h-14 sm:w-16 sm:h-16 mb-2.5 group-hover:scale-110 transition-transform" />
                             <span className={`font-semibold text-xs sm:text-sm truncate w-full px-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={folder.name}>
                               {folder.name}
                             </span>
-                            <span className="text-[10px] text-gray-400 mt-1">Mở thư mục</span>
+                            <span className="text-[10px] text-gray-400 mt-1">Bấm để mở</span>
                           </div>
                         ))}
                     </div>
