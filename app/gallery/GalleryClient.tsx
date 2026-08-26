@@ -8,13 +8,13 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, Folder, ChevronRight as ChevronPath
 } from 'lucide-react'
 
 interface MediaItem {
   id: string
   name: string
-  type: 'image' | 'video'
+  type: 'image' | 'video' | 'folder'
   url: string
   fullUrl: string
   downloadUrl: string
@@ -24,6 +24,12 @@ interface Album {
   id: string
   title: string
   coverUrl: string
+  driveUrl: string
+}
+
+interface FolderBreadcrumb {
+  id: string
+  title: string
   driveUrl: string
 }
 
@@ -49,6 +55,7 @@ export default function GalleryClient() {
   const [albums, setAlbums] = useState<Album[]>([])
   
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null)
+  const [folderHistory, setFolderHistory] = useState<FolderBreadcrumb[]>([])
   const [images, setImages] = useState<MediaItem[]>([])
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
@@ -124,7 +131,6 @@ export default function GalleryClient() {
     return []
   }
 
-  // Lấy link thư mục tổng đã lưu trên Supabase
   const fetchMasterFolder = async (currentAlbums: Album[]) => {
     const { data } = await supabase.from('site_settings').select('value').eq('key', 'master_drive_folder').single()
     if (data?.value) {
@@ -133,7 +139,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Quét đối chiếu thư mục mới
   const checkNewDriveFolders = async (mUrl: string, currentAlbums: Album[]) => {
     if (!mUrl) return
     try {
@@ -147,7 +152,6 @@ export default function GalleryClient() {
     } catch {}
   }
 
-  // Lưu link thư mục tổng
   const handleSaveMasterFolder = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const { error } = await supabase.from('site_settings').upsert({
@@ -164,7 +168,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Đồng bộ thư mục mới vào web
   const handleConfirmSync = async () => {
     if (pendingSyncAlbums.length === 0) return
     setIsSyncing(true)
@@ -208,6 +211,7 @@ export default function GalleryClient() {
     }
   }, [isKeyGenOpen])
 
+  // Lấy nội dung tệp/thư mục từ Drive URL
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
@@ -227,6 +231,28 @@ export default function GalleryClient() {
     }
   }
 
+  // Mở thư mục con bên trong Album[cite: 1]
+  const handleOpenSubFolder = (folderItem: MediaItem) => {
+    const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
+    setFolderHistory(prev => [...prev, { id: folderItem.id, title: folderItem.name, driveUrl: folderDriveUrl }])
+    fetchAlbumImages(folderDriveUrl)
+  }
+
+  // Quay lại cấp thư mục trước đó bằng Breadcrumb[cite: 1]
+  const handleNavigateBreadcrumb = (index: number) => {
+    if (index === -1) {
+      // Về thư mục gốc của Album
+      if (selectedAlbum) {
+        setFolderHistory([])
+        fetchAlbumImages(selectedAlbum.driveUrl)
+      }
+    } else {
+      const target = folderHistory[index]
+      setFolderHistory(prev => prev.slice(0, index + 1))
+      fetchAlbumImages(target.driveUrl)
+    }
+  }
+
   useEffect(() => {
     albums.forEach(async (album) => {
       if (!album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
@@ -242,7 +268,9 @@ export default function GalleryClient() {
     })
   }, [albums])
 
+  // Lọc theo số sao (Folder luôn hiển thị)[cite: 1]
   const filteredImages = images.filter(img => {
+    if (img.type === 'folder') return true
     if (starFilter === 'all') return true
     const imgStar = ratings[img.id] || 0
     return imgStar === starFilter
@@ -251,7 +279,7 @@ export default function GalleryClient() {
   const totalPages = Math.ceil(filteredImages.length / itemsPerPage)
   const paginatedImages = filteredImages.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
 
-  const previewSourceList = filteredImages.length > 0 ? filteredImages : images
+  const previewSourceList = filteredImages.filter(i => i.type !== 'folder')
   const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
   
   useEffect(() => {
@@ -308,15 +336,15 @@ export default function GalleryClient() {
     setZipProgress('Chuẩn bị...')
 
     try {
-      let targetFiles = images
+      let targetFiles = images.filter(f => f.type !== 'folder')
       if (albumToDownload && albumToDownload.id !== selectedAlbum?.id) {
         const res = await fetch(`/api/drive?url=${encodeURIComponent(albumToDownload.driveUrl)}`)
         const data = await res.json()
-        targetFiles = data.files || []
+        targetFiles = (data.files || []).filter((f: any) => f.type !== 'folder')
       }
 
       if (targetFiles.length === 0) {
-        alert('Album hiện không có tệp nào để tải!')
+        alert('Không có tệp ảnh/video nào để tải!')
         setIsZipping(false)
         return
       }
@@ -376,7 +404,7 @@ export default function GalleryClient() {
       e.preventDefault()
       e.stopPropagation()
     }
-    if (downloadingId) return
+    if (downloadingId || item.type === 'folder') return
 
     setDownloadingId(item.id)
     const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
@@ -558,6 +586,7 @@ export default function GalleryClient() {
             driveUrl: data.drive_url
           }
           setSelectedAlbum(sharedAlbumObj)
+          setFolderHistory([])
           fetchAlbumImages(sharedAlbumObj.driveUrl)
           document.title = `${data.title} - DinhThong Gallery`
         }
@@ -632,8 +661,22 @@ export default function GalleryClient() {
 
   const handleOpenAlbum = (album: Album) => {
     setSelectedAlbum(album)
+    setFolderHistory([])
     document.title = `${album.title} - DinhThong Gallery`
     fetchAlbumImages(album.driveUrl)
+  }
+
+  const handleBackToParentFolder = () => {
+    if (folderHistory.length > 1) {
+      const prev = folderHistory[folderHistory.length - 2]
+      setFolderHistory(p => p.slice(0, -1))
+      fetchAlbumImages(prev.driveUrl)
+    } else if (folderHistory.length === 1 && selectedAlbum) {
+      setFolderHistory([])
+      fetchAlbumImages(selectedAlbum.driveUrl)
+    } else {
+      setSelectedAlbum(null)
+    }
   }
 
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
@@ -705,7 +748,7 @@ export default function GalleryClient() {
     localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
   }
 
-  const selectedImagesList = images.filter(img => (ratings[img.id] || 0) > 0)
+  const selectedImagesList = images.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
 
   let separator = '\n'
   if (!useNewline) {
@@ -749,14 +792,14 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-      {/* Header tối ưu cho Mobile & Desktop */}
+      {/* Header */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/90 border-white/10' : 'bg-white/90 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
           
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {selectedAlbum && !isSharedGuest && (
               <button 
-                onClick={() => setSelectedAlbum(null)}
+                onClick={handleBackToParentFolder}
                 className={`p-1.5 sm:p-2 rounded-full border transition cursor-pointer ${
                   isDarkMode ? 'border-white/10 hover:bg-white/10 text-white' : 'border-gray-200 hover:bg-gray-100 text-gray-700'
                 }`}
@@ -830,7 +873,6 @@ export default function GalleryClient() {
                     />
                   </div>
 
-                  {/* Nút Cài Đặt Thư Mục Tổng Drive */}
                   <button
                     type="button"
                     onClick={() => setIsMasterModalOpen(true)}
@@ -845,7 +887,6 @@ export default function GalleryClient() {
                     <span className="hidden sm:inline">Thư Mục Tổng</span>
                   </button>
 
-                  {/* Nút Tạo Key Panel */}
                   <button
                     type="button"
                     onClick={() => setIsKeyGenOpen(true)}
@@ -864,7 +905,7 @@ export default function GalleryClient() {
                     onClick={() => setIsModalOpen(true)}
                     className="flex items-center gap-1 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
                   >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     <span className="hidden xs:inline">Thêm album</span>
                   </button>
                 </div>
@@ -911,7 +952,7 @@ export default function GalleryClient() {
       {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
 
-        {/* ITEM BANNER HỎI ĐỒNG BỘ THƯ MỤC MỚI TỪ THƯ MỤC TỔNG */}
+        {/* BANNER ĐỒNG BỘ THƯ MỤC MỚI TỪ LINK TỔNG */}
         {!selectedAlbum && !isSharedGuest && pendingSyncAlbums.length > 0 && !hideSyncBanner && (
           <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-emerald-500/10 to-transparent border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-4 duration-300">
             <div className="flex items-center gap-3">
@@ -1053,11 +1094,36 @@ export default function GalleryClient() {
           </div>
         ) : (
           <div>
+            {/* Thanh Breadcrumb điều hướng đa cấp thư mục con[cite: 1] */}
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3 flex-wrap">
+              <button 
+                onClick={() => handleNavigateBreadcrumb(-1)}
+                className="hover:text-emerald-600 font-medium transition cursor-pointer"
+              >
+                {selectedAlbum.title}
+              </button>
+              {folderHistory.map((folder, index) => (
+                <React.Fragment key={folder.id}>
+                  <ChevronPath className="w-3.5 h-3.5 text-gray-400" />
+                  <button
+                    onClick={() => handleNavigateBreadcrumb(index)}
+                    className={`hover:text-emerald-600 transition cursor-pointer ${
+                      index === folderHistory.length - 1 ? 'text-emerald-600 font-bold' : 'font-medium'
+                    }`}
+                  >
+                    {folder.title}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
+
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-gray-200 dark:border-white/10">
               <div>
-                <h2 className="text-xl sm:text-2xl font-bold font-serif">{selectedAlbum.title}</h2>
+                <h2 className="text-xl sm:text-2xl font-bold font-serif">
+                  {folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : selectedAlbum.title}
+                </h2>
                 <p className="text-xs text-gray-400 mt-1">
-                  {loadingImages ? 'Đang tải danh sách tệp...' : `Hiển thị ${(currentPage - 1) * itemsPerPage + 1} - ${Math.min(currentPage * itemsPerPage, paginatedImages.length)} / ${images.length} tệp`}
+                  {loadingImages ? 'Đang tải danh sách tệp...' : `Hiển thị ${(currentPage - 1) * itemsPerPage + 1} - ${Math.min(currentPage * itemsPerPage, paginatedImages.length)} / ${images.length} mục`}
                 </p>
               </div>
 
@@ -1113,6 +1179,31 @@ export default function GalleryClient() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                   {paginatedImages.filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase())).map((item) => {
                     const currentStar = ratings[item.id] || 0
+                    
+                    // NẾU LÀ FOLDER CON -> Click để mở sâu tiếp[cite: 1]
+                    if (item.type === 'folder') {
+                      return (
+                        <div
+                          key={item.id}
+                          onClick={() => handleOpenSubFolder(item)}
+                          className={`rounded-xl border transition-all cursor-pointer group p-4 flex flex-col items-center justify-center text-center h-44 sm:h-56 ${
+                            isDarkMode 
+                              ? 'bg-[#16181e] border-white/10 hover:border-emerald-500/50 hover:bg-[#1c1f26]' 
+                              : 'bg-white border-gray-100 shadow-sm hover:border-emerald-500/40 hover:shadow-md'
+                          }`}
+                        >
+                          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                            <Folder className="w-8 h-8 sm:w-10 sm:h-10 fill-amber-500/30 text-amber-500" />
+                          </div>
+                          <span className={`font-semibold text-xs sm:text-sm truncate w-full px-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={item.name}>
+                            {item.name}
+                          </span>
+                          <span className="text-[10px] text-gray-400 mt-1">Thư mục con (Bấm để xem)</span>
+                        </div>
+                      )
+                    }
+
+                    // NẾU LÀ ẢNH HOẶC VIDEO
                     return (
                       <div 
                         key={item.id}
@@ -1212,7 +1303,7 @@ export default function GalleryClient() {
               </div>
               <button 
                 onClick={() => setIsMasterModalOpen(false)}
-                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition"
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
