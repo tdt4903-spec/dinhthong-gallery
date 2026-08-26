@@ -1,60 +1,62 @@
-import type { Metadata } from 'next'
-import { createClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 import GalleryClient from './GalleryClient'
 
-type Props = {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
+interface PageProps {
+  searchParams: Promise<{ id?: string; f?: string; folder?: string; folderName?: string }>
 }
 
-export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
-  const resolvedParams = await searchParams
-  const id = resolvedParams?.id as string | undefined
+export async function generateMetadata({ searchParams }: PageProps) {
+  const params = await searchParams
+  const albumId = params.id
+  const folderId = params.f || params.folder
+  const folderNameParam = params.folderName
 
-  if (!id) {
-    return {
-      title: 'Dinh Thong Gallery',
-      description: 'Xem album ảnh từ Dinh Thong Gallery.',
-    }
-  }
+  let title = 'Dinh Thong Gallery'
 
-  const supabase = createClient(
+  const cookieStore = cookies()
+  const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll() {}
+      }
+    }
   )
 
-  const { data: album } = await supabase
-    .from('albums')
-    .select('title, cover_url')
-    .eq('id', id)
-    .single()
-
-  if (!album) {
-    return {
-      title: 'Dinh Thong Gallery',
-      description: 'Xem album ảnh từ Dinh Thong Gallery.',
+  if (albumId) {
+    // Lấy tên Album chính từ Supabase
+    const { data: albumData } = await supabase.from('albums').select('title').eq('id', albumId).single()
+    if (albumData?.title) {
+      title = `${albumData.title} - Dinh Thong Gallery`
     }
   }
 
-  const title = `${album.title} - Dinh Thong Gallery`
-  const description = `Xem album ảnh ${album.title} từ Dinh Thong Gallery.`
-  const images = album.cover_url ? [album.cover_url] : []
+  if (folderId) {
+    if (folderNameParam) {
+      title = `${decodeURIComponent(folderNameParam)} - Dinh Thong Gallery`
+    } else {
+      // Nếu không có sẵn tên trong param, kiểm tra bảng custom names trên Supabase
+      const { data: customData } = await supabase.from('custom_item_names').select('custom_name').eq('id', folderId).single()
+      if (customData?.custom_name) {
+        title = `${customData.custom_name} - Dinh Thong Gallery`
+      }
+    }
+  }
 
   return {
-    title: title,
-    description: description,
+    title,
     openGraph: {
-      title: title,
-      description: description,
-      images: images,
-      siteName: 'Dinh Thong Gallery',
-      type: 'website',
+      title,
+      description: 'Khoảnh khắc Lưu giữ cảm xúc - Dinh Thong Gallery',
     },
     twitter: {
       card: 'summary_large_image',
-      title: title,
-      description: description,
-      images: images,
-    },
+      title,
+      description: 'Khoảnh khắc Lưu giữ cảm xúc - Dinh Thong Gallery',
+    }
   }
 }
 
