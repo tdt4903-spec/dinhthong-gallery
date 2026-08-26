@@ -223,26 +223,47 @@ export default function GalleryClient() {
     } catch {}
   }
 
+  // Thêm Thư Mục Tổng và TỰ ĐỘNG ĐỒNG BỘ RA TRANG CHỦ NGAY LẬP TỨC
   const handleAddMasterFolder = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newMasterName.trim() || !newMasterUrl.trim()) return
 
-    const newFolder: MasterFolderItem = {
-      id: Date.now().toString(),
-      name: newMasterName.trim(),
-      url: newMasterUrl.trim()
-    }
+    setIsSyncing(true)
+    const newId = Date.now().toString()
+    const cleanUrl = newMasterUrl.trim()
+    const cleanName = newMasterName.trim()
 
-    const { error } = await supabase.from('master_folders').insert([newFolder])
-    if (!error) {
-      const updated = [newFolder, ...masterFoldersList]
-      setMasterFoldersList(updated)
+    try {
+      // 1. Lưu vào bảng master_folders
+      const newMaster: MasterFolderItem = {
+        id: newId,
+        name: cleanName,
+        url: cleanUrl
+      }
+      await supabase.from('master_folders').insert([newMaster])
+
+      // 2. Tự động thêm Album Tổng này ra Trang Chủ (bảng albums)
+      await supabase.from('albums').insert([
+        {
+          id: newId,
+          title: cleanName,
+          drive_url: cleanUrl,
+          cover_url: ''
+        }
+      ])
+
+      // 3. Cập nhật lại giao diện và đóng modal ngay
+      await fetchAlbumsFromSupabase()
+      setMasterFoldersList(prev => [newMaster, ...prev.filter(m => m.url !== cleanUrl)])
       setNewMasterName('')
       setNewMasterUrl('')
-      checkAllMasterFolders(updated, albums)
-      alert('Đã thêm Thư Mục Tổng thành công!')
-    } else {
-      alert('Lỗi: ' + error.message)
+      setIsMasterModalOpen(false)
+      
+      alert(`Đã thêm và đồng bộ thành công Album "${cleanName}" ra trang chủ!`)
+    } catch (err: any) {
+      alert('Lỗi: ' + err.message)
+    } finally {
+      setIsSyncing(false)
     }
   }
 
@@ -807,7 +828,6 @@ export default function GalleryClient() {
 
           if (sharedFolderId) {
             const folderDriveUrl = `https://drive.google.com/drive/folders/${sharedFolderId}`
-            // Đặt trực tiếp tên thư mục chia sẻ làm mốc, không hiển thị thư mục gốc trước đó
             setFolderHistory([{ id: sharedFolderId, title: data.title, driveUrl: folderDriveUrl }])
             await fetchAlbumImages(folderDriveUrl)
             document.title = `${data.title} - Dinh Thong Gallery`
@@ -896,7 +916,7 @@ export default function GalleryClient() {
   }
 
   const handleBackToParentFolder = () => {
-    if (isSharedGuest) return // Khách xem link rút gọn không cho lùi ra ngoài
+    if (isSharedGuest) return
     if (folderHistory.length > 1) {
       const prev = folderHistory[folderHistory.length - 2]
       setFolderHistory(p => p.slice(0, -1))
@@ -1733,7 +1753,7 @@ export default function GalleryClient() {
                   value={newMasterName}
                   onChange={(e) => setNewMasterName(e.target.value)}
                   required
-                  placeholder="Đặt tên Thư Mục Tổng (Ví dụ: Thư Mục Ảnh Cưới 2026)"
+                  placeholder="Đặt tên Thư Mục Tổng (Ví dụ: ẢNH 2026)"
                   className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
                     isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
                   }`}
@@ -1747,15 +1767,15 @@ export default function GalleryClient() {
                   required
                   placeholder="Dán link Google Drive: https://drive.google.com/drive/folders/..."
                   className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:border-emerald-500'
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
                   }`}
                 />
               </div>
               <button
                 type="submit"
-                className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition"
+                className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition cursor-pointer"
               >
-                + Thêm vào danh sách quét
+                + Thêm vào danh sách quét & Tạo Album
               </button>
             </form>
 
@@ -1774,7 +1794,7 @@ export default function GalleryClient() {
                       <button
                         type="button"
                         onClick={() => handleDeleteMasterFolder(f.id)}
-                        className="p-1.5 text-gray-400 hover:text-red-500 transition"
+                        className="p-1.5 text-gray-400 hover:text-red-500 transition cursor-pointer"
                         title="Xóa Thư Mục Tổng này"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1789,7 +1809,7 @@ export default function GalleryClient() {
               <button
                 type="button"
                 onClick={() => setIsMasterModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-gray-500 hover:bg-gray-600 text-white text-xs font-semibold transition"
+                className="px-4 py-2 rounded-xl bg-gray-500 hover:bg-gray-600 text-white text-xs font-semibold transition cursor-pointer"
               >
                 Đóng
               </button>
