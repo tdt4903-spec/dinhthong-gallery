@@ -590,20 +590,20 @@ export default function GalleryClient() {
     }
   }
 
-  // RÚT GỌN LINK ALBUM
+  // RÚT GỌN LINK ALBUM DẠNG /s/12345
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
-    const shareUrl = `${window.location.origin}/gallery?id=${album.id}`
+    const shareUrl = `${window.location.origin}/s/${album.id}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(album.id)
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // RÚT GỌN LINK THƯ MỤC CON
+  // RÚT GỌN LINK THƯ MỤC CON DẠNG /s/albumId/folderId
   const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!selectedAlbum) return
-    const shareUrl = `${window.location.origin}/gallery?id=${selectedAlbum.id}&f=${folder.id}`
+    const shareUrl = `${window.location.origin}/s/${selectedAlbum.id}/${folder.id}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(folder.id)
     setTimeout(() => setShareCopiedId(null), 2500)
@@ -781,11 +781,14 @@ export default function GalleryClient() {
     }
   }
 
-  // TỰ ĐỘNG NHẬN DIỆN LINK RÚT GỌN ?id=...&f=... VÀ ẨN BREADCRUMB CHA
+  // TỰ ĐỘNG NHẬN DIỆN LINK RÚT GỌN /s/[id]/[folderId] HOẶC DẠNG QUERY
   useEffect(() => {
+    const pathParts = window.location.pathname.split('/').filter(Boolean)
+    const isShortRoute = pathParts[0] === 's'
+    
     const params = new URLSearchParams(window.location.search)
-    const sharedId = params.get('id')
-    const sharedFolderId = params.get('f') || params.get('folder')
+    const sharedId = isShortRoute ? pathParts[1] : params.get('id')
+    const sharedFolderId = isShortRoute ? pathParts[2] : (params.get('f') || params.get('folder'))
 
     if (sharedId) {
       setIsSharedGuest(true)
@@ -893,7 +896,7 @@ export default function GalleryClient() {
   }
 
   const handleBackToParentFolder = () => {
-    if (isSharedGuest) return
+    if (isSharedGuest) return // Khách xem link rút gọn không cho lùi ra ngoài
     if (folderHistory.length > 1) {
       const prev = folderHistory[folderHistory.length - 2]
       setFolderHistory(p => p.slice(0, -1))
@@ -1732,7 +1735,7 @@ export default function GalleryClient() {
                   required
                   placeholder="Đặt tên Thư Mục Tổng (Ví dụ: Thư Mục Ảnh Cưới 2026)"
                   className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:border-emerald-500'
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
                   }`}
                 />
               </div>
@@ -2043,7 +2046,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Xem Trước Tệp - ZERO DELAY */}
+      {/* Modal Xem Trước Tệp */}
       {previewMedia && (
         <div 
           onClick={handleClosePreview}
