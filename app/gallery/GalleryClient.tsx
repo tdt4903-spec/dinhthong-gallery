@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings
 } from 'lucide-react'
 
 interface MediaItem {
@@ -64,6 +64,13 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
+  // Cấu hình Thư mục Tổng và Đồng bộ
+  const [masterFolderUrl, setMasterFolderUrl] = useState('')
+  const [isMasterModalOpen, setIsMasterModalOpen] = useState(false)
+  const [pendingSyncAlbums, setPendingSyncAlbums] = useState<Album[]>([])
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [hideSyncBanner, setHideSyncBanner] = useState(false)
+
   // State Modal Quản lý Key Panel Supabase
   const [isKeyGenOpen, setIsKeyGenOpen] = useState(false)
   const [customerName, setCustomerName] = useState('')
@@ -112,10 +119,79 @@ export default function GalleryClient() {
         coverUrl: item.cover_url || ''
       }))
       setAlbums(formatted)
+      return formatted
+    }
+    return []
+  }
+
+  // Lấy link thư mục tổng đã lưu trên Supabase
+  const fetchMasterFolder = async (currentAlbums: Album[]) => {
+    const { data } = await supabase.from('site_settings').select('value').eq('key', 'master_drive_folder').single()
+    if (data?.value) {
+      setMasterFolderUrl(data.value)
+      checkNewDriveFolders(data.value, currentAlbums)
     }
   }
 
-  // Tải danh sách Key từ bảng panel_licenses trên Supabase
+  // Quét đối chiếu thư mục mới
+  const checkNewDriveFolders = async (mUrl: string, currentAlbums: Album[]) => {
+    if (!mUrl) return
+    try {
+      const res = await fetch(`/api/sync-check?masterUrl=${encodeURIComponent(mUrl)}`)
+      const data = await res.json()
+      if (data.albums && Array.isArray(data.albums)) {
+        const existingUrls = new Set(currentAlbums.map(a => a.driveUrl.trim()))
+        const newFolders = data.albums.filter((f: any) => !existingUrls.has(f.driveUrl.trim()))
+        setPendingSyncAlbums(newFolders)
+      }
+    } catch {}
+  }
+
+  // Lưu link thư mục tổng
+  const handleSaveMasterFolder = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const { error } = await supabase.from('site_settings').upsert({
+      key: 'master_drive_folder',
+      value: masterFolderUrl.trim()
+    })
+
+    if (!error) {
+      setIsMasterModalOpen(false)
+      checkNewDriveFolders(masterFolderUrl.trim(), albums)
+      alert('Đã lưu thành công Link Thư Mục Tổng!')
+    } else {
+      alert('Lỗi lưu: ' + error.message)
+    }
+  }
+
+  // Đồng bộ thư mục mới vào web
+  const handleConfirmSync = async () => {
+    if (pendingSyncAlbums.length === 0) return
+    setIsSyncing(true)
+
+    try {
+      const insertData = pendingSyncAlbums.map(f => ({
+        id: Date.now().toString() + Math.floor(Math.random() * 1000),
+        title: f.title,
+        drive_url: f.driveUrl,
+        cover_url: ''
+      }))
+
+      const { error } = await supabase.from('albums').insert(insertData)
+      if (!error) {
+        await fetchAlbumsFromSupabase()
+        setPendingSyncAlbums([])
+        alert(`Đã đồng bộ thành công ${insertData.length} album mới!`)
+      } else {
+        alert('Lỗi khi đồng bộ: ' + error.message)
+      }
+    } catch (e: any) {
+      alert('Lỗi: ' + e.message)
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
   const fetchLicenses = async () => {
     const { data, error } = await supabase
       .from('panel_licenses')
@@ -220,7 +296,6 @@ export default function GalleryClient() {
     }
   }
 
-  // TẢI VÀ NÉN 1000 ẢNH GỐC SIÊU TỐC VỚI JSZIP (16 LUỒNG SONG SONG + STORE MODE)[cite: 1]
   const handleDownloadAlbumZip = async (albumToDownload?: Album, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -296,7 +371,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Tải lẻ 1 file giữ nguyên 100% dung lượng gốc[cite: 1]
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -369,7 +443,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Thuật toán sinh Key cho Panel & Lưu trực tiếp Supabase
   const durationOptions = [
     { value: '10m', label: '10 Phút' },
     { value: '7d', label: '7 Ngày' },
@@ -437,7 +510,6 @@ export default function GalleryClient() {
     setIsSavingKey(false)
   }
 
-  // Khóa máy / Mở khóa từ xa
   const handleToggleRevoke = async (record: KeyRecord) => {
     const newStatus = record.status === 'revoked' ? 'active' : 'revoked'
     const actionName = newStatus === 'revoked' ? 'khóa máy và thu hồi quyền' : 'mở khóa lại cho'
@@ -456,7 +528,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Xóa khỏi danh sách Supabase
   const handleDeleteRecord = async (id: string) => {
     if (confirm('Bạn có chắc muốn xóa bản ghi này khỏi danh sách quản lý?')) {
       const { error } = await supabase
@@ -526,7 +597,8 @@ export default function GalleryClient() {
         }
 
         setUser(data.session.user)
-        await fetchAlbumsFromSupabase()
+        const currentAlbs = await fetchAlbumsFromSupabase()
+        fetchMasterFolder(currentAlbs)
 
         const savedRatings = localStorage.getItem('dinhthong_image_ratings')
         if (savedRatings) {
@@ -677,7 +749,7 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-      {/* Header tối ưu hoàn hảo cho Mobile & Desktop */}
+      {/* Header tối ưu cho Mobile & Desktop */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/90 border-white/10' : 'bg-white/90 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
           
@@ -750,7 +822,7 @@ export default function GalleryClient() {
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       placeholder="Tìm album..."
-                      className={`w-full pl-7 sm:pl-8 pr-2 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs border outline-none transition ${
+                      className={`w-full pl-7 sm:pl-8 pr-2 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs border outline-none transition ${
                         isDarkMode 
                           ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
                           : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-sm'
@@ -758,7 +830,22 @@ export default function GalleryClient() {
                     />
                   </div>
 
-                  {/* Nút Tạo Key Panel tự động co gọn trên mobile */}
+                  {/* Nút Cài Đặt Thư Mục Tổng Drive */}
+                  <button
+                    type="button"
+                    onClick={() => setIsMasterModalOpen(true)}
+                    className={`flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer ${
+                      isDarkMode 
+                        ? 'bg-white/10 hover:bg-white/20 border-white/15 text-emerald-400' 
+                        : 'bg-white hover:bg-gray-50 border-gray-200 text-emerald-700'
+                    }`}
+                    title="Cài đặt link Thư Mục Tổng trên Google Drive"
+                  >
+                    <Settings className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="hidden sm:inline">Thư Mục Tổng</span>
+                  </button>
+
+                  {/* Nút Tạo Key Panel */}
                   <button
                     type="button"
                     onClick={() => setIsKeyGenOpen(true)}
@@ -769,15 +856,15 @@ export default function GalleryClient() {
                     }`}
                     title="Mở bảng tạo mã kích hoạt cho Panel Retouch"
                   >
-                    <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600" />
-                    <span className="hidden sm:inline">Tạo Key Panel</span>
+                    <KeyRound className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="hidden sm:inline">Key Panel</span>
                   </button>
 
                   <button
                     onClick={() => setIsModalOpen(true)}
                     className="flex items-center gap-1 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
                   >
-                    <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <Plus className="w-3.5 h-3.5" />
                     <span className="hidden xs:inline">Thêm album</span>
                   </button>
                 </div>
@@ -823,6 +910,43 @@ export default function GalleryClient() {
 
       {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
+
+        {/* ITEM BANNER HỎI ĐỒNG BỘ THƯ MỤC MỚI TỪ THƯ MỤC TỔNG */}
+        {!selectedAlbum && !isSharedGuest && pendingSyncAlbums.length > 0 && !hideSyncBanner && (
+          <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-emerald-500/10 to-transparent border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-4 duration-300">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-emerald-500 text-white flex-shrink-0 shadow-sm">
+                <FolderSync className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                  Phát hiện {pendingSyncAlbums.length} album mới trong Thư Mục Tổng Drive!
+                </h4>
+                <p className="text-xs text-gray-600 dark:text-gray-300 mt-0.5">
+                  Bạn có muốn tự động thêm các thư mục mới này vào danh sách Album trên web không?
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-auto flex-shrink-0">
+              <button
+                onClick={handleConfirmSync}
+                disabled={isSyncing}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow transition cursor-pointer disabled:opacity-60"
+              >
+                {isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                <span>{isSyncing ? 'Đang thêm...' : 'Đồng bộ ngay'}</span>
+              </button>
+              <button
+                onClick={() => setHideSyncBanner(true)}
+                className="p-2 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-white transition cursor-pointer"
+                title="Bỏ qua"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
         
         {!selectedAlbum ? (
           <div>
@@ -1074,6 +1198,65 @@ export default function GalleryClient() {
           </div>
         )}
       </main>
+
+      {/* MODAL CÀI ĐẶT LINK THƯ MỤC TỔNG GOOGLE DRIVE */}
+      {isMasterModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <Settings className="w-5 h-5 text-emerald-500" />
+                <h3 className="font-serif font-bold text-base">Cài Đặt Thư Mục Tổng Drive</h3>
+              </div>
+              <button 
+                onClick={() => setIsMasterModalOpen(false)}
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveMasterFolder} className="mt-4 space-y-4 text-xs">
+              <div>
+                <label className="block font-medium mb-1 text-gray-600 dark:text-gray-300">
+                  Dán đường dẫn Link Thư Mục Tổng trên Google Drive:
+                </label>
+                <input 
+                  type="text" 
+                  value={masterFolderUrl}
+                  onChange={(e) => setMasterFolderUrl(e.target.value)}
+                  required
+                  placeholder="https://drive.google.com/drive/folders/..."
+                  className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
+                  }`}
+                />
+                <p className="text-[11px] text-gray-400 mt-1.5">
+                  Hệ thống sẽ chỉ tự động quét các thư mục con nằm bên trong Thư Mục Tổng này.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setIsMasterModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10 transition font-medium cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md transition cursor-pointer"
+                >
+                  Lưu cấu hình
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL TRẮNG QUẢN LÝ & TẠO KEY (SUPABASE SYNC & THU HỒI TỪ XA) */}
       {isKeyGenOpen && (
