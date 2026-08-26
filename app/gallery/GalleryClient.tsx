@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square
 } from 'lucide-react'
 
 interface MediaItem {
@@ -53,7 +53,6 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
-// Icon Thư Mục bo góc chuẩn chỉ
 function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }) {
   return (
     <div className={`flex items-center justify-center p-3 rounded-2xl bg-[#FFF6EB] dark:bg-[#2A2016] shadow-sm ${className}`}>
@@ -115,7 +114,10 @@ export default function GalleryClient() {
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false)
   const [newMasterName, setNewMasterName] = useState('')
   const [newMasterUrl, setNewMasterUrl] = useState('')
+  
+  // Quản lý duyệt đồng bộ thư mục mới từ Drive
   const [pendingSyncAlbums, setPendingSyncAlbums] = useState<Album[]>([])
+  const [selectedPendingUrls, setSelectedPendingUrls] = useState<Set<string>>(new Set())
   const [isSyncing, setIsSyncing] = useState(false)
   const [hideSyncBanner, setHideSyncBanner] = useState(false)
 
@@ -204,6 +206,7 @@ export default function GalleryClient() {
     }
   }
 
+  // Quét đối chiếu kiểm tra xem trên Drive có thư mục mới nào chưa được duyệt không
   const checkAllMasterFolders = async (folders: MasterFolderItem[], currentAlbums: Album[]) => {
     if (!folders || folders.length === 0) return
     try {
@@ -220,55 +223,36 @@ export default function GalleryClient() {
       }
 
       setPendingSyncAlbums(allNewFolders)
+      // Mặc định chọn sẵn tất cả các thư mục mới để Admin tiện duyệt
+      setSelectedPendingUrls(new Set(allNewFolders.map(a => a.driveUrl)))
     } catch {}
   }
 
-  // Thêm Thư Mục Tổng và TỰ ĐỘNG ĐỒNG BỘ RA TRANG CHỦ NGAY LẬP TỨC
   const handleAddMasterFolder = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newMasterName.trim() || !newMasterUrl.trim()) return
 
-    setIsSyncing(true)
-    const newId = Date.now().toString()
-    const cleanUrl = newMasterUrl.trim()
-    const cleanName = newMasterName.trim()
+    const newFolder: MasterFolderItem = {
+      id: Date.now().toString(),
+      name: newMasterName.trim(),
+      url: newMasterUrl.trim()
+    }
 
-    try {
-      // 1. Lưu vào bảng master_folders
-      const newMaster: MasterFolderItem = {
-        id: newId,
-        name: cleanName,
-        url: cleanUrl
-      }
-      await supabase.from('master_folders').insert([newMaster])
-
-      // 2. Tự động thêm Album Tổng này ra Trang Chủ (bảng albums)
-      await supabase.from('albums').insert([
-        {
-          id: newId,
-          title: cleanName,
-          drive_url: cleanUrl,
-          cover_url: ''
-        }
-      ])
-
-      // 3. Cập nhật lại giao diện và đóng modal ngay
-      await fetchAlbumsFromSupabase()
-      setMasterFoldersList(prev => [newMaster, ...prev.filter(m => m.url !== cleanUrl)])
+    const { error } = await supabase.from('master_folders').insert([newFolder])
+    if (!error) {
+      const updated = [newFolder, ...masterFoldersList]
+      setMasterFoldersList(updated)
       setNewMasterName('')
       setNewMasterUrl('')
-      setIsMasterModalOpen(false)
-      
-      alert(`Đã thêm và đồng bộ thành công Album "${cleanName}" ra trang chủ!`)
-    } catch (err: any) {
-      alert('Lỗi: ' + err.message)
-    } finally {
-      setIsSyncing(false)
+      checkAllMasterFolders(updated, albums)
+      alert('Đã thêm Thư Mục Tổng vào danh sách quản lý quét!')
+    } else {
+      alert('Lỗi: ' + error.message)
     }
   }
 
   const handleDeleteMasterFolder = async (id: string) => {
-    if (confirm('Bạn có chắc muốn xóa thư mục tổng này?')) {
+    if (confirm('Bạn có chắc muốn xóa thư mục tổng này khỏi danh sách quản lý?')) {
       const { error } = await supabase.from('master_folders').delete().eq('id', id)
       if (!error) {
         const updated = masterFoldersList.filter(f => f.id !== id)
@@ -277,13 +261,28 @@ export default function GalleryClient() {
     }
   }
 
-  const handleConfirmSync = async () => {
-    if (pendingSyncAlbums.length === 0) return
-    setIsSyncing(true)
+  // Chọn / Bỏ chọn từng thư mục trong hộp thoại hỏi Admin
+  const handleToggleSelectPending = (url: string) => {
+    setSelectedPendingUrls(prev => {
+      const next = new Set(prev)
+      if (next.has(url)) next.delete(url)
+      else next.add(url)
+      return next
+    })
+  }
 
+  // ADMIN XÁC NHẬN ĐỒNG BỘ CÁC THƯ MỤC ĐÃ CHỌN LÊN WEB
+  const handleConfirmSync = async () => {
+    const foldersToInsert = pendingSyncAlbums.filter(f => selectedPendingUrls.has(f.driveUrl))
+    if (foldersToInsert.length === 0) {
+      alert('Vui lòng chọn ít nhất 1 thư mục để đồng bộ sang Web Album!')
+      return
+    }
+
+    setIsSyncing(true)
     try {
-      const insertData = pendingSyncAlbums.map(f => ({
-        id: Date.now().toString() + Math.floor(Math.random() * 1000),
+      const insertData = foldersToInsert.map((f, idx) => ({
+        id: (Date.now() + idx).toString(),
         title: f.title,
         drive_url: f.driveUrl,
         cover_url: ''
@@ -292,8 +291,10 @@ export default function GalleryClient() {
       const { error } = await supabase.from('albums').insert(insertData)
       if (!error) {
         await fetchAlbumsFromSupabase()
-        setPendingSyncAlbums([])
-        alert(`Đã đồng bộ thành công ${insertData.length} album mới!`)
+        const remaining = pendingSyncAlbums.filter(f => !selectedPendingUrls.has(f.driveUrl))
+        setPendingSyncAlbums(remaining)
+        setSelectedPendingUrls(new Set(remaining.map(r => r.driveUrl)))
+        alert(`Đã đồng bộ thành công ${insertData.length} album lên web!`)
       } else {
         alert('Lỗi khi đồng bộ: ' + error.message)
       }
@@ -301,6 +302,13 @@ export default function GalleryClient() {
       alert('Lỗi: ' + e.message)
     } finally {
       setIsSyncing(false)
+    }
+  }
+
+  // BỎ QUA KHÔNG ĐỒNG BỘ
+  const handleDismissPending = () => {
+    if (confirm('Bạn có chắc muốn bỏ qua thông báo đồng bộ các thư mục này?')) {
+      setHideSyncBanner(true)
     }
   }
 
@@ -802,7 +810,7 @@ export default function GalleryClient() {
     }
   }
 
-  // TỰ ĐỘNG NHẬN DIỆN LINK RÚT GỌN /s/[id]/[folderId] HOẶC DẠNG QUERY
+  // TỰ ĐỘNG NHẬN DIỆN LINK RÚT GỌN /s/[id]/[folderId]
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
@@ -1195,38 +1203,69 @@ export default function GalleryClient() {
       {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
 
-        {/* BANNER ĐỒNG BỘ THƯ MỤC MỚI */}
+        {/* HỘP THOẠI HỎI Ý KIẾN ADMIN KHI CÓ THƯ MỤC MỚI TRÊN DRIVE */}
         {!selectedAlbum && !isSharedGuest && pendingSyncAlbums.length > 0 && !hideSyncBanner && (
-          <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-emerald-500/10 to-transparent border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-4 duration-300">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-emerald-500 text-white flex-shrink-0 shadow-sm">
-                <FolderSync className="w-5 h-5" />
+          <div className="mb-6 p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-emerald-500/10 to-transparent border border-emerald-500/30 flex flex-col gap-4 animate-in fade-in slide-in-from-top-4 duration-300 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500 text-white flex-shrink-0 shadow-sm">
+                  <FolderSync className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm sm:text-base font-bold text-emerald-600 dark:text-emerald-400">
+                    Phát hiện {pendingSyncAlbums.length} thư mục mới vừa được thêm trên Google Drive!
+                  </h4>
+                  <p className="text-xs text-gray-600 dark:text-gray-300 mt-0.5">
+                    Bạn có muốn đồng bộ các thư mục này sang Web Album ngay bây giờ không?
+                  </p>
+                </div>
               </div>
-              <div>
-                <h4 className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                  Phát hiện {pendingSyncAlbums.length} album mới trong Thư Mục Tổng Drive!
-                </h4>
-                <p className="text-xs text-gray-600 dark:text-gray-300 mt-0.5">
-                  Bạn có muốn tự động thêm các thư mục mới này vào danh sách Album trên web không?
-                </p>
-              </div>
-            </div>
 
-            <div className="flex items-center gap-2 self-end sm:self-auto flex-shrink-0">
               <button
-                onClick={handleConfirmSync}
-                disabled={isSyncing}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow transition cursor-pointer disabled:opacity-60"
-              >
-                {isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                <span>{isSyncing ? 'Vui lòng đợi...' : 'Đồng bộ ngay'}</span>
-              </button>
-              <button
-                onClick={() => setHideSyncBanner(true)}
-                className="p-2 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-white transition cursor-pointer"
+                onClick={handleDismissPending}
+                className="p-1.5 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-white transition cursor-pointer"
                 title="Bỏ qua"
               >
                 <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Danh sách các thư mục mới với Checkbox để Admin tick chọn */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-y-auto p-1">
+              {pendingSyncAlbums.map((folder) => {
+                const isChecked = selectedPendingUrls.has(folder.driveUrl)
+                return (
+                  <div 
+                    key={folder.driveUrl}
+                    onClick={() => handleToggleSelectPending(folder.driveUrl)}
+                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs cursor-pointer select-none transition ${
+                      isChecked 
+                        ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 font-semibold' 
+                        : 'bg-white/40 dark:bg-white/5 border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-400'
+                    }`}
+                  >
+                    {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-600 flex-shrink-0" /> : <Square className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                    <span className="truncate">{folder.title}</span>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Nút thao tác Đồng bộ hoặc Bỏ qua */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-emerald-500/20">
+              <button
+                onClick={handleDismissPending}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10 transition cursor-pointer"
+              >
+                Để sau / Bỏ qua
+              </button>
+              <button
+                onClick={handleConfirmSync}
+                disabled={isSyncing || selectedPendingUrls.size === 0}
+                className="flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md transition cursor-pointer disabled:opacity-50"
+              >
+                {isSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                <span>{isSyncing ? 'Đang đồng bộ...' : `Xác nhận đồng bộ (${selectedPendingUrls.size})`}</span>
               </button>
             </div>
           </div>
@@ -1349,7 +1388,6 @@ export default function GalleryClient() {
           </div>
         ) : (
           <div>
-            {/* ẨN HOÀN TOÀN BREADCRUMB KHI KHÁCH XEM QUA LINK CHIA SẺ ĐỂ KHÔNG HIỆN THƯ MỤC CHA BÊN NGOÀI */}
             {!isSharedGuest && (
               <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3 flex-wrap">
                 <button 
@@ -1775,7 +1813,7 @@ export default function GalleryClient() {
                 type="submit"
                 className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition cursor-pointer"
               >
-                + Thêm vào danh sách quét & Tạo Album
+                + Thêm vào danh sách quét
               </button>
             </form>
 
