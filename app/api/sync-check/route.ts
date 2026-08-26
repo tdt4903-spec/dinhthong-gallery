@@ -8,30 +8,32 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Chưa có Link thư mục tổng' }, { status: 400 })
   }
 
-  // Tách ID thư mục từ link Drive
+  // Tách ID thư mục từ link Google Drive
   const folderMatch = masterUrl.match(/folders\/([a-zA-Z0-9_-]+)/)
   const masterFolderId = folderMatch ? folderMatch[1] : masterUrl.trim()
+  const apiKey = process.env.GOOGLE_DRIVE_API_KEY
+
+  if (!apiKey) {
+    return NextResponse.json({ error: 'Thiếu GOOGLE_DRIVE_API_KEY trong .env' }, { status: 500 })
+  }
 
   try {
-    const res = await fetch(`https://drive.google.com/embeddedfolderview?id=${masterFolderId}#list`)
-    const html = await res.text()
+    // Quét toàn bộ thư mục con bên trong thư mục tổng
+    const query = encodeURIComponent(`'${masterFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`)
+    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)&pageSize=1000&key=${apiKey}`
 
-    // Quét toàn bộ ID và tên thư mục con trong thư mục tổng
-    const folderRegex = /\["([^"]+)",\[\],"folder","([^"]+)"/g
-    const albums: { id: string; title: string; driveUrl: string }[] = []
-    let match
-
-    while ((match = folderRegex.exec(html)) !== null) {
-      const folderId = match[1]
-      const folderName = match[2]
-      if (folderId && folderName) {
-        albums.push({
-          id: folderId,
-          title: folderName,
-          driveUrl: `https://drive.google.com/drive/folders/${folderId}`,
-        })
-      }
+    const res = await fetch(url)
+    if (!res.ok) {
+      const errData = await res.json()
+      throw new Error(errData.error?.message || 'Không thể quét thư mục từ Google Drive')
     }
+
+    const data = await res.json()
+    const albums = (data.files || []).map((f: any) => ({
+      id: f.id,
+      title: f.name,
+      driveUrl: `https://drive.google.com/drive/folders/${f.id}`,
+    }))
 
     return NextResponse.json({ albums })
   } catch (error: any) {
