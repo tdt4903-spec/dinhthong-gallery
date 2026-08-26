@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff
 } from 'lucide-react'
 
 interface MediaItem {
@@ -114,12 +114,22 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  // Danh sách Thư Mục Tổng
+  // Quản lý Thư Mục Tổng
   const [masterFoldersList, setMasterFoldersList] = useState<MasterFolderItem[]>([])
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false)
   const [newMasterName, setNewMasterName] = useState('')
   const [newMasterUrl, setNewMasterUrl] = useState('')
   const [isSyncing, setIsSyncing] = useState(false)
+
+  // Quản lý kiểm duyệt đồng bộ thư mục mới từ Drive
+  const [pendingSyncAlbums, setPendingSyncAlbums] = useState<Album[]>([])
+  const [selectedPendingUrls, setSelectedPendingUrls] = useState<Set<string>>(new Set())
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
+
+  // Quản lý danh sách ẩn / hiện chi tiết trong từng album
+  const [isManageVisibilityOpen, setIsManageVisibilityOpen] = useState(false)
+  const [tempVisibleIds, setTempVisibleIds] = useState<Set<string>>(new Set())
+  const [isSavingVisibility, setIsSavingVisibility] = useState(false)
 
   // Modal Quản lý Key Panel
   const [isKeyGenOpen, setIsKeyGenOpen] = useState(false)
@@ -202,10 +212,55 @@ export default function GalleryClient() {
     const { data } = await supabase.from('master_folders').select('*').order('created_at', { ascending: false })
     if (data) {
       setMasterFoldersList(data)
+      return data
+    }
+    return []
+  }
+
+  // Tự động quét kiểm tra xem trên Drive có thư mục nào mới chưa được đồng bộ không
+  const checkAllMasterFolders = async (folders: MasterFolderItem[], currentAlbums: Album[], isManual = false) => {
+    if (!folders || folders.length === 0) {
+      if (isManual) alert('Vui lòng thêm ít nhất 1 Thư Mục Tổng trước khi quét!')
+      return
+    }
+    setIsSyncing(true)
+    try {
+      const existingDriveIds = new Set(
+        currentAlbums.map(a => {
+          const m = a.driveUrl.match(/folders\/([a-zA-Z0-9_-]+)/)
+          return m ? m[1] : a.driveUrl.trim()
+        })
+      )
+
+      const allNewFolders: Album[] = []
+
+      for (const f of folders) {
+        const res = await fetch(`/api/sync-check?masterUrl=${encodeURIComponent(f.url)}&_t=${Date.now()}`, {
+          cache: 'no-store'
+        })
+        const data = await res.json()
+        if (data.albums && Array.isArray(data.albums)) {
+          const newOnes = data.albums.filter((alb: any) => !existingDriveIds.has(alb.id))
+          allNewFolders.push(...newOnes)
+        }
+      }
+
+      if (allNewFolders.length === 0) {
+        if (isManual) alert('Tất cả thư mục trên Drive đã được cập nhật đầy đủ!')
+      } else {
+        setPendingSyncAlbums(allNewFolders)
+        setSelectedPendingUrls(new Set(allNewFolders.map(a => a.driveUrl)))
+        // BẬT POPUP HỎI Ý KIẾN ADMIN
+        setIsSyncModalOpen(true)
+      }
+    } catch (e) {
+      console.error('Lỗi quét thư mục mới:', e)
+    } finally {
+      setIsSyncing(false)
     }
   }
 
-  // THÊM THƯ MỤC TỔNG RA TRANG CHỦ
+  // Thêm Thư Mục Tổng Lớn ra màn hình chính
   const handleAddMasterFolder = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newMasterName.trim() || !newMasterUrl.trim()) return
@@ -223,7 +278,6 @@ export default function GalleryClient() {
       }
       await supabase.from('master_folders').insert([newMaster])
 
-      // Chỉ thêm đúng Thư Mục Tổng này vào danh sách Albums ngoài trang chủ
       await supabase.from('albums').insert([
         {
           id: newId,
@@ -233,13 +287,15 @@ export default function GalleryClient() {
         }
       ])
 
-      await fetchAlbumsFromSupabase()
-      setMasterFoldersList(prev => [newMaster, ...prev.filter(m => m.url !== cleanUrl)])
+      const updatedAlbums = await fetchAlbumsFromSupabase()
+      const updatedMasters = [newMaster, ...masterFoldersList.filter(m => m.url !== cleanUrl)]
+      setMasterFoldersList(updatedMasters)
       setNewMasterName('')
       setNewMasterUrl('')
       setIsMasterModalOpen(false)
       
-      alert(`Đã thêm Thư Mục Tổng "${cleanName}" ra trang chủ!`)
+      // Quét kiểm tra thư mục con ngay sau khi thêm
+      checkAllMasterFolders(updatedMasters, updatedAlbums, false)
     } catch (err: any) {
       alert('Lỗi: ' + err.message)
     } finally {
@@ -272,7 +328,7 @@ export default function GalleryClient() {
       return
     }
 
-    if (confirm(`Tìm thấy ${childAlbumsToDelete.length} thư mục con đang bị tràn ra trang chủ. Bạn có muốn dọn dẹp để đưa chúng về đúng bên trong Thư Mục Tổng không?`)) {
+    if (confirm(`Tìm thấy ${childAlbumsToDelete.length} thư mục con đang bị tràn ra ngoài. Bạn có muốn dọn dẹp để đưa chúng về đúng bên trong Thư Mục Tổng không?`)) {
       const idsToDelete = childAlbumsToDelete.map(a => a.id)
       const { error } = await supabase.from('albums').delete().in('id', idsToDelete)
       if (!error) {
@@ -281,6 +337,56 @@ export default function GalleryClient() {
       } else {
         alert('Lỗi dọn dẹp: ' + error.message)
       }
+    }
+  }
+
+  const handleToggleSelectPending = (url: string) => {
+    setSelectedPendingUrls(prev => {
+      const next = new Set(prev)
+      if (next.has(url)) next.delete(url)
+      else next.add(url)
+      return next
+    })
+  }
+
+  const handleSelectAllPending = () => {
+    if (selectedPendingUrls.size === pendingSyncAlbums.length) {
+      setSelectedPendingUrls(new Set())
+    } else {
+      setSelectedPendingUrls(new Set(pendingSyncAlbums.map(f => f.driveUrl)))
+    }
+  }
+
+  // ADMIN XÁC NHẬN ĐỒNG BỘ CÁC THƯ MỤC ĐÃ CHỌN LÊN WEB
+  const handleConfirmSync = async () => {
+    const foldersToInsert = pendingSyncAlbums.filter(f => selectedPendingUrls.has(f.driveUrl))
+    if (foldersToInsert.length === 0) {
+      alert('Vui lòng chọn ít nhất 1 thư mục để đồng bộ!')
+      return
+    }
+
+    setIsSyncing(true)
+    try {
+      const insertData = foldersToInsert.map((f, idx) => ({
+        id: (Date.now() + idx).toString(),
+        title: f.title,
+        drive_url: f.driveUrl,
+        cover_url: ''
+      }))
+
+      const { error } = await supabase.from('albums').insert(insertData)
+      if (!error) {
+        await fetchAlbumsFromSupabase()
+        setIsSyncModalOpen(false)
+        setPendingSyncAlbums([])
+        alert(`Đã đồng bộ thành công ${insertData.length} album lên web!`)
+      } else {
+        alert('Lỗi khi đồng bộ: ' + error.message)
+      }
+    } catch (e: any) {
+      alert('Lỗi: ' + e.message)
+    } finally {
+      setIsSyncing(false)
     }
   }
 
@@ -691,29 +797,45 @@ export default function GalleryClient() {
     }
   }
 
-  // KHÔI PHỤC HIỂN THỊ TOÀN BỘ TỆP ĐÃ XÓA
-  const handleRestoreAllHidden = async () => {
-    if (isSharedGuest) return
-    const currentFolderItemIds = items.map(i => i.id)
-    const itemsToRestore = currentFolderItemIds.filter(id => hiddenItemIds.has(id))
+  // MỞ MODAL QUẢN LÝ ẨN / HIỆN DANH SÁCH CHI TIẾT
+  const handleOpenVisibilityManager = () => {
+    const visibleSet = new Set(items.map(i => i.id).filter(id => !hiddenItemIds.has(id)))
+    setTempVisibleIds(visibleSet)
+    setIsManageVisibilityOpen(true)
+  }
 
-    if (itemsToRestore.length === 0) {
-      alert('Thư mục này chưa có tệp nào bị xóa!')
-      return
-    }
+  // LƯU THAY ĐỔI ẨN / HIỆN DANH SÁCH
+  const handleSaveVisibilityChanges = async () => {
+    setIsSavingVisibility(true)
+    try {
+      const allCurrentItemIds = items.map(i => i.id)
+      const newlyHiddenIds = allCurrentItemIds.filter(id => !tempVisibleIds.has(id))
+      const newlyShownIds = allCurrentItemIds.filter(id => tempVisibleIds.has(id))
 
-    if (confirm(`Khôi phục lại ${itemsToRestore.length} mục đã bị xóa trong thư mục này?`)) {
-      const { error } = await supabase.from('hidden_items').delete().in('id', itemsToRestore)
-      if (!error) {
-        setHiddenItemIds(prev => {
-          const next = new Set(prev)
-          itemsToRestore.forEach(id => next.delete(id))
-          return next
-        })
-        alert('Đã khôi phục và đồng bộ lại toàn bộ hiển thị!')
-      } else {
-        alert('Lỗi khôi phục: ' + error.message)
+      // 1. Thêm các mục bị bỏ chọn vào hidden_items
+      if (newlyHiddenIds.length > 0) {
+        await supabase.from('hidden_items').upsert(newlyHiddenIds.map(id => ({ id })), { onConflict: 'id' })
       }
+
+      // 2. Xóa các mục được chọn lại khỏi hidden_items
+      if (newlyShownIds.length > 0) {
+        await supabase.from('hidden_items').delete().in('id', newlyShownIds)
+      }
+
+      // 3. Cập nhật state
+      setHiddenItemIds(prev => {
+        const next = new Set(prev)
+        newlyHiddenIds.forEach(id => next.add(id))
+        newlyShownIds.forEach(id => next.delete(id))
+        return next
+      })
+
+      setIsManageVisibilityOpen(false)
+      alert('Đã cập nhật trạng thái hiển thị thành công!')
+    } catch (err: any) {
+      alert('Lỗi lưu: ' + err.message)
+    } finally {
+      setIsSavingVisibility(false)
     }
   }
 
@@ -981,8 +1103,11 @@ export default function GalleryClient() {
         setUser(data.session.user)
         await fetchHiddenItemIds()
         await fetchCustomNames()
-        await fetchAlbumsFromSupabase()
-        await fetchMasterFoldersList()
+        const currentAlbs = await fetchAlbumsFromSupabase()
+        const masterFolders = await fetchMasterFoldersList()
+
+        // TỰ ĐỘNG QUÉT KIỂM TRA DRIVE KHI ADMIN ĐĂNG NHẬP VÀO TRANG
+        checkAllMasterFolders(masterFolders, currentAlbs, false)
 
         const savedRatings = localStorage.getItem('dinhthong_image_ratings')
         if (savedRatings) {
@@ -1224,19 +1349,20 @@ export default function GalleryClient() {
                     />
                   </div>
 
-                  {/* NÚT DỌN DẸP TRANG CHỦ KHI BỊ TRÀN ALBUM CON */}
+                  {/* NÚT QUÉT DRIVE CHỦ ĐỘNG */}
                   <button
                     type="button"
-                    onClick={handleCleanHomePage}
+                    onClick={() => checkAllMasterFolders(masterFoldersList, albums, true)}
+                    disabled={isSyncing}
                     className={`flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer ${
                       isDarkMode 
-                        ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-400' 
-                        : 'bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700'
+                        ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400' 
+                        : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700'
                     }`}
-                    title="Dọn dẹp các thư mục con bị tràn ngoài trang chủ"
+                    title="Kiểm tra và quét các thư mục mới trên Google Drive"
                   >
-                    <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
-                    <span className="hidden sm:inline">Dọn dẹp trang chủ</span>
+                    <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span className="hidden sm:inline">{isSyncing ? 'Đang quét...' : 'Quét Drive'}</span>
                   </button>
 
                   <button
@@ -1343,9 +1469,28 @@ export default function GalleryClient() {
 
             <div className={`w-full h-[1px] mb-8 sm:mb-12 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
-            <div className="flex items-center justify-between mb-6 sm:mb-8">
-              <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
-              <span className="text-xs text-gray-400">{filteredAlbums.length} album</span>
+            {/* TIÊU ĐỀ THƯ MỤC ALBUM VÀ NÚT DỌN DẸP BỐ CỤC MỚI */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 sm:mb-8">
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
+                <span className="text-xs text-gray-400">({filteredAlbums.length} album)</span>
+              </div>
+
+              {!isSharedGuest && (
+                <button
+                  type="button"
+                  onClick={handleCleanHomePage}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-sm self-start sm:self-auto cursor-pointer ${
+                    isDarkMode 
+                      ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-400' 
+                      : 'bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700'
+                  }`}
+                  title="Dọn dẹp các thư mục con đang bị tràn ra màn hình chính"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Dọn dẹp trang chủ</span>
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5 sm:gap-6">
@@ -1482,14 +1627,15 @@ export default function GalleryClient() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
+                {/* NÚT MỞ DANH SÁCH ẨN/HIỆN CHI TIẾT */}
                 {!isSharedGuest && (
                   <button
-                    onClick={handleRestoreAllHidden}
+                    onClick={handleOpenVisibilityManager}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition cursor-pointer"
-                    title="Khôi phục lại các file/thư mục đã bị xóa trong mục này"
+                    title="Xem danh sách tick chọn các mục ẩn / hiện trong album này"
                   >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Đồng bộ / Khôi phục hiển thị</span>
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Quản lý Ẩn / Hiện</span>
                   </button>
                 )}
 
@@ -1541,7 +1687,7 @@ export default function GalleryClient() {
               </div>
             ) : visibleItems.length === 0 ? (
               <div className="text-center py-20 text-gray-400 text-xs">
-                Thư mục này hiện đang trống.
+                Thư mục này hiện đang trống hoặc tất cả các mục đã bị ẩn.
               </div>
             ) : (
               <div className="space-y-10">
@@ -1609,7 +1755,7 @@ export default function GalleryClient() {
                                     <button
                                       onClick={(e) => handlePermanentlyHideItem(folder.id, displayName, e)}
                                       className="absolute top-2.5 right-2.5 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                                      title="Xóa dứt điểm thư mục này"
+                                      title="Ẩn thư mục này"
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
                                     </button>
@@ -1732,7 +1878,7 @@ export default function GalleryClient() {
                                   <button
                                     onClick={(e) => handlePermanentlyHideItem(item.id, displayName, e)}
                                     className="absolute top-2 left-2 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                                    title="Xóa dứt điểm tệp này"
+                                    title="Ẩn tệp này"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -1840,6 +1986,196 @@ export default function GalleryClient() {
         </div>
       )}
 
+      {/* MODAL QUẢN LÝ ẨN / HIỆN DANH SÁCH CHI TIẾT TRONG ALBUM (POPUP NỀN MỜ) */}
+      {isManageVisibilityOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-start justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-amber-500 text-white flex-shrink-0 shadow-md">
+                  <Eye className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-base sm:text-lg">Quản Lý Ẩn / Hiện Mục Trong Album</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Tick chọn để hiển thị, bỏ tick để ẩn mục khỏi web gallery.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsManageVisibilityOpen(false)}
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="my-5">
+              <div className="flex items-center justify-between text-xs px-1 mb-3">
+                <div className="space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setTempVisibleIds(new Set(items.map(i => i.id)))}
+                    className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline cursor-pointer"
+                  >
+                    Hiện tất cả
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTempVisibleIds(new Set())}
+                    className="text-red-500 font-semibold hover:underline cursor-pointer"
+                  >
+                    Ẩn tất cả
+                  </button>
+                </div>
+                <span className="text-gray-400">Đang hiển thị: {tempVisibleIds.size}/{items.length}</span>
+              </div>
+
+              <div className="space-y-2 max-h-64 overflow-y-auto p-1">
+                {items.length === 0 ? (
+                  <p className="text-center text-xs text-gray-400 py-4">Thư mục không có tệp nào.</p>
+                ) : (
+                  items.map((item) => {
+                    const isVisible = tempVisibleIds.has(item.id)
+                    const displayName = customNames[item.id] || item.name
+                    return (
+                      <div 
+                        key={item.id}
+                        onClick={() => {
+                          setTempVisibleIds(prev => {
+                            const next = new Set(prev)
+                            if (next.has(item.id)) next.delete(item.id)
+                            else next.add(item.id)
+                            return next
+                          })
+                        }}
+                        className={`flex items-center justify-between p-3 rounded-2xl border text-xs cursor-pointer select-none transition ${
+                          isVisible 
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-gray-900 dark:text-white font-medium' 
+                            : 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10 text-gray-400 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 truncate pr-2">
+                          {isVisible ? <CheckSquare className="w-4 h-4 text-emerald-600 flex-shrink-0" /> : <Square className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                          <span className="truncate">{displayName}</span>
+                        </div>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                          isVisible ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-gray-200 dark:bg-white/10 text-gray-500'
+                        }`}>
+                          {isVisible ? 'Đang hiện' : 'Đang ẩn'}
+                        </span>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-white/10">
+              <button
+                type="button"
+                onClick={() => setIsManageVisibilityOpen(false)}
+                className="px-5 py-2.5 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10 transition cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveVisibilityChanges}
+                disabled={isSavingVisibility}
+                className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md transition cursor-pointer disabled:opacity-50"
+              >
+                {isSavingVisibility ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                <span>{isSavingVisibility ? 'Đang lưu...' : 'Lưu trạng thái hiển thị'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC MỚI TỪ DRIVE */}
+      {isSyncModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-start justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-emerald-500 text-white flex-shrink-0 shadow-md">
+                  <FolderSync className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-base sm:text-lg">Kiểm Duyệt Đồng Bộ Thư Mục Mới</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Phát hiện {pendingSyncAlbums.length} thư mục mới trên Google Drive chưa có trên web.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsSyncModalOpen(false)}
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="my-5">
+              <div className="flex items-center justify-between text-xs px-1 mb-3">
+                <button
+                  type="button"
+                  onClick={handleSelectAllPending}
+                  className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline cursor-pointer"
+                >
+                  {selectedPendingUrls.size === pendingSyncAlbums.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                </button>
+                <span className="text-gray-400">Đã chọn: {selectedPendingUrls.size}/{pendingSyncAlbums.length}</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-60 overflow-y-auto p-1">
+                {pendingSyncAlbums.map((folder) => {
+                  const isChecked = selectedPendingUrls.has(folder.driveUrl)
+                  return (
+                    <div 
+                      key={folder.driveUrl}
+                      onClick={() => handleToggleSelectPending(folder.driveUrl)}
+                      className={`flex items-center gap-3 p-3 rounded-2xl border text-xs cursor-pointer select-none transition ${
+                        isChecked 
+                          ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 font-semibold shadow-sm' 
+                          : 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-400'
+                      }`}
+                    >
+                      {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-600 flex-shrink-0" /> : <Square className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                      <span className="truncate">{folder.title}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-white/10">
+              <button
+                type="button"
+                onClick={() => setIsSyncModalOpen(false)}
+                className="px-5 py-2.5 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10 transition cursor-pointer"
+              >
+                Để sau / Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSync}
+                disabled={isSyncing || selectedPendingUrls.size === 0}
+                className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md transition cursor-pointer disabled:opacity-50"
+              >
+                {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                <span>{isSyncing ? 'Đang đồng bộ...' : `Xác nhận đưa lên web (${selectedPendingUrls.size})`}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL SỬA TÊN HIỂN THỊ THƯ MỤC CON */}
       {editingSubFolder && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1874,13 +2210,13 @@ export default function GalleryClient() {
                 <button
                   type="button"
                   onClick={() => setEditingSubFolder(null)}
-                  className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10 transition font-medium"
+                  className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10 transition font-medium cursor-pointer"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md transition"
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md transition cursor-pointer"
                 >
                   Lưu tên
                 </button>
@@ -1919,7 +2255,7 @@ export default function GalleryClient() {
                   required
                   placeholder="Đặt tên Thư Mục Tổng (Ví dụ: ẢNH 2026)"
                   className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-white border-gray-200 focus:border-emerald-500'
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
                   }`}
                 />
               </div>
@@ -1931,7 +2267,7 @@ export default function GalleryClient() {
                   required
                   placeholder="Dán link Google Drive: https://drive.google.com/drive/folders/..."
                   className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:border-emerald-500'
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
                   }`}
                 />
               </div>
@@ -2257,7 +2593,7 @@ export default function GalleryClient() {
                 <button 
                   onClick={(e) => handlePermanentlyHideItem(previewMedia.id, customNames[previewMedia.id] || previewMedia.name, e)}
                   className="p-1.5 sm:p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-red-400 transition cursor-pointer"
-                  title="Xóa dứt điểm tệp này"
+                  title="Ẩn tệp này"
                 >
                   <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
                 </button>
@@ -2493,7 +2829,7 @@ export default function GalleryClient() {
               <h3 className="font-serif font-bold text-base">Thêm Album Mới Từ Google Drive</h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
-                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition"
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
