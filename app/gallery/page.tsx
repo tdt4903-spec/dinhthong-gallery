@@ -14,7 +14,8 @@ export async function generateMetadata({ searchParams }: PageProps) {
 
   let title = 'Dinh Thong Gallery'
 
-  const cookieStore = cookies()
+  // Await cookies() để tương thích chuẩn Promise trong Next.js
+  const cookieStore = await cookies()
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -27,7 +28,6 @@ export async function generateMetadata({ searchParams }: PageProps) {
   )
 
   if (albumId) {
-    // Lấy tên Album chính từ Supabase
     const { data: albumData } = await supabase.from('albums').select('title').eq('id', albumId).single()
     if (albumData?.title) {
       title = `${albumData.title} - Dinh Thong Gallery`
@@ -38,7 +38,6 @@ export async function generateMetadata({ searchParams }: PageProps) {
     if (folderNameParam) {
       title = `${decodeURIComponent(folderNameParam)} - Dinh Thong Gallery`
     } else {
-      // Nếu không có sẵn tên trong param, kiểm tra bảng custom names trên Supabase
       const { data: customData } = await supabase.from('custom_item_names').select('custom_name').eq('id', folderId).single()
       if (customData?.custom_name) {
         title = `${customData.custom_name} - Dinh Thong Gallery`
