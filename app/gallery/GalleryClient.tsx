@@ -47,7 +47,6 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
-// Component Icon Thư Mục chuẩn theo giao diện yêu cầu
 function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }) {
   return (
     <div className={`flex items-center justify-center p-3 rounded-2xl bg-[#FFF6EB] dark:bg-[#2A2016] shadow-sm ${className}`}>
@@ -101,14 +100,12 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  // Cấu hình Thư mục Tổng và Đồng bộ
   const [masterFolderUrl, setMasterFolderUrl] = useState('')
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false)
   const [pendingSyncAlbums, setPendingSyncAlbums] = useState<Album[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
   const [hideSyncBanner, setHideSyncBanner] = useState(false)
 
-  // State Modal Quản lý Key Panel Supabase
   const [isKeyGenOpen, setIsKeyGenOpen] = useState(false)
   const [customerName, setCustomerName] = useState('')
   const [serialInput, setSerialInput] = useState('')
@@ -241,7 +238,6 @@ export default function GalleryClient() {
     }
   }, [isKeyGenOpen])
 
-  // Lấy nội dung tệp và thư mục con từ Drive URL[cite: 1]
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
@@ -280,7 +276,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Tự động quét và lấy ảnh đầu tiên làm ảnh bìa cho Album chính[cite: 1]
   useEffect(() => {
     albums.forEach(async (album) => {
       if (!album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
@@ -300,7 +295,6 @@ export default function GalleryClient() {
     })
   }, [albums])
 
-  // Phân loại: Thư mục con & Hình ảnh/Video[cite: 1]
   const subFolders = items.filter(item => item.type === 'folder')
   const mediaFiles = items.filter(item => item.type !== 'folder')
 
@@ -358,27 +352,31 @@ export default function GalleryClient() {
     }
   }
 
-  const handleDownloadAlbumZip = async (albumToDownload?: Album, e?: React.MouseEvent) => {
+  // Tải ZIP cho cả Album chính lẫn Thư mục con[cite: 1]
+  const handleDownloadAlbumZip = async (targetInfo?: { title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
       e.stopPropagation()
     }
-    const targetAlbum = albumToDownload || selectedAlbum
-    if (!targetAlbum || isZipping) return
+    const currentFolder = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1] : null
+    const target = targetInfo || currentFolder || selectedAlbum
+    if (!target || isZipping) return
 
     setIsZipping(true)
     setZipProgress('Chuẩn bị...')
 
     try {
       let targetFiles = items.filter(f => f.type !== 'folder')
-      if (albumToDownload && albumToDownload.id !== selectedAlbum?.id) {
-        const res = await fetch(`/api/drive?url=${encodeURIComponent(albumToDownload.driveUrl)}`)
+      
+      // Nếu tải một thư mục con riêng biệt chưa được mở
+      if (targetInfo && targetInfo.driveUrl !== (currentFolder?.driveUrl || selectedAlbum?.driveUrl)) {
+        const res = await fetch(`/api/drive?url=${encodeURIComponent(targetInfo.driveUrl)}`)
         const data = await res.json()
         targetFiles = (data.files || []).filter((f: any) => f.type !== 'folder')
       }
 
       if (targetFiles.length === 0) {
-        alert('Không có tệp ảnh/video nào để tải!')
+        alert('Thư mục này hiện không có tệp ảnh/video nào để tải!')
         setIsZipping(false)
         return
       }
@@ -424,13 +422,30 @@ export default function GalleryClient() {
         }
       )
 
-      saveAs(zipContent, `${targetAlbum.title}.zip`)
+      saveAs(zipContent, `${target.title}.zip`)
     } catch (err: any) {
       alert('Có lỗi xảy ra khi tải album: ' + err.message)
     } finally {
       setIsZipping(false)
       setZipProgress('')
     }
+  }
+
+  // Xóa thư mục con khỏi giao diện hiện tại[cite: 1]
+  const handleDeleteSubFolder = (folderId: string, folderName: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (confirm(`Bạn có chắc muốn ẩn thư mục "${folderName}" khỏi danh sách hiển thị không?`)) {
+      setItems(prev => prev.filter(item => item.id !== folderId))
+    }
+  }
+
+  // Chia sẻ thư mục con[cite: 1]
+  const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const folderDriveUrl = `https://drive.google.com/drive/folders/${folder.id}`
+    navigator.clipboard.writeText(folderDriveUrl)
+    setShareCopiedId(folder.id)
+    setTimeout(() => setShareCopiedId(null), 2500)
   }
 
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
@@ -868,7 +883,7 @@ export default function GalleryClient() {
                 </div>
 
                 <button
-                  onClick={(e) => handleDownloadAlbumZip(selectedAlbum, e)}
+                  onClick={(e) => handleDownloadAlbumZip(undefined, e)}
                   disabled={isZipping}
                   className="flex items-center gap-1 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap disabled:opacity-60"
                   title="Nén tất cả ảnh thành file ZIP"
@@ -1124,7 +1139,7 @@ export default function GalleryClient() {
                       </div>
 
                       <button 
-                        onClick={(e) => handleDownloadAlbumZip(album, e)}
+                        onClick={(e) => handleDownloadAlbumZip({ title: album.title, driveUrl: album.driveUrl }, e)}
                         disabled={isZipping}
                         className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60"
                       >
@@ -1223,7 +1238,7 @@ export default function GalleryClient() {
               </div>
             ) : (
               <div className="space-y-10">
-                {/* 1. KHU VỰC THƯ MỤC CON: TỰ ĐỘNG PHÂN BIỆT THƯ MỤC CÓ ẢNH VÀ THƯ MỤC CHỨA ALBUM[cite: 1] */}
+                {/* 1. KHU VỰC THƯ MỤC CON ĐẦY ĐỦ NÚT XÓA, CHIA SẺ, TẢI XUỐNG[cite: 1] */}
                 {subFolders.length > 0 && (
                   <div>
                     <div className="flex items-center gap-2 mb-4">
@@ -1232,25 +1247,27 @@ export default function GalleryClient() {
                       </h3>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
                       {subFolders
                         .filter(f => f.name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map((folder) => {
                           const hasCover = Boolean(folder.coverUrl)
+                          const folderDriveUrl = `https://drive.google.com/drive/folders/${folder.id}`
 
                           return (
                             <div
                               key={folder.id}
-                              onClick={() => handleOpenSubFolder(folder)}
-                              className={`rounded-2xl overflow-hidden border transition-all cursor-pointer group flex flex-col justify-between ${
+                              className={`rounded-2xl overflow-hidden border transition-all duration-300 hover:shadow-lg group flex flex-col justify-between ${
                                 isDarkMode 
-                                  ? 'bg-[#16181e] border-white/10 hover:border-emerald-500/50 hover:bg-[#1e222b]' 
-                                  : 'bg-white border-gray-100 shadow-sm hover:border-emerald-500/40 hover:shadow-md'
+                                  ? 'bg-[#16181e] border-white/10' 
+                                  : 'bg-white border-gray-100 shadow-sm'
                               }`}
                             >
-                              {hasCover ? (
-                                /* THƯ MỤC CÓ ẢNH -> HIỂN THỊ ẢNH ĐẦU TIÊN LÀM BÌA ALBUM[cite: 1] */
-                                <div className="h-32 sm:h-36 bg-gray-100 dark:bg-gray-800 relative overflow-hidden flex items-center justify-center">
+                              <div 
+                                onClick={() => handleOpenSubFolder(folder)}
+                                className="h-44 sm:h-52 bg-gray-50 dark:bg-[#12141a] relative cursor-pointer overflow-hidden flex items-center justify-center"
+                              >
+                                {hasCover ? (
                                   <img 
                                     src={folder.coverUrl} 
                                     alt={folder.name} 
@@ -1259,24 +1276,57 @@ export default function GalleryClient() {
                                       (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${folder.id}`
                                     }}
                                   />
-                                  <span className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[9px] px-2 py-0.5 rounded flex items-center gap-1 font-medium">
-                                    <FolderIcon className="w-2.5 h-2.5 text-amber-400" /> Album
-                                  </span>
-                                </div>
-                              ) : (
-                                /* THƯ MỤC CHỈ CHỨA THƯ MỤC TIẾP THEO -> HIỂN THỊ ICON THƯ MỤC[cite: 1] */
-                                <div className="h-32 sm:h-36 bg-gray-50 dark:bg-[#14161d] flex flex-col items-center justify-center p-3">
-                                  <CustomFolderGraphic className="w-12 h-12 sm:w-14 sm:h-14 group-hover:scale-110 transition-transform" />
-                                </div>
-                              )}
+                                ) : (
+                                  <div className="flex flex-col items-center justify-center p-4 text-center group-hover:scale-105 transition-transform duration-300">
+                                    <CustomFolderGraphic className="w-16 h-16 sm:w-20 sm:h-20 mb-2" />
+                                    <span className="text-[11px] font-medium text-gray-400">
+                                      Thư mục con
+                                    </span>
+                                  </div>
+                                )}
 
-                              <div className="p-3 text-center">
-                                <span className={`font-semibold text-xs sm:text-sm truncate block ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={folder.name}>
-                                  {folder.name}
-                                </span>
-                                <span className="text-[10px] text-gray-400 mt-0.5 block">
-                                  {hasCover ? 'Xem hình ảnh' : 'Mở thư mục'}
-                                </span>
+                                <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
+
+                                {/* Nút Xóa Thư Mục Con[cite: 1] */}
+                                <button
+                                  onClick={(e) => handleDeleteSubFolder(folder.id, folder.name, e)}
+                                  className="absolute top-2.5 right-2.5 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                  title="Xóa thư mục khỏi web"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+
+                                {/* Nút Chia Sẻ Thư Mục Con[cite: 1] */}
+                                <button
+                                  onClick={(e) => handleShareSubFolder(folder, e)}
+                                  className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-[11px] font-semibold hover:bg-black/80 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                  title="Sao chép link thư mục"
+                                >
+                                  <Share2 className="w-3 h-3 text-emerald-400" />
+                                  <span>{shareCopiedId === folder.id ? 'Đã chép!' : 'Chia sẻ'}</span>
+                                </button>
+                              </div>
+
+                              <div className="p-3.5 flex items-center justify-between gap-2">
+                                <div onClick={() => handleOpenSubFolder(folder)} className="cursor-pointer truncate flex-1">
+                                  <h4 className="font-semibold text-xs sm:text-sm hover:text-emerald-600 transition-colors truncate" title={folder.name}>
+                                    {folder.name}
+                                  </h4>
+                                  <p className="text-[10px] text-gray-400 mt-0.5">
+                                    {hasCover ? 'Album ảnh' : 'Thư mục con'}
+                                  </p>
+                                </div>
+
+                                {/* Nút Tải Xuống Thư Mục Con[cite: 1] */}
+                                <button
+                                  onClick={(e) => handleDownloadAlbumZip({ title: folder.name, driveUrl: folderDriveUrl }, e)}
+                                  disabled={isZipping}
+                                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
+                                  title="Tải nén toàn bộ thư mục này"
+                                >
+                                  {isZipping ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                                  <span>Tải xuống</span>
+                                </button>
                               </div>
                             </div>
                           )
@@ -1808,7 +1858,6 @@ export default function GalleryClient() {
               </div>
             </div>
 
-            {/* Băng chuyền thumbnail */}
             <div ref={thumbnailRef} className="flex items-center gap-2 overflow-x-auto max-w-2xl px-4 py-2 scrollbar-none w-full justify-start">
               {previewSourceList.map((item) => {
                 const isActive = item.id === previewMedia.id
