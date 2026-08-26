@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, Folder, ChevronRight as ChevronPath
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, Folder, ChevronRight as ChevronPath, Image as ImageIcon
 } from 'lucide-react'
 
 interface MediaItem {
@@ -56,7 +56,7 @@ export default function GalleryClient() {
   
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null)
   const [folderHistory, setFolderHistory] = useState<FolderBreadcrumb[]>([])
-  const [images, setImages] = useState<MediaItem[]>([])
+  const [items, setItems] = useState<MediaItem[]>([])
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -211,7 +211,7 @@ export default function GalleryClient() {
     }
   }, [isKeyGenOpen])
 
-  // Lấy nội dung tệp/thư mục từ Drive URL
+  // Lấy nội dung tệp và thư mục con từ Drive URL
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
@@ -220,11 +220,11 @@ export default function GalleryClient() {
       const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}`)
       const data = await res.json()
       const files = data.files || []
-      setImages(files)
+      setItems(files)
       return files
     } catch (e) {
       console.error(e)
-      setImages([])
+      setItems([])
       return []
     } finally {
       setLoadingImages(false)
@@ -241,7 +241,6 @@ export default function GalleryClient() {
   // Quay lại cấp thư mục trước đó bằng Breadcrumb[cite: 1]
   const handleNavigateBreadcrumb = (index: number) => {
     if (index === -1) {
-      // Về thư mục gốc của Album
       if (selectedAlbum) {
         setFolderHistory([])
         fetchAlbumImages(selectedAlbum.driveUrl)
@@ -268,18 +267,20 @@ export default function GalleryClient() {
     })
   }, [albums])
 
-  // Lọc theo số sao (Folder luôn hiển thị)[cite: 1]
-  const filteredImages = images.filter(img => {
-    if (img.type === 'folder') return true
+  // PHÂN BIỆT RÕ RÀNG GIỮA THƯ MỤC CON VÀ HÌNH ẢNH/VIDEO
+  const subFolders = items.filter(item => item.type === 'folder')
+  const mediaFiles = items.filter(item => item.type !== 'folder')
+
+  const filteredMediaFiles = mediaFiles.filter(img => {
     if (starFilter === 'all') return true
     const imgStar = ratings[img.id] || 0
     return imgStar === starFilter
   })
 
-  const totalPages = Math.ceil(filteredImages.length / itemsPerPage)
-  const paginatedImages = filteredImages.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+  const totalPages = Math.ceil(filteredMediaFiles.length / itemsPerPage)
+  const paginatedImages = filteredMediaFiles.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
 
-  const previewSourceList = filteredImages.filter(i => i.type !== 'folder')
+  const previewSourceList = filteredMediaFiles
   const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
   
   useEffect(() => {
@@ -288,7 +289,7 @@ export default function GalleryClient() {
     for (let i = 1; i <= 3; i++) {
       const nextIdx = (currentIndex + i) % previewSourceList.length
       const item = previewSourceList[nextIdx]
-      if (item.type === 'image') {
+      if (item && item.type === 'image') {
         const targetUrl = item.fullUrl || item.url
         if (targetUrl && !preloadedCache.has(targetUrl)) {
           preloadedCache.add(targetUrl)
@@ -336,7 +337,7 @@ export default function GalleryClient() {
     setZipProgress('Chuẩn bị...')
 
     try {
-      let targetFiles = images.filter(f => f.type !== 'folder')
+      let targetFiles = items.filter(f => f.type !== 'folder')
       if (albumToDownload && albumToDownload.id !== selectedAlbum?.id) {
         const res = await fetch(`/api/drive?url=${encodeURIComponent(albumToDownload.driveUrl)}`)
         const data = await res.json()
@@ -748,7 +749,7 @@ export default function GalleryClient() {
     localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
   }
 
-  const selectedImagesList = images.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
+  const selectedImagesList = items.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
 
   let separator = '\n'
   if (!useNewline) {
@@ -952,7 +953,7 @@ export default function GalleryClient() {
       {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
 
-        {/* BANNER ĐỒNG BỘ THƯ MỤC MỚI TỪ LINK TỔNG */}
+        {/* BANNER ĐỒNG BỘ THƯ MỤC MỚI */}
         {!selectedAlbum && !isSharedGuest && pendingSyncAlbums.length > 0 && !hideSyncBanner && (
           <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-500/15 via-emerald-500/10 to-transparent border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-4 duration-300">
             <div className="flex items-center gap-3">
@@ -1094,7 +1095,7 @@ export default function GalleryClient() {
           </div>
         ) : (
           <div>
-            {/* Thanh Breadcrumb điều hướng đa cấp thư mục con[cite: 1] */}
+            {/* Breadcrumb điều hướng thư mục[cite: 1] */}
             <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3 flex-wrap">
               <button 
                 onClick={() => handleNavigateBreadcrumb(-1)}
@@ -1123,165 +1124,197 @@ export default function GalleryClient() {
                   {folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : selectedAlbum.title}
                 </h2>
                 <p className="text-xs text-gray-400 mt-1">
-                  {loadingImages ? 'Đang tải danh sách tệp...' : `Hiển thị ${(currentPage - 1) * itemsPerPage + 1} - ${Math.min(currentPage * itemsPerPage, paginatedImages.length)} / ${images.length} mục`}
+                  {loadingImages ? 'Đang tải danh sách...' : `${subFolders.length} thư mục, ${mediaFiles.length} hình ảnh`}
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 p-1 rounded-xl border border-gray-200 dark:border-white/10 text-xs overflow-x-auto max-w-full">
-                  <span className="px-2 py-1 font-semibold text-gray-500 text-[11px]">Lọc:</span>
-                  <button
-                    onClick={() => { setStarFilter('all'); setCurrentPage(1); }}
-                    className={`px-2.5 py-1 rounded-lg transition font-medium cursor-pointer text-[11px] ${
-                      starFilter === 'all' ? 'bg-emerald-600 text-white shadow' : 'hover:bg-gray-200 dark:hover:bg-white/10'
-                    }`}
-                  >
-                    Tất cả
-                  </button>
-                  {[0, 1, 2, 3, 4, 5].map((star) => (
+              {mediaFiles.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 p-1 rounded-xl border border-gray-200 dark:border-white/10 text-xs overflow-x-auto max-w-full">
+                    <span className="px-2 py-1 font-semibold text-gray-500 text-[11px]">Lọc:</span>
                     <button
-                      key={star}
-                      onClick={() => { setStarFilter(star); setCurrentPage(1); }}
-                      className={`px-2.5 py-1 rounded-lg transition flex items-center gap-0.5 cursor-pointer text-[11px] ${
-                        starFilter === star ? 'bg-emerald-600 text-white shadow' : 'hover:bg-gray-200 dark:hover:bg-white/10'
+                      onClick={() => { setStarFilter('all'); setCurrentPage(1); }}
+                      className={`px-2.5 py-1 rounded-lg transition font-medium cursor-pointer text-[11px] ${
+                        starFilter === 'all' ? 'bg-emerald-600 text-white shadow' : 'hover:bg-gray-200 dark:hover:bg-white/10'
                       }`}
                     >
-                      <Star className="w-3 h-3 fill-current text-emerald-400" />
-                      <span>{star}</span>
+                      Tất cả
                     </button>
-                  ))}
-                </div>
+                    {[0, 1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        onClick={() => { setStarFilter(star); setCurrentPage(1); }}
+                        className={`px-2.5 py-1 rounded-lg transition flex items-center gap-0.5 cursor-pointer text-[11px] ${
+                          starFilter === star ? 'bg-emerald-600 text-white shadow' : 'hover:bg-gray-200 dark:hover:bg-white/10'
+                        }`}
+                      >
+                        <Star className="w-3 h-3 fill-current text-emerald-400" />
+                        <span>{star}</span>
+                      </button>
+                    ))}
+                  </div>
 
-                {selectedImagesList.length > 0 && (
-                  <button
-                    onClick={handleClearAllSelections}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 transition cursor-pointer"
-                    title="Xóa tất cả đánh giá sao"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Xóa ({selectedImagesList.length})</span>
-                  </button>
-                )}
-              </div>
+                  {selectedImagesList.length > 0 && (
+                    <button
+                      onClick={handleClearAllSelections}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 transition cursor-pointer"
+                      title="Xóa tất cả đánh giá sao"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Xóa ({selectedImagesList.length})</span>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {loadingImages ? (
               <div className="flex flex-col items-center justify-center py-24 text-gray-400">
                 <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
-                <p className="text-xs">Đang quét toàn bộ tệp từ Google Drive...</p>
+                <p className="text-xs">Đang quét toàn bộ thư mục và tệp từ Google Drive...</p>
               </div>
-            ) : paginatedImages.length === 0 ? (
+            ) : items.length === 0 ? (
               <div className="text-center py-20 text-gray-400 text-xs">
-                Không tìm thấy tệp nào phù hợp với bộ lọc.
+                Thư mục này hiện đang trống.
               </div>
             ) : (
-              <div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-                  {paginatedImages.filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase())).map((item) => {
-                    const currentStar = ratings[item.id] || 0
-                    
-                    // NẾU LÀ FOLDER CON -> Click để mở sâu tiếp[cite: 1]
-                    if (item.type === 'folder') {
-                      return (
-                        <div
-                          key={item.id}
-                          onClick={() => handleOpenSubFolder(item)}
-                          className={`rounded-xl border transition-all cursor-pointer group p-4 flex flex-col items-center justify-center text-center h-44 sm:h-56 ${
-                            isDarkMode 
-                              ? 'bg-[#16181e] border-white/10 hover:border-emerald-500/50 hover:bg-[#1c1f26]' 
-                              : 'bg-white border-gray-100 shadow-sm hover:border-emerald-500/40 hover:shadow-md'
-                          }`}
-                        >
-                          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                            <Folder className="w-8 h-8 sm:w-10 sm:h-10 fill-amber-500/30 text-amber-500" />
-                          </div>
-                          <span className={`font-semibold text-xs sm:text-sm truncate w-full px-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={item.name}>
-                            {item.name}
-                          </span>
-                          <span className="text-[10px] text-gray-400 mt-1">Thư mục con (Bấm để xem)</span>
-                        </div>
-                      )
-                    }
+              <div className="space-y-10">
+                {/* 1. KHU VỰC THƯ MỤC CON (FOLDER) */}
+                {subFolders.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <Folder className="w-4 h-4 text-amber-500" />
+                      <h3 className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                        Thư mục con ({subFolders.length})
+                      </h3>
+                    </div>
 
-                    // NẾU LÀ ẢNH HOẶC VIDEO
-                    return (
-                      <div 
-                        key={item.id}
-                        className={`rounded-xl overflow-hidden border transition group relative ${
-                          isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
-                        }`}
-                      >
-                        <div 
-                          onClick={() => setPreviewMedia(item)}
-                          className="h-44 sm:h-56 bg-gray-100 relative cursor-pointer overflow-hidden flex items-center justify-center"
-                        >
-                          {item.type === 'video' ? (
-                            <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white relative">
-                              <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
-                                <Film className="w-8 h-8 sm:w-10 sm:h-10 text-emerald-400 drop-shadow-md" />
-                              </div>
-                              <span className="absolute top-2 left-2 bg-black/60 text-[9px] px-2 py-0.5 rounded flex items-center gap-1 z-20">
-                                VIDEO
-                              </span>
-                            </div>
-                          ) : (
-                            <img 
-                              src={item.url} 
-                              alt={item.name} 
-                              loading="lazy"
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                            />
-                          )}
-
-                          {currentStar > 0 && (
-                            <div className="absolute top-2 right-2 bg-emerald-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md z-20">
-                              <Star className="w-3 h-3 fill-current" />
-                              <span>{currentStar}</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="p-2.5 sm:p-3 flex items-center justify-between text-xs">
-                          <span className={`truncate font-medium text-[11px] sm:text-xs transition-colors ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={item.name}>
-                            {item.name}
-                          </span>
-                          <button 
-                            onClick={(e) => handleDownloadMedia(item, e)}
-                            disabled={downloadingId === item.id}
-                            className="p-1 text-gray-400 hover:text-emerald-600 transition cursor-pointer disabled:opacity-50 flex-shrink-0"
-                            title="Lưu tệp về máy"
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+                      {subFolders
+                        .filter(f => f.name.toLowerCase().includes(searchTerm.toLowerCase()))
+                        .map((folder) => (
+                          <div
+                            key={folder.id}
+                            onClick={() => handleOpenSubFolder(folder)}
+                            className={`rounded-2xl border transition-all cursor-pointer group p-4 flex flex-col items-center justify-center text-center h-36 sm:h-44 ${
+                              isDarkMode 
+                                ? 'bg-[#16181e] border-white/10 hover:border-amber-500/50 hover:bg-[#1e222b]' 
+                                : 'bg-white border-gray-100 shadow-sm hover:border-amber-500/40 hover:shadow-md'
+                            }`}
                           >
-                            {downloadingId === item.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-                            ) : (
-                              <Download className="w-4 h-4" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
+                            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
+                              <Folder className="w-6 h-6 sm:w-8 sm:h-8 fill-amber-500/30 text-amber-500" />
+                            </div>
+                            <span className={`font-semibold text-xs sm:text-sm truncate w-full px-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={folder.name}>
+                              {folder.name}
+                            </span>
+                            <span className="text-[10px] text-gray-400 mt-1">Mở thư mục</span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
 
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-center gap-2 mt-8 sm:mt-10">
-                    <button
-                      onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
-                      disabled={currentPage === 1}
-                      className="px-3.5 py-1.5 rounded-xl bg-gray-200 dark:bg-white/10 text-xs font-semibold disabled:opacity-40 cursor-pointer transition"
-                    >
-                      Trang trước
-                    </button>
-                    <span className="text-xs px-2 text-gray-500">
-                      {currentPage} / {totalPages}
-                    </span>
-                    <button
-                      onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
-                      disabled={currentPage === totalPages}
-                      className="px-3.5 py-1.5 rounded-xl bg-gray-200 dark:bg-white/10 text-xs font-semibold disabled:opacity-40 cursor-pointer transition"
-                    >
-                      Trang sau
-                    </button>
+                {/* 2. KHU VỰC HÌNH ẢNH & VIDEO */}
+                {mediaFiles.length > 0 && (
+                  <div>
+                    {subFolders.length > 0 && (
+                      <div className="flex items-center gap-2 mb-4">
+                        <ImageIcon className="w-4 h-4 text-emerald-500" />
+                        <h3 className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                          Hình ảnh & Video ({filteredMediaFiles.length})
+                        </h3>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                      {paginatedImages
+                        .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
+                        .map((item) => {
+                          const currentStar = ratings[item.id] || 0
+                          return (
+                            <div 
+                              key={item.id}
+                              className={`rounded-xl overflow-hidden border transition group relative ${
+                                isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
+                              }`}
+                            >
+                              <div 
+                                onClick={() => setPreviewMedia(item)}
+                                className="h-44 sm:h-56 bg-gray-100 relative cursor-pointer overflow-hidden flex items-center justify-center"
+                              >
+                                {item.type === 'video' ? (
+                                  <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white relative">
+                                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
+                                      <Film className="w-8 h-8 sm:w-10 sm:h-10 text-emerald-400 drop-shadow-md" />
+                                    </div>
+                                    <span className="absolute top-2 left-2 bg-black/60 text-[9px] px-2 py-0.5 rounded flex items-center gap-1 z-20">
+                                      VIDEO
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <img 
+                                    src={item.url} 
+                                    alt={item.name} 
+                                    loading="lazy"
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}`
+                                    }}
+                                  />
+                                )}
+
+                                {currentStar > 0 && (
+                                  <div className="absolute top-2 right-2 bg-emerald-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md z-20">
+                                    <Star className="w-3 h-3 fill-current" />
+                                    <span>{currentStar}</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="p-2.5 sm:p-3 flex items-center justify-between text-xs">
+                                <span className={`truncate font-medium text-[11px] sm:text-xs transition-colors ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={item.name}>
+                                  {item.name}
+                                </span>
+                                <button 
+                                  onClick={(e) => handleDownloadMedia(item, e)}
+                                  disabled={downloadingId === item.id}
+                                  className="p-1 text-gray-400 hover:text-emerald-600 transition cursor-pointer disabled:opacity-50 flex-shrink-0"
+                                  title="Lưu tệp về máy"
+                                >
+                                  {downloadingId === item.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
+                                  ) : (
+                                    <Download className="w-4 h-4" />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                    </div>
+
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-center gap-2 mt-8 sm:mt-10">
+                        <button
+                          onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                          disabled={currentPage === 1}
+                          className="px-3.5 py-1.5 rounded-xl bg-gray-200 dark:bg-white/10 text-xs font-semibold disabled:opacity-40 cursor-pointer transition"
+                        >
+                          Trang trước
+                        </button>
+                        <span className="text-xs px-2 text-gray-500">
+                          {currentPage} / {totalPages}
+                        </span>
+                        <button
+                          onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                          disabled={currentPage === totalPages}
+                          className="px-3.5 py-1.5 rounded-xl bg-gray-200 dark:bg-white/10 text-xs font-semibold disabled:opacity-40 cursor-pointer transition"
+                        >
+                          Trang sau
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1290,7 +1323,7 @@ export default function GalleryClient() {
         )}
       </main>
 
-      {/* MODAL CÀI ĐẶT LINK THƯ MỤC TỔNG GOOGLE DRIVE */}
+      {/* MODAL CÀI ĐẶT LINK THƯ MỤC TỔNG */}
       {isMasterModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
@@ -1303,7 +1336,7 @@ export default function GalleryClient() {
               </div>
               <button 
                 onClick={() => setIsMasterModalOpen(false)}
-                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1349,7 +1382,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL TRẮNG QUẢN LÝ & TẠO KEY (SUPABASE SYNC & THU HỒI TỪ XA) */}
+      {/* MODAL QUẢN LÝ & TẠO KEY */}
       {isKeyGenOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4">
           <div className="bg-white text-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
