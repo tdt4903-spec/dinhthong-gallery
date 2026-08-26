@@ -53,7 +53,16 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
-// Icon Thư Mục bo góc chuẩn
+// Trích xuất ID Drive thuần túy để tạo link ngắn
+const extractDriveId = (url: string) => {
+  if (!url) return ''
+  const match = url.match(/folders\/([a-zA-Z0-9_-]+)/)
+  if (match && match[1]) return match[1]
+  const matchFile = url.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  if (matchFile && matchFile[1]) return matchFile[1]
+  return url.replace(/[^a-zA-Z0-9_-]/g, '')
+}
+
 function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }) {
   return (
     <div className={`flex items-center justify-center p-3 rounded-2xl bg-[#FFF6EB] dark:bg-[#2A2016] shadow-sm ${className}`}>
@@ -95,6 +104,8 @@ export default function GalleryClient() {
   const [items, setItems] = useState<MediaItem[]>([])
   const [customNames, setCustomNames] = useState<Record<string, string>>({})
   const [hiddenItemIds, setHiddenItemIds] = useState<Set<string>>(new Set())
+  const [knownFolderIds, setKnownFolderIds] = useState<Set<string>>(new Set())
+
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -122,8 +133,8 @@ export default function GalleryClient() {
   const [isSyncing, setIsSyncing] = useState(false)
 
   // Quản lý kiểm duyệt đồng bộ thư mục mới từ Drive
-  const [pendingSyncAlbums, setPendingSyncAlbums] = useState<Album[]>([])
-  const [selectedPendingUrls, setSelectedPendingUrls] = useState<Set<string>>(new Set())
+  const [pendingSyncAlbums, setPendingSyncAlbums] = useState<{ id: string; name: string; driveUrl: string; parentTitle: string }[]>([])
+  const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(new Set())
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
 
   // Quản lý danh sách ẩn / hiện chi tiết trong từng album
@@ -180,6 +191,18 @@ export default function GalleryClient() {
     } catch {}
   }
 
+  const fetchKnownFolderIds = async () => {
+    try {
+      const { data } = await supabase.from('known_drive_folders').select('id')
+      if (data) {
+        const idSet = new Set(data.map((item: any) => item.id))
+        setKnownFolderIds(idSet)
+        return idSet
+      }
+    } catch {}
+    return new Set<string>()
+  }
+
   const fetchCustomNames = async () => {
     try {
       const { data } = await supabase.from('custom_item_names').select('id, custom_name')
@@ -217,15 +240,16 @@ export default function GalleryClient() {
     return []
   }
 
-  // Quét đối chiếu kiểm tra xem trong các Thư Mục Tổng có thư mục con nào mới tải lên Drive không
-  const checkAllMasterFolders = async (folders: MasterFolderItem[], isManual = false) => {
+  // Quét đối chiếu kiểm tra thư mục con mới trên Drive
+  const checkAllMasterFolders = async (folders: MasterFolderItem[], isManual = false, existingKnown?: Set<string>) => {
     if (!folders || folders.length === 0) {
       if (isManual) alert('Vui lòng thêm ít nhất 1 Thư Mục Tổng trước khi quét!')
       return
     }
     setIsSyncing(true)
     try {
-      const allNewFolders: Album[] = []
+      const currentKnown = existingKnown || knownFolderIds
+      const newFoldersDetected: { id: string; name: string; driveUrl: string; parentTitle: string }[] = []
 
       for (const f of folders) {
         const res = await fetch(`/api/sync-check?masterUrl=${encodeURIComponent(f.url)}&_t=${Date.now()}`, {
@@ -233,19 +257,24 @@ export default function GalleryClient() {
         })
         const data = await res.json()
         if (data.albums && Array.isArray(data.albums)) {
-          // Lấy tất cả các thư mục con tìm thấy trong Thư Mục Tổng này
-          allNewFolders.push(...data.albums)
+          const unapproved = data.albums.filter((sub: any) => !currentKnown.has(sub.id))
+          unapproved.forEach((sub: any) => {
+            newFoldersDetected.push({
+              id: sub.id,
+              name: sub.title,
+              driveUrl: sub.driveUrl,
+              parentTitle: f.name
+            })
+          })
         }
       }
 
-      if (allNewFolders.length === 0) {
-        if (isManual) alert('Tất cả thư mục bên trong Drive đã được quét xong!')
+      if (newFoldersDetected.length === 0) {
+        if (isManual) alert('Tất cả thư mục trên Drive đã được đồng bộ đầy đủ!')
       } else {
-        setPendingSyncAlbums(allNewFolders)
-        setSelectedPendingUrls(new Set(allNewFolders.map(a => a.driveUrl)))
-        if (isManual) {
-          setIsSyncModalOpen(true)
-        }
+        setPendingSyncAlbums(newFoldersDetected)
+        setSelectedPendingIds(new Set(newFoldersDetected.map(a => a.id)))
+        setIsSyncModalOpen(true)
       }
     } catch (e) {
       console.error('Lỗi quét thư mục mới:', e)
@@ -254,41 +283,41 @@ export default function GalleryClient() {
     }
   }
 
-  // THÊM THƯ MỤC TỔNG RA TRANG CHỦ
+  // THÊM THƯ MỤC TỔNG RA TRANG CHỦ (TỰ ĐỘNG GÁN ID RÚT GỌN TỪ DRIVE ID)
   const handleAddMasterFolder = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newMasterName.trim() || !newMasterUrl.trim()) return
 
     setIsSyncing(true)
-    const newId = Date.now().toString()
     const cleanUrl = newMasterUrl.trim()
     const cleanName = newMasterName.trim()
+    const cleanId = extractDriveId(cleanUrl) || Date.now().toString()
 
     try {
       const newMaster: MasterFolderItem = {
-        id: newId,
+        id: cleanId,
         name: cleanName,
         url: cleanUrl
       }
-      await supabase.from('master_folders').insert([newMaster])
+      await supabase.from('master_folders').upsert([newMaster], { onConflict: 'id' })
 
-      // Chỉ thêm đúng Thư Mục Tổng này vào danh sách Albums ngoài trang chủ
-      await supabase.from('albums').insert([
+      await supabase.from('albums').upsert([
         {
-          id: newId,
+          id: cleanId,
           title: cleanName,
           drive_url: cleanUrl,
           cover_url: ''
         }
-      ])
+      ], { onConflict: 'id' })
 
       await fetchAlbumsFromSupabase()
-      setMasterFoldersList(prev => [newMaster, ...prev.filter(m => m.url !== cleanUrl)])
+      const updatedMasters = [newMaster, ...masterFoldersList.filter(m => m.id !== cleanId)]
+      setMasterFoldersList(updatedMasters)
       setNewMasterName('')
       setNewMasterUrl('')
       setIsMasterModalOpen(false)
       
-      alert(`Đã thêm Thư Mục Tổng "${cleanName}" ra trang chủ!`)
+      checkAllMasterFolders(updatedMasters, false)
     } catch (err: any) {
       alert('Lỗi: ' + err.message)
     } finally {
@@ -306,7 +335,7 @@ export default function GalleryClient() {
     }
   }
 
-  // DỌN DẸP TRANG CHỦ: CHỈ GIỮ LẠI ĐÚNG CÁC THƯ MỤC TỔNG (ẢNH 2026,...)
+  // DỌN DẸP TRANG CHỦ: CHỈ GIỮ LẠI ĐÚNG CÁC THƯ MỤC TỔNG
   const handleCleanHomePage = async () => {
     if (masterFoldersList.length === 0) {
       alert('Chưa có Thư Mục Tổng nào trong cấu hình!')
@@ -314,7 +343,8 @@ export default function GalleryClient() {
     }
 
     const masterUrls = new Set(masterFoldersList.map(m => m.url.trim()))
-    const childAlbumsToDelete = albums.filter(a => !masterUrls.has(a.driveUrl.trim()))
+    const masterIds = new Set(masterFoldersList.map(m => m.id))
+    const childAlbumsToDelete = albums.filter(a => !masterUrls.has(a.driveUrl.trim()) && !masterIds.has(a.id))
 
     if (childAlbumsToDelete.length === 0) {
       alert('Trang chủ đã chuẩn xác, chỉ chứa các Thư Mục Tổng!')
@@ -333,57 +363,65 @@ export default function GalleryClient() {
     }
   }
 
-  const handleToggleSelectPending = (url: string) => {
-    setSelectedPendingUrls(prev => {
+  const handleToggleSelectPending = (id: string) => {
+    setSelectedPendingIds(prev => {
       const next = new Set(prev)
-      if (next.has(url)) next.delete(url)
-      else next.add(url)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
 
   const handleSelectAllPending = () => {
-    if (selectedPendingUrls.size === pendingSyncAlbums.length) {
-      setSelectedPendingUrls(new Set())
+    if (selectedPendingIds.size === pendingSyncAlbums.length) {
+      setSelectedPendingIds(new Set())
     } else {
-      setSelectedPendingUrls(new Set(pendingSyncAlbums.map(f => f.driveUrl)))
+      setSelectedPendingIds(new Set(pendingSyncAlbums.map(f => f.id)))
     }
   }
 
-  // XÁC NHẬN DUYỆT THƯ MỤC CON: ĐẢM BẢO CHÚNG NẰM TRONG THƯ MỤC TỔNG, KHÔNG ĐẨY RA NGOÀI
+  // XÁC NHẬN DUYỆT THƯ MỤC CON
   const handleConfirmSync = async () => {
     setIsSyncing(true)
     try {
-      // Bỏ ẩn cho các thư mục được tick chọn (nếu trước đó bị ẩn)
-      const unhideIds = pendingSyncAlbums
-        .filter(f => selectedPendingUrls.has(f.driveUrl))
-        .map(f => f.id)
+      const recordsToInsert = pendingSyncAlbums.map(f => ({
+        id: f.id,
+        name: f.name,
+        parent_url: f.driveUrl
+      }))
+      await supabase.from('known_drive_folders').upsert(recordsToInsert, { onConflict: 'id' })
 
-      if (unhideIds.length > 0) {
-        await supabase.from('hidden_items').delete().in('id', unhideIds)
-        setHiddenItemIds(prev => {
-          const next = new Set(prev)
-          unhideIds.forEach(id => next.delete(id))
-          return next
-        })
-      }
-
-      // Ẩn các thư mục không được tick chọn
-      const hideIds = pendingSyncAlbums
-        .filter(f => !selectedPendingUrls.has(f.driveUrl))
+      const unselectedIds = pendingSyncAlbums
+        .filter(f => !selectedPendingIds.has(f.id))
         .map(f => ({ id: f.id }))
 
-      if (hideIds.length > 0) {
-        await supabase.from('hidden_items').upsert(hideIds, { onConflict: 'id' })
+      if (unselectedIds.length > 0) {
+        await supabase.from('hidden_items').upsert(unselectedIds, { onConflict: 'id' })
         setHiddenItemIds(prev => {
           const next = new Set(prev)
-          hideIds.forEach(h => next.add(h.id))
+          unselectedIds.forEach(h => next.add(h.id))
           return next
         })
       }
 
+      const selectedIds = Array.from(selectedPendingIds)
+      if (selectedIds.length > 0) {
+        await supabase.from('hidden_items').delete().in('id', selectedIds)
+        setHiddenItemIds(prev => {
+          const next = new Set(prev)
+          selectedIds.forEach(id => next.delete(id))
+          return next
+        })
+      }
+
+      setKnownFolderIds(prev => {
+        const next = new Set(prev)
+        recordsToInsert.forEach(r => next.add(r.id))
+        return next
+      })
+
       setIsSyncModalOpen(false)
-      alert(`Đã hoàn tất đồng bộ! Các thư mục này nằm đầy đủ bên trong Thư Mục Tổng.`)
+      alert(`Đã đồng bộ thành công ${selectedPendingIds.size} thư mục vào bên trong Thư Mục Tổng!`)
     } catch (e: any) {
       alert('Lỗi khi đồng bộ: ' + e.message)
     } finally {
@@ -407,7 +445,7 @@ export default function GalleryClient() {
     }
   }, [isKeyGenOpen])
 
-  // LẤY DỮ LIỆU BÊN TRONG ALBUM (ẢNH VÀ THƯ MỤC CON NẰM GỌN BÊN TRONG)
+  // LẤY DỮ LIỆU BÊN TRONG ALBUM (ẢNH VÀ THƯ MỤC CON)
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
@@ -837,20 +875,22 @@ export default function GalleryClient() {
     }
   }
 
-  // RÚT GỌN LINK ALBUM DẠNG /s/12345
+  // TỐI ƯU CỐ ĐỊNH LINK RÚT GỌN CHO ALBUM: /s/[DRIVE_ID]
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
-    const shareUrl = `${window.location.origin}/s/${album.id}`
+    const cleanId = extractDriveId(album.driveUrl) || album.id
+    const shareUrl = `${window.location.origin}/s/${cleanId}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(album.id)
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // RÚT GỌN LINK THƯ MỤC CON DẠNG /s/albumId/folderId
+  // TỐI ƯU CỐ ĐỊNH LINK RÚT GỌN CHO THƯ MỤC CON: /s/[ALBUM_ID]/[FOLDER_ID]
   const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!selectedAlbum) return
-    const shareUrl = `${window.location.origin}/s/${selectedAlbum.id}/${folder.id}`
+    const cleanAlbumId = extractDriveId(selectedAlbum.driveUrl) || selectedAlbum.id
+    const shareUrl = `${window.location.origin}/s/${cleanAlbumId}/${folder.id}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(folder.id)
     setTimeout(() => setShareCopiedId(null), 2500)
@@ -1028,7 +1068,7 @@ export default function GalleryClient() {
     }
   }
 
-  // TỰ ĐỘNG NHẬN DIỆN LINK RÚT GỌN /s/[id]/[folderId]
+  // TỰ ĐỘNG NHẬN DIỆN CẢ LINK SIÊU NGẮN /s/[id]/[folderId] LẪN QUERY CŨ
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
@@ -1042,7 +1082,8 @@ export default function GalleryClient() {
       fetchHiddenItemIds()
       fetchCustomNames()
 
-      supabase.from('albums').select('*').eq('id', sharedId).single().then(async ({ data }) => {
+      // Hỗ trợ tìm album theo cả id hoặc drive_url
+      supabase.from('albums').select('*').or(`id.eq.${sharedId},drive_url.ilike.%${sharedId}%`).single().then(async ({ data }) => {
         if (data) {
           const sharedAlbumObj: Album = {
             id: data.id,
@@ -1061,6 +1102,23 @@ export default function GalleryClient() {
             setFolderHistory([])
             await fetchAlbumImages(sharedAlbumObj.driveUrl)
             document.title = `${data.title} - Dinh Thong Gallery`
+          }
+        } else {
+          // Fallback nếu link chia sẻ là thẳng folder ID Drive
+          const folderDriveUrl = `https://drive.google.com/drive/folders/${sharedId}`
+          const fallbackAlbum: Album = {
+            id: sharedId,
+            title: 'Album Chia Sẻ',
+            coverUrl: '',
+            driveUrl: folderDriveUrl
+          }
+          setSelectedAlbum(fallbackAlbum)
+          if (sharedFolderId) {
+            const subFolderUrl = `https://drive.google.com/drive/folders/${sharedFolderId}`
+            setFolderHistory([{ id: sharedFolderId, title: 'Thư mục', driveUrl: subFolderUrl }])
+            await fetchAlbumImages(subFolderUrl)
+          } else {
+            await fetchAlbumImages(folderDriveUrl)
           }
         }
         setLoading(false)
@@ -1100,12 +1158,13 @@ export default function GalleryClient() {
 
         setUser(data.session.user)
         await fetchHiddenItemIds()
+        const knownSet = await fetchKnownFolderIds()
         await fetchCustomNames()
         await fetchAlbumsFromSupabase()
         const masterFolders = await fetchMasterFoldersList()
 
-        // TỰ ĐỘNG QUÉT KIỂM TRA DRIVE KHI ADMIN ĐĂNG NHẬP
-        checkAllMasterFolders(masterFolders, false)
+        // TỰ ĐỘNG QUÉT KIỂM TRA DRIVE KHI ADMIN MỞ TRANG
+        checkAllMasterFolders(masterFolders, false, knownSet)
 
         const savedRatings = localStorage.getItem('dinhthong_image_ratings')
         if (savedRatings) {
@@ -1165,9 +1224,9 @@ export default function GalleryClient() {
     const urlInput = form.elements.namedItem('url') as HTMLInputElement
     const coverInput = form.elements.namedItem('cover') as HTMLInputElement
 
-    const newId = Date.now().toString()
     const newTitle = titleInput.value
     const newDriveUrl = urlInput.value
+    const newId = extractDriveId(newDriveUrl) || Date.now().toString()
     const newCoverUrl = coverInput.value.trim() ? formatDriveCoverUrl(coverInput.value) : ''
 
     const { error } = await supabase.from('albums').insert([
@@ -1178,7 +1237,7 @@ export default function GalleryClient() {
       await fetchAlbumsFromSupabase()
       setIsModalOpen(false)
     } else {
-      alert('Lỗi khi thêm album lên database: ' + error.message)
+      alert('Lỗi khi thêm album: ' + error.message)
     }
   }
 
@@ -1467,7 +1526,7 @@ export default function GalleryClient() {
 
             <div className={`w-full h-[1px] mb-8 sm:mb-12 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
-            {/* TIÊU ĐỀ THƯ MỤC ALBUM VÀ NÚT DỌN DẸP BỐ CỤC MỚI */}
+            {/* TIÊU ĐỀ THƯ MỤC ALBUM VÀ NÚT DỌN DẸP BỐ CỤC */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 sm:mb-8">
               <div className="flex items-center gap-3">
                 <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
@@ -2093,7 +2152,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* POPUP KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC CON TỪ DRIVE (NỀN MỜ - KHÔNG CHÈN RA MÀN HÌNH CHÍNH) */}
+      {/* POPUP KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC CON MỚI TRÊN DRIVE */}
       {isSyncModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
@@ -2105,9 +2164,9 @@ export default function GalleryClient() {
                   <FolderSync className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="font-serif font-bold text-base sm:text-lg">Kiểm Duyệt Thư Mục Con Trong Drive</h3>
+                  <h3 className="font-serif font-bold text-base sm:text-lg">Kiểm Duyệt Thư Mục Mới Từ Drive</h3>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Quét thấy {pendingSyncAlbums.length} thư mục con bên trong Thư Mục Tổng.
+                    Phát hiện {pendingSyncAlbums.length} thư mục mới vừa được thêm trên Google Drive.
                   </p>
                 </div>
               </div>
@@ -2126,26 +2185,29 @@ export default function GalleryClient() {
                   onClick={handleSelectAllPending}
                   className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline cursor-pointer"
                 >
-                  {selectedPendingUrls.size === pendingSyncAlbums.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                  {selectedPendingIds.size === pendingSyncAlbums.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
                 </button>
-                <span className="text-gray-400">Cho phép hiển thị: {selectedPendingUrls.size}/{pendingSyncAlbums.length}</span>
+                <span className="text-gray-400">Cho phép hiển thị: {selectedPendingIds.size}/{pendingSyncAlbums.length}</span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-60 overflow-y-auto p-1">
                 {pendingSyncAlbums.map((folder) => {
-                  const isChecked = selectedPendingUrls.has(folder.driveUrl)
+                  const isChecked = selectedPendingIds.has(folder.id)
                   return (
                     <div 
-                      key={folder.driveUrl}
-                      onClick={() => handleToggleSelectPending(folder.driveUrl)}
-                      className={`flex items-center gap-3 p-3 rounded-2xl border text-xs cursor-pointer select-none transition ${
+                      key={folder.id}
+                      onClick={() => handleToggleSelectPending(folder.id)}
+                      className={`flex flex-col p-3 rounded-2xl border text-xs cursor-pointer select-none transition ${
                         isChecked 
                           ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 font-semibold shadow-sm' 
                           : 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-400'
                       }`}
                     >
-                      {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-600 flex-shrink-0" /> : <Square className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-                      <span className="truncate">{folder.title}</span>
+                      <div className="flex items-center gap-2.5">
+                        {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-600 flex-shrink-0" /> : <Square className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                        <span className="truncate">{folder.name}</span>
+                      </div>
+                      <span className="text-[10px] text-gray-400 mt-1 pl-6">Nằm trong: {folder.parentTitle}</span>
                     </div>
                   )
                 })}
@@ -2167,7 +2229,7 @@ export default function GalleryClient() {
                 className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md transition cursor-pointer disabled:opacity-50"
               >
                 {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                <span>{isSyncing ? 'Đang cập nhật...' : `Xác nhận hiển thị (${selectedPendingUrls.size})`}</span>
+                <span>{isSyncing ? 'Đang cập nhật...' : `Xác nhận hiển thị (${selectedPendingIds.size})`}</span>
               </button>
             </div>
           </div>
