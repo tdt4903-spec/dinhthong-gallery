@@ -27,6 +27,16 @@ interface Album {
   driveUrl: string
 }
 
+interface KeyRecord {
+  id: string
+  customerName: string
+  serial: string
+  durationLabel: string
+  key: string
+  createdAt: string
+}
+
+const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
 export default function GalleryClient() {
@@ -52,6 +62,14 @@ export default function GalleryClient() {
   const [copied, setCopied] = useState(false)
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
+
+  // State cho Modal Tạo Key Panel
+  const [isKeyGenOpen, setIsKeyGenOpen] = useState(false)
+  const [customerName, setCustomerName] = useState('')
+  const [serialInput, setSerialInput] = useState('')
+  const [duration, setDuration] = useState('LIFE')
+  const [generatedKey, setGeneratedKey] = useState('')
+  const [keyRecords, setKeyRecords] = useState<KeyRecord[]>([])
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [isZipping, setIsZipping] = useState(false)
@@ -129,6 +147,16 @@ export default function GalleryClient() {
     })
   }, [albums])
 
+  // Tải danh sách Key đã lưu trong LocalStorage
+  useEffect(() => {
+    const savedKeys = localStorage.getItem('dinhthong_key_history')
+    if (savedKeys) {
+      try {
+        setKeyRecords(JSON.parse(savedKeys))
+      } catch (e) {}
+    }
+  }, [])
+
   const filteredImages = images.filter(img => {
     if (starFilter === 'all') return true
     const imgStar = ratings[img.id] || 0
@@ -183,7 +211,7 @@ export default function GalleryClient() {
     }
   }
 
-  // TẢI VÀ NÉN 1000 ẢNH GỐC SIÊU TỐC VỚI JSZIP (16 LUỒNG SONG SONG + STORE MODE)
+  // TẢI VÀ NÉN 1000 ẢNH GỐC SIÊU TỐC VỚI JSZIP (16 LUỒNG SONG SONG + STORE MODE)[cite: 2]
   const handleDownloadAlbumZip = async (albumToDownload?: Album, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -213,7 +241,6 @@ export default function GalleryClient() {
       const total = targetFiles.length
       let completedCount = 0
 
-      // Chạy 16 luồng tải song song tối đa
       const CONCURRENCY_LIMIT = 16
       const fetchRawOriginalFile = async (file: MediaItem) => {
         const ext = file.type === 'video' ? 'mp4' : 'jpg'
@@ -223,7 +250,6 @@ export default function GalleryClient() {
           const res = await fetch(`/api/download?url=${encodeURIComponent(file.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
           if (res.ok) {
             const blob = await res.blob()
-            // STORE mode: Không tốn CPU nén lại các file ảnh/video đã nén sẵn, giữ nguyên dung lượng gốc
             zip.file(exactFileName, blob, { compression: 'STORE' })
           }
         } catch (err) {
@@ -261,7 +287,7 @@ export default function GalleryClient() {
     }
   }
 
-  // Tải lẻ 1 file giữ nguyên 100% dung lượng gốc
+  // Tải lẻ 1 file giữ nguyên 100% dung lượng gốc[cite: 2]
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -495,6 +521,79 @@ export default function GalleryClient() {
     localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
   }
 
+  // Thuật toán sinh Key cho Panel
+  const durationOptions = [
+    { value: '10m', label: '10 Phút' },
+    { value: '7d', label: '7 Ngày' },
+    { value: '1M', label: '1 Tháng' },
+    { value: '3M', label: '3 Tháng' },
+    { value: '6M', label: '6 Tháng' },
+    { value: '1Y', label: '1 Năm' },
+    { value: 'LIFE', label: 'Vĩnh viễn' },
+  ]
+
+  const handleGenerateKey = () => {
+    if (!customerName.trim()) {
+      alert('Vui lòng nhập Tên khách hàng!')
+      return
+    }
+    if (!serialInput.trim()) {
+      alert('Vui lòng nhập Số Seri máy của khách!')
+      return
+    }
+
+    let expireTimestamp = 0
+    const now = Date.now()
+
+    switch (duration) {
+      case '10m': expireTimestamp = now + 10 * 60 * 1000; break;
+      case '7d': expireTimestamp = now + 7 * 24 * 60 * 60 * 1000; break;
+      case '1M': expireTimestamp = now + 30 * 24 * 60 * 60 * 1000; break;
+      case '3M': expireTimestamp = now + 90 * 24 * 60 * 60 * 1000; break;
+      case '6M': expireTimestamp = now + 180 * 24 * 60 * 60 * 1000; break;
+      case '1Y': expireTimestamp = now + 365 * 24 * 60 * 60 * 1000; break;
+      case 'LIFE': expireTimestamp = 9999999999999; break;
+    }
+
+    const payload = `${serialInput.trim().toUpperCase()}|${expireTimestamp}|${SECRET_SALT}`
+    let hash = 0
+    for (let i = 0; i < payload.length; i++) {
+      hash = ((hash << 5) - hash) + payload.charCodeAt(i)
+      hash |= 0
+    }
+    const signature = Math.abs(hash).toString(36).toUpperCase()
+    const finalKey = `DT-${expireTimestamp.toString(36).toUpperCase()}-${signature}`
+    setGeneratedKey(finalKey)
+
+    const durLabel = durationOptions.find((d) => d.value === duration)?.label || duration
+    const newRecord: KeyRecord = {
+      id: Date.now().toString(),
+      customerName: customerName.trim(),
+      serial: serialInput.trim().toUpperCase(),
+      durationLabel: durLabel,
+      key: finalKey,
+      createdAt: new Date().toLocaleDateString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }),
+    }
+
+    const updated = [newRecord, ...keyRecords]
+    setKeyRecords(updated)
+    localStorage.setItem('dinhthong_key_history', JSON.stringify(updated))
+  }
+
+  const handleDeleteRecord = (id: string) => {
+    if (confirm('Bạn có chắc muốn xóa máy này khỏi lịch sử đã lưu?')) {
+      const updated = keyRecords.filter((r) => r.id !== id)
+      setKeyRecords(updated)
+      localStorage.setItem('dinhthong_key_history', JSON.stringify(updated))
+    }
+  }
+
   const selectedImagesList = images.filter(img => (ratings[img.id] || 0) > 0)
 
   let separator = '\n'
@@ -507,8 +606,8 @@ export default function GalleryClient() {
   }
   const textFileContent = selectedImagesList.map(img => img.name).join(separator)
 
-  const handleCopyText = () => {
-    navigator.clipboard.writeText(textFileContent)
+  const handleCopyText = (text: string) => {
+    navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -620,21 +719,20 @@ export default function GalleryClient() {
                     />
                   </div>
 
-                  {/* Nút Mở Tab Tạo Key Panel */}
-                  <a
-                    href="/keygen.html"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  {/* Nút Mở Popup Trắng Tạo Key Panel Ngay Trên Trang */}
+                  <button
+                    type="button"
+                    onClick={() => setIsKeyGenOpen(true)}
                     className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer ${
                       isDarkMode 
                         ? 'bg-white/10 hover:bg-white/20 border-white/15 text-emerald-400' 
-                        : 'bg-gray-100 hover:bg-gray-200 border-gray-200 text-emerald-700'
+                        : 'bg-white hover:bg-gray-50 border-gray-200 text-emerald-700'
                     }`}
                     title="Mở bảng tạo mã kích hoạt cho Panel Retouch"
                   >
-                    <KeyRound className="w-4 h-4" />
+                    <KeyRound className="w-4 h-4 text-emerald-600" />
                     <span className="hidden sm:inline">Tạo Key Panel</span>
-                  </a>
+                  </button>
 
                   <button
                     onClick={() => setIsModalOpen(true)}
@@ -938,6 +1036,166 @@ export default function GalleryClient() {
         )}
       </main>
 
+      {/* MODAL TRẮNG TẠO KEY CHO PANEL RETOUCH (LIGHT THEME) */}
+      {isKeyGenOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white text-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+              <div>
+                <h2 className="text-base font-bold text-gray-900 tracking-tight">DINH THONG RETOUCH</h2>
+                <p className="text-xs text-gray-500">Quản lý & Cấp mã kích hoạt bản quyền Panel</p>
+              </div>
+              <button
+                onClick={() => setIsKeyGenOpen(false)}
+                className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-all cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">Tên khách hàng</label>
+                  <input
+                    type="text"
+                    placeholder="Ví dụ: Nguyễn Văn A"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 focus:bg-white transition-all text-gray-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1.5">Số Seri máy khách</label>
+                  <input
+                    type="text"
+                    placeholder="Dán DT-XXXXXX gửi từ máy khách"
+                    value={serialInput}
+                    onChange={(e) => setSerialInput(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 focus:bg-white transition-all text-gray-900"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-2">Thời hạn kích hoạt</label>
+                <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+                  {durationOptions.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setDuration(opt.value)}
+                      className={`py-1.5 px-2 text-[11px] font-medium rounded-lg border transition-all cursor-pointer ${
+                        duration === opt.value
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Mã kích hoạt</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    placeholder="Bấm 'Tạo Key' để sinh mã"
+                    value={generatedKey}
+                    className="flex-1 text-xs px-3.5 py-2.5 bg-gray-100 text-gray-900 font-mono font-medium border border-gray-200 rounded-lg outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerateKey}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all cursor-pointer"
+                  >
+                    Tạo Key
+                  </button>
+                  {generatedKey && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(generatedKey)}
+                      className="px-3.5 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg border border-gray-200 transition-all cursor-pointer"
+                    >
+                      Copy
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-gray-100">
+                <div className="flex items-center justify-between mb-2.5">
+                  <h3 className="text-xs font-bold text-gray-900">Danh sách máy đang sử dụng ({keyRecords.length})</h3>
+                  {keyRecords.length > 0 && (
+                    <span className="text-[10px] text-gray-400">Lưu tự động vào trình duyệt</span>
+                  )}
+                </div>
+
+                <div className="border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                  <div className="max-h-48 overflow-y-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-gray-50 text-gray-500 font-semibold sticky top-0 border-b border-gray-100">
+                        <tr>
+                          <th className="py-2.5 px-3">Khách hàng</th>
+                          <th className="py-2.5 px-3">Seri Máy</th>
+                          <th className="py-2.5 px-3">Gói</th>
+                          <th className="py-2.5 px-3">Mã Key</th>
+                          <th className="py-2.5 px-3 text-right">Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {keyRecords.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-6 text-center text-gray-400 text-xs">
+                              Chưa có máy nào được tạo key.
+                            </td>
+                          </tr>
+                        ) : (
+                          keyRecords.map((r) => (
+                            <tr key={r.id} className="hover:bg-gray-50/80 transition-colors">
+                              <td className="py-2.5 px-3 font-medium text-gray-900">{r.customerName}</td>
+                              <td className="py-2.5 px-3 font-mono text-gray-500 text-[11px]">{r.serial}</td>
+                              <td className="py-2.5 px-3">
+                                <span className="inline-block px-2 py-0.5 text-[10px] font-semibold bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
+                                  {r.durationLabel}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 font-mono text-[11px] text-gray-600 truncate max-w-[130px]" title={r.key}>
+                                {r.key}
+                              </td>
+                              <td className="py-2.5 px-3 text-right space-x-2">
+                                <button
+                                  onClick={() => handleCopyText(r.key)}
+                                  className="text-[11px] text-emerald-600 hover:underline font-medium cursor-pointer"
+                                >
+                                  Copy
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteRecord(r.id)}
+                                  className="text-[11px] text-red-500 hover:underline font-medium cursor-pointer"
+                                >
+                                  Xóa
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Chỉnh Sửa Album */}
       {editingAlbum && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1228,7 +1486,7 @@ export default function GalleryClient() {
                 </button>
 
                 <button
-                  onClick={handleCopyText}
+                  onClick={() => handleCopyText(textFileContent)}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow transition cursor-pointer"
                 >
                   {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
