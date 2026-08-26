@@ -99,6 +99,10 @@ export default function GalleryClient() {
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
+  // State chọn nhiều (Batch Selection)
+  const [selectedAlbumIds, setSelectedAlbumIds] = useState<Set<string>>(new Set())
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
+
   const [albumCovers, setAlbumCovers] = useState<Record<string, string>>({})
   const [editingAlbum, setEditingAlbum] = useState<Album | null>(null)
   const [editingSubFolder, setEditingSubFolder] = useState<{ id: string; name: string } | null>(null)
@@ -110,7 +114,7 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  // Danh sách nhiều Thư Mục Tổng
+  // Quản lý Thư Mục Tổng
   const [masterFoldersList, setMasterFoldersList] = useState<MasterFolderItem[]>([])
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false)
   const [newMasterName, setNewMasterName] = useState('')
@@ -259,7 +263,6 @@ export default function GalleryClient() {
     const cleanName = newMasterName.trim()
 
     try {
-      // 1. Lưu vào bảng master_folders
       const newMaster: MasterFolderItem = {
         id: newId,
         name: cleanName,
@@ -267,7 +270,6 @@ export default function GalleryClient() {
       }
       await supabase.from('master_folders').insert([newMaster])
 
-      // 2. Tự động thêm Album Tổng Lớn này ra Trang Chủ
       await supabase.from('albums').insert([
         {
           id: newId,
@@ -277,7 +279,6 @@ export default function GalleryClient() {
         }
       ])
 
-      // 3. Cập nhật lại giao diện và đóng modal
       await fetchAlbumsFromSupabase()
       setMasterFoldersList(prev => [newMaster, ...prev.filter(m => m.url !== cleanUrl)])
       setNewMasterName('')
@@ -319,7 +320,6 @@ export default function GalleryClient() {
     }
   }
 
-  // ADMIN XÁC NHẬN ĐỒNG BỘ CÁC THƯ MỤC ĐÃ CHỌN LÊN WEB
   const handleConfirmSync = async () => {
     const foldersToInsert = pendingSyncAlbums.filter(f => selectedPendingUrls.has(f.driveUrl))
     if (foldersToInsert.length === 0) {
@@ -372,6 +372,7 @@ export default function GalleryClient() {
     setLoadingImages(true)
     setStarFilter('all')
     setCurrentPage(1)
+    setSelectedItemIds(new Set())
     try {
       const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}`)
       const data = await res.json()
@@ -443,7 +444,7 @@ export default function GalleryClient() {
   const previewSourceList = filteredMediaFiles
   const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
 
-  // PRELOAD BUFFER ±3 ẢNH CHUẨN w1600 (0.0S DELAY)
+  // PRELOAD BUFFER ±3 ẢNH CHUẨN w1600
   useEffect(() => {
     if (currentIndex === -1 || previewSourceList.length === 0) return
 
@@ -516,6 +517,134 @@ export default function GalleryClient() {
 
     touchStartX.current = null
     touchEndX.current = null
+  }
+
+  // XỬ LÝ CHECKBOX CHỌN NHIỀU ALBUM TRANG CHỦ
+  const handleToggleSelectAlbum = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedAlbumIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // XỬ LÝ CHECKBOX CHỌN NHIỀU FILE / THƯ MỤC CON
+  const handleToggleSelectItem = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedItemIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // TẢI ZIP HÀNG LOẠT CÁC MỤC ĐANG ĐƯỢC CHỌN (BATCH DOWNLOAD)
+  const handleBatchDownload = async () => {
+    if (isZipping) return
+
+    if (!selectedAlbum) {
+      // Đang ở trang chủ: Tải các album được chọn
+      const selectedAlbumsList = albums.filter(a => selectedAlbumIds.has(a.id))
+      if (selectedAlbumsList.length === 0) return
+
+      setIsZipping(true)
+      setZipProgress('Chuẩn bị tải...')
+      try {
+        for (const alb of selectedAlbumsList) {
+          await handleDownloadAlbumZip({ title: alb.title, driveUrl: alb.driveUrl })
+        }
+        setSelectedAlbumIds(new Set())
+      } finally {
+        setIsZipping(false)
+        setZipProgress('')
+      }
+    } else {
+      // Đang ở bên trong Album: Tải các ảnh/video được chọn
+      const selectedFiles = visibleItems.filter(f => selectedItemIds.has(f.id) && f.type !== 'folder')
+      if (selectedFiles.length === 0) {
+        alert('Vui lòng chọn ít nhất 1 tệp ảnh/video để tải!')
+        return
+      }
+
+      setIsZipping(true)
+      setZipProgress('Đang nén...')
+      try {
+        const zip = new JSZip()
+        const total = selectedFiles.length
+        let completedCount = 0
+
+        const CONCURRENCY_LIMIT = 16
+        const fetchFile = async (file: MediaItem) => {
+          const ext = file.type === 'video' ? 'mp4' : 'jpg'
+          const exactFileName = file.name.includes('.') ? file.name : `${file.name}.${ext}`
+          try {
+            const res = await fetch(`/api/download?url=${encodeURIComponent(file.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
+            if (res.ok) {
+              const blob = await res.blob()
+              zip.file(exactFileName, blob, { compression: 'STORE' })
+            }
+          } catch (err) {
+            console.error(err)
+          } finally {
+            completedCount++
+            setZipProgress(`${completedCount}/${total}`)
+          }
+        }
+
+        for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+          const chunk = selectedFiles.slice(i, i + CONCURRENCY_LIMIT)
+          await Promise.all(chunk.map(file => fetchFile(file)))
+        }
+
+        setZipProgress('Tạo file ZIP...')
+        const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+        saveAs(zipContent, `${selectedAlbum.title}_da_chon.zip`)
+        setSelectedItemIds(new Set())
+      } catch (e: any) {
+        alert('Lỗi tải tệp: ' + e.message)
+      } finally {
+        setIsZipping(false)
+        setZipProgress('')
+      }
+    }
+  }
+
+  // XÓA HÀNG LOẠT CÁC MỤC ĐƯỢC CHỌN (BATCH DELETE - CHỈ ADMIN)
+  const handleBatchDelete = async () => {
+    if (isSharedGuest) return
+
+    if (!selectedAlbum) {
+      // Xóa hàng loạt album ngoài trang chủ
+      if (selectedAlbumIds.size === 0) return
+      if (confirm(`Bạn có chắc muốn XÓA ${selectedAlbumIds.size} album đã chọn khỏi hệ thống?`)) {
+        const idsToDelete = Array.from(selectedAlbumIds)
+        const { error } = await supabase.from('albums').delete().in('id', idsToDelete)
+        if (!error) {
+          await fetchAlbumsFromSupabase()
+          setSelectedAlbumIds(new Set())
+          alert('Đã xóa thành công các album đã chọn!')
+        } else {
+          alert('Lỗi khi xóa: ' + error.message)
+        }
+      }
+    } else {
+      // Xóa hàng loạt tệp / thư mục con bên trong album
+      if (selectedItemIds.size === 0) return
+      if (confirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM ${selectedItemIds.size} mục đã chọn khỏi hiển thị?`)) {
+        const idsToHide = Array.from(selectedItemIds).map(id => ({ id }))
+        const { error } = await supabase.from('hidden_items').insert(idsToHide)
+        if (!error) {
+          setHiddenItemIds(prev => new Set([...Array.from(prev), ...Array.from(selectedItemIds)]))
+          setSelectedItemIds(new Set())
+          alert('Đã xóa dứt điểm các mục đã chọn!')
+        } else {
+          alert('Lỗi khi xóa: ' + error.message)
+        }
+      }
+    }
   }
 
   const handleDownloadAlbumZip = async (targetInfo?: { title: string; driveUrl: string }, e?: React.MouseEvent) => {
@@ -1071,6 +1200,8 @@ export default function GalleryClient() {
     album.title.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
+  const currentSelectionCount = selectedAlbum ? selectedItemIds.size : selectedAlbumIds.size
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#07130c] flex flex-col items-center justify-center text-white">
@@ -1081,7 +1212,7 @@ export default function GalleryClient() {
   }
 
   return (
-    <div className={`min-h-screen w-full max-w-full overflow-x-hidden transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
+    <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
       {/* Header */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/90 border-white/10' : 'bg-white/90 border-gray-100'}`}>
@@ -1164,7 +1295,6 @@ export default function GalleryClient() {
                     />
                   </div>
 
-                  {/* NÚT QUÉT DRIVE CHỦ ĐỘNG */}
                   <button
                     type="button"
                     onClick={() => checkAllMasterFolders(masterFoldersList, albums)}
@@ -1293,11 +1423,14 @@ export default function GalleryClient() {
               {filteredAlbums.map((album) => {
                 const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
                 const hasImageCover = Boolean(coverImage)
+                const isChecked = selectedAlbumIds.has(album.id)
 
                 return (
                   <div 
                     key={album.id}
                     className={`rounded-2xl overflow-hidden border transition-all duration-300 hover:shadow-lg group ${
+                      isChecked ? 'ring-2 ring-emerald-500' : ''
+                    } ${
                       isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
                     }`}
                   >
@@ -1321,6 +1454,15 @@ export default function GalleryClient() {
                       )}
                       
                       <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
+
+                      {/* NÚT TICK CHỌN CHECKBOX TRÊN ALBUM */}
+                      <button
+                        onClick={(e) => handleToggleSelectAlbum(album.id, e)}
+                        className="absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
+                        title={isChecked ? 'Bỏ chọn' : 'Chọn album'}
+                      >
+                        {isChecked ? <CheckSquare className="w-5 h-5 text-emerald-400" /> : <Square className="w-5 h-5 text-white/80" />}
+                      </button>
 
                       {!isSharedGuest && (
                         <>
@@ -1490,11 +1632,14 @@ export default function GalleryClient() {
                           const hasCover = Boolean(folder.coverUrl)
                           const folderDriveUrl = `https://drive.google.com/drive/folders/${folder.id}`
                           const displayName = customNames[folder.id] || folder.name
+                          const isChecked = selectedItemIds.has(folder.id)
 
                           return (
                             <div
                               key={folder.id}
                               className={`rounded-2xl overflow-hidden border transition-all duration-300 hover:shadow-lg group flex flex-col justify-between ${
+                                isChecked ? 'ring-2 ring-emerald-500' : ''
+                              } ${
                                 isDarkMode 
                                   ? 'bg-[#16181e] border-white/10' 
                                   : 'bg-white border-gray-100 shadow-sm'
@@ -1520,6 +1665,15 @@ export default function GalleryClient() {
                                 )}
 
                                 <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
+
+                                {/* NÚT TICK CHỌN CHECKBOX THƯ MỤC CON */}
+                                <button
+                                  onClick={(e) => handleToggleSelectItem(folder.id, e)}
+                                  className="absolute bottom-2.5 left-2.5 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
+                                  title={isChecked ? 'Bỏ chọn' : 'Chọn thư mục'}
+                                >
+                                  {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
+                                </button>
 
                                 {!isSharedGuest && (
                                   <>
@@ -1600,11 +1754,14 @@ export default function GalleryClient() {
                           const currentStar = ratings[item.id] || 0
                           const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w600`
                           const displayName = customNames[item.id] || item.name
+                          const isChecked = selectedItemIds.has(item.id)
 
                           return (
                             <div 
                               key={item.id}
                               className={`rounded-xl overflow-hidden border transition group relative ${
+                                isChecked ? 'ring-2 ring-emerald-500' : ''
+                              } ${
                                 isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
                               }`}
                             >
@@ -1632,6 +1789,15 @@ export default function GalleryClient() {
                                     }}
                                   />
                                 )}
+
+                                {/* NÚT TICK CHỌN CHECKBOX TỪNG FILE ẢNH/VIDEO */}
+                                <button
+                                  onClick={(e) => handleToggleSelectItem(item.id, e)}
+                                  className="absolute bottom-2 left-2 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
+                                  title={isChecked ? 'Bỏ chọn' : 'Chọn tệp'}
+                                >
+                                  {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
+                                </button>
 
                                 {!isSharedGuest && (
                                   <button
@@ -1702,7 +1868,50 @@ export default function GalleryClient() {
         )}
       </main>
 
-      {/* POPUP KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC MỚI TỪ DRIVE (MODAL NỀN MỜ CHUẨN ĐẸP) */}
+      {/* THANH CÔNG CỤ NỔI KHI TICK CHỌN CHECKBOX (BATCH ACTION BAR) */}
+      {currentSelectionCount > 0 && (
+        <div className="fixed bottom-6 inset-x-0 z-40 flex justify-center px-4 animate-in slide-in-from-bottom-5 duration-200">
+          <div className="flex items-center gap-2.5 sm:gap-4 px-4 sm:px-6 py-3 rounded-2xl bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white shadow-2xl border border-white/15">
+            <span className="text-xs font-medium text-emerald-400">
+              Đã chọn: <strong className="text-white">{currentSelectionCount}</strong> mục
+            </span>
+
+            <div className="h-4 w-[1px] bg-white/20" />
+
+            <button
+              onClick={handleBatchDownload}
+              disabled={isZipping}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow transition cursor-pointer disabled:opacity-50"
+            >
+              {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              <span>{isZipping ? zipProgress : 'Lưu ZIP các mục đã chọn'}</span>
+            </button>
+
+            {!isSharedGuest && (
+              <button
+                onClick={handleBatchDelete}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 text-xs font-semibold transition cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xóa các mục đã chọn</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                setSelectedAlbumIds(new Set())
+                setSelectedItemIds(new Set())
+              }}
+              className="p-1 rounded-full text-white/60 hover:text-white transition cursor-pointer"
+              title="Bỏ chọn"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC MỚI TỪ DRIVE */}
       {isSyncModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
@@ -1862,7 +2071,7 @@ export default function GalleryClient() {
                   required
                   placeholder="Đặt tên Thư Mục Tổng (Ví dụ: ẢNH 2026)"
                   className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-white border-gray-200 focus:border-emerald-500'
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
                   }`}
                 />
               </div>
@@ -1874,7 +2083,7 @@ export default function GalleryClient() {
                   required
                   placeholder="Dán link Google Drive: https://drive.google.com/drive/folders/..."
                   className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
-                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-white border-gray-200 focus:border-emerald-500'
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
                   }`}
                 />
               </div>
@@ -2436,7 +2645,7 @@ export default function GalleryClient() {
               <h3 className="font-serif font-bold text-base">Thêm Album Mới Từ Google Drive</h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
-                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition"
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
