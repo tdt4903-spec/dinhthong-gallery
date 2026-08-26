@@ -29,11 +29,12 @@ interface Album {
 
 interface KeyRecord {
   id: string
-  customerName: string
+  customer_name: string
   serial: string
-  durationLabel: string
-  key: string
-  createdAt: string
+  duration_label: string
+  license_key: string
+  status: 'active' | 'revoked'
+  created_at?: string
 }
 
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
@@ -63,13 +64,14 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  // State cho Modal Tạo Key Panel
+  // State Modal Quản lý Key Panel Supabase
   const [isKeyGenOpen, setIsKeyGenOpen] = useState(false)
   const [customerName, setCustomerName] = useState('')
   const [serialInput, setSerialInput] = useState('')
   const [duration, setDuration] = useState('LIFE')
   const [generatedKey, setGeneratedKey] = useState('')
   const [keyRecords, setKeyRecords] = useState<KeyRecord[]>([])
+  const [isSavingKey, setIsSavingKey] = useState(false)
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [isZipping, setIsZipping] = useState(false)
@@ -113,6 +115,23 @@ export default function GalleryClient() {
     }
   }
 
+  // Tải danh sách Key từ bảng panel_licenses trên Supabase
+  const fetchLicenses = async () => {
+    const { data, error } = await supabase
+      .from('panel_licenses')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (!error && data) {
+      setKeyRecords(data)
+    }
+  }
+
+  useEffect(() => {
+    if (isKeyGenOpen) {
+      fetchLicenses()
+    }
+  }, [isKeyGenOpen])
+
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
@@ -146,16 +165,6 @@ export default function GalleryClient() {
       }
     })
   }, [albums])
-
-  // Tải danh sách Key đã lưu trong LocalStorage
-  useEffect(() => {
-    const savedKeys = localStorage.getItem('dinhthong_key_history')
-    if (savedKeys) {
-      try {
-        setKeyRecords(JSON.parse(savedKeys))
-      } catch (e) {}
-    }
-  }, [])
 
   const filteredImages = images.filter(img => {
     if (starFilter === 'all') return true
@@ -521,7 +530,7 @@ export default function GalleryClient() {
     localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
   }
 
-  // Thuật toán sinh Key cho Panel
+  // Thuật toán sinh Key cho Panel & Lưu trực tiếp Supabase
   const durationOptions = [
     { value: '10m', label: '10 Phút' },
     { value: '7d', label: '7 Ngày' },
@@ -532,7 +541,7 @@ export default function GalleryClient() {
     { value: 'LIFE', label: 'Vĩnh viễn' },
   ]
 
-  const handleGenerateKey = () => {
+  const handleGenerateKey = async () => {
     if (!customerName.trim()) {
       alert('Vui lòng nhập Tên khách hàng!')
       return
@@ -542,6 +551,7 @@ export default function GalleryClient() {
       return
     }
 
+    setIsSavingKey(true)
     let expireTimestamp = 0
     const now = Date.now()
 
@@ -555,7 +565,8 @@ export default function GalleryClient() {
       case 'LIFE': expireTimestamp = 9999999999999; break;
     }
 
-    const payload = `${serialInput.trim().toUpperCase()}|${expireTimestamp}|${SECRET_SALT}`
+    const cleanSerial = serialInput.trim().toUpperCase()
+    const payload = `${cleanSerial}|${expireTimestamp}|${SECRET_SALT}`
     let hash = 0
     for (let i = 0; i < payload.length; i++) {
       hash = ((hash << 5) - hash) + payload.charCodeAt(i)
@@ -568,29 +579,57 @@ export default function GalleryClient() {
     const durLabel = durationOptions.find((d) => d.value === duration)?.label || duration
     const newRecord: KeyRecord = {
       id: Date.now().toString(),
-      customerName: customerName.trim(),
-      serial: serialInput.trim().toUpperCase(),
-      durationLabel: durLabel,
-      key: finalKey,
-      createdAt: new Date().toLocaleDateString('vi-VN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      }),
+      customer_name: customerName.trim(),
+      serial: cleanSerial,
+      duration_label: durLabel,
+      license_key: finalKey,
+      status: 'active',
     }
 
-    const updated = [newRecord, ...keyRecords]
-    setKeyRecords(updated)
-    localStorage.setItem('dinhthong_key_history', JSON.stringify(updated))
+    const { error } = await supabase
+      .from('panel_licenses')
+      .upsert(newRecord, { onConflict: 'serial' })
+
+    if (!error) {
+      await fetchLicenses()
+    } else {
+      alert('Lỗi lưu Supabase: ' + error.message)
+    }
+    setIsSavingKey(false)
   }
 
-  const handleDeleteRecord = (id: string) => {
-    if (confirm('Bạn có chắc muốn xóa máy này khỏi lịch sử đã lưu?')) {
-      const updated = keyRecords.filter((r) => r.id !== id)
-      setKeyRecords(updated)
-      localStorage.setItem('dinhthong_key_history', JSON.stringify(updated))
+  // Khóa máy / Mở khóa từ xa
+  const handleToggleRevoke = async (record: KeyRecord) => {
+    const newStatus = record.status === 'revoked' ? 'active' : 'revoked'
+    const actionName = newStatus === 'revoked' ? 'khóa máy và thu hồi quyền' : 'mở khóa lại cho'
+    
+    if (confirm(`Bạn có chắc muốn ${actionName} khách hàng: ${record.customer_name} (${record.serial})?`)) {
+      const { error } = await supabase
+        .from('panel_licenses')
+        .update({ status: newStatus })
+        .eq('id', record.id)
+
+      if (!error) {
+        await fetchLicenses()
+      } else {
+        alert('Lỗi cập nhật: ' + error.message)
+      }
+    }
+  }
+
+  // Xóa khỏi danh sách Supabase
+  const handleDeleteRecord = async (id: string) => {
+    if (confirm('Bạn có chắc muốn xóa bản ghi này khỏi danh sách quản lý?')) {
+      const { error } = await supabase
+        .from('panel_licenses')
+        .delete()
+        .eq('id', id)
+
+      if (!error) {
+        await fetchLicenses()
+      } else {
+        alert('Lỗi khi xóa: ' + error.message)
+      }
     }
   }
 
@@ -719,7 +758,7 @@ export default function GalleryClient() {
                     />
                   </div>
 
-                  {/* Nút Mở Popup Trắng Tạo Key Panel Ngay Trên Trang */}
+                  {/* Nút Mở Modal Trắng Tạo Key Panel (Supabase Sync) */}
                   <button
                     type="button"
                     onClick={() => setIsKeyGenOpen(true)}
@@ -1036,7 +1075,7 @@ export default function GalleryClient() {
         )}
       </main>
 
-      {/* MODAL TRẮNG TẠO KEY CHO PANEL RETOUCH (LIGHT THEME) */}
+      {/* MODAL TRẮNG QUẢN LÝ & TẠO KEY (SUPABASE SYNC & THU HỒI TỪ XA) */}
       {isKeyGenOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white text-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -1060,7 +1099,7 @@ export default function GalleryClient() {
                   <label className="block text-xs font-semibold text-gray-700 mb-1.5">Tên khách hàng</label>
                   <input
                     type="text"
-                    placeholder="Ví dụ: Nguyễn Văn A"
+                    placeholder="Ví dụ: Trần Đình Thông (Chủ panel)"
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
                     className="w-full text-xs px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 focus:bg-white transition-all text-gray-900"
@@ -1111,10 +1150,12 @@ export default function GalleryClient() {
                   />
                   <button
                     type="button"
+                    disabled={isSavingKey}
                     onClick={handleGenerateKey}
-                    className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all cursor-pointer"
+                    className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all cursor-pointer disabled:opacity-60 flex items-center gap-1.5"
                   >
-                    Tạo Key
+                    {isSavingKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    <span>Tạo Key</span>
                   </button>
                   {generatedKey && (
                     <button
@@ -1131,9 +1172,7 @@ export default function GalleryClient() {
               <div className="pt-3 border-t border-gray-100">
                 <div className="flex items-center justify-between mb-2.5">
                   <h3 className="text-xs font-bold text-gray-900">Danh sách máy đang sử dụng ({keyRecords.length})</h3>
-                  {keyRecords.length > 0 && (
-                    <span className="text-[10px] text-gray-400">Lưu tự động vào trình duyệt</span>
-                  )}
+                  <span className="text-[10px] text-gray-400">Đồng bộ đám mây Supabase</span>
                 </div>
 
                 <div className="border border-gray-100 rounded-xl overflow-hidden shadow-sm">
@@ -1152,28 +1191,40 @@ export default function GalleryClient() {
                         {keyRecords.length === 0 ? (
                           <tr>
                             <td colSpan={5} className="py-6 text-center text-gray-400 text-xs">
-                              Chưa có máy nào được tạo key.
+                              Chưa có máy nào được tạo key trên hệ thống.
                             </td>
                           </tr>
                         ) : (
                           keyRecords.map((r) => (
                             <tr key={r.id} className="hover:bg-gray-50/80 transition-colors">
-                              <td className="py-2.5 px-3 font-medium text-gray-900">{r.customerName}</td>
+                              <td className="py-2.5 px-3 font-medium text-gray-900">{r.customer_name}</td>
                               <td className="py-2.5 px-3 font-mono text-gray-500 text-[11px]">{r.serial}</td>
                               <td className="py-2.5 px-3">
-                                <span className="inline-block px-2 py-0.5 text-[10px] font-semibold bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100">
-                                  {r.durationLabel}
+                                <span className={`inline-block px-2 py-0.5 text-[10px] font-semibold rounded-full border ${
+                                  r.status === 'revoked'
+                                    ? 'bg-red-50 text-red-600 border-red-200'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                }`}>
+                                  {r.status === 'revoked' ? 'Đã khóa' : r.duration_label}
                                 </span>
                               </td>
-                              <td className="py-2.5 px-3 font-mono text-[11px] text-gray-600 truncate max-w-[130px]" title={r.key}>
-                                {r.key}
+                              <td className="py-2.5 px-3 font-mono text-[11px] text-gray-600 truncate max-w-[120px]" title={r.license_key}>
+                                {r.license_key}
                               </td>
                               <td className="py-2.5 px-3 text-right space-x-2">
                                 <button
-                                  onClick={() => handleCopyText(r.key)}
+                                  onClick={() => handleCopyText(r.license_key)}
                                   className="text-[11px] text-emerald-600 hover:underline font-medium cursor-pointer"
                                 >
                                   Copy
+                                </button>
+                                <button
+                                  onClick={() => handleToggleRevoke(r)}
+                                  className={`text-[11px] font-semibold hover:underline cursor-pointer ${
+                                    r.status === 'revoked' ? 'text-emerald-600' : 'text-amber-600'
+                                  }`}
+                                >
+                                  {r.status === 'revoked' ? 'Mở khóa' : 'Khóa máy'}
                                 </button>
                                 <button
                                   onClick={() => handleDeleteRecord(r.id)}
