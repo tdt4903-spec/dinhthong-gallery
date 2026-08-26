@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>Kích Hoạt Panel DINH THONG RETOUCH - Bộ Tạo Key</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    body {
+      background-color: #383838;
+      color: #dfdfdf;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .keygen-box {
+      width: 520px;
+      background-color: #535353;
+      border: 1px solid #282828;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.6);
+      padding: 20px 24px;
+      border-radius: 4px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 14px;
+    }
+    .brand-title {
+      font-size: 16px;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: 1px;
+    }
+    .brand-sub {
+      font-size: 9px;
+      color: #b5b5b5;
+      letter-spacing: 1px;
+      margin-top: 2px;
+    }
+    .instruction {
+      font-size: 11px;
+      color: #cccccc;
+      margin-top: 8px;
+    }
+    .form-group {
+      display: flex;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .label {
+      width: 110px;
+      font-size: 12px;
+      color: #cccccc;
+      flex-shrink: 0;
+    }
+    .input-text {
+      flex: 1;
+      background: #383838;
+      border: 1px solid #282828;
+      color: #ffffff;
+      padding: 7px 10px;
+      font-size: 12px;
+      border-radius: 2px;
+      outline: none;
+    }
+    .input-text:focus {
+      border-color: #2f69a1;
+    }
+    .radio-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px 10px;
+      font-size: 11.5px;
+    }
+    .radio-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+    }
+    .radio-item input {
+      accent-color: #38ef7d;
+      cursor: pointer;
+    }
+    .footer-btns {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .btn {
+      background: #424242;
+      border: 1px solid #262626;
+      color: #ffffff;
+      padding: 7px 20px;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 2px;
+    }
+    .btn:hover {
+      background: #4e4e4e;
+    }
+    .btn-primary {
+      background: #2f69a1;
+      border-color: #1c4873;
+    }
+    .btn-primary:hover {
+      background: #3b7bb9;
+    }
+  </style>
+</head>
+<body>
+
+<div class="keygen-box" id="keygen-container" style="display: none;">
+  <div class="header">
+    <div class="brand-title">DINH THONG RETOUCH</div>
+    <div class="brand-sub">PHOTOS • WEB • GRAPHIC DESIGNER</div>
+    <div class="instruction">Vui lòng nhập số seri trước rồi chọn thời gian và sau đó nhấn tạo key.</div>
+  </div>
+
+  <div class="form-group">
+    <div class="label">Số Seri :</div>
+    <input type="text" id="input-serial" class="input-text" placeholder="Dán số seri của khách vào đây" />
+  </div>
+
+  <div class="form-group" style="align-items: flex-start; margin-top: 6px;">
+    <div class="label" style="padding-top: 2px;">Thời hạn :</div>
+    <div class="radio-grid">
+      <label class="radio-item"><input type="radio" name="duration" value="10m"> 10 Phút</label>
+      <label class="radio-item"><input type="radio" name="duration" value="7d"> 7 Ngày</label>
+      <label class="radio-item"><input type="radio" name="duration" value="1M"> 1 Tháng</label>
+      <label class="radio-item"><input type="radio" name="duration" value="3M"> 3 Tháng</label>
+      <label class="radio-item"><input type="radio" name="duration" value="6M"> 6 Tháng</label>
+      <label class="radio-item"><input type="radio" name="duration" value="1Y"> 1 Năm</label>
+      <label class="radio-item"><input type="radio" name="duration" value="LIFE" checked> Vĩnh viễn</label>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <div class="label">Mã kích hoạt :</div>
+    <input type="text" id="output-key" class="input-text" readonly placeholder="Mã kích hoạt sẽ hiển thị ở đây" />
+  </div>
+
+  <div class="footer-btns">
+    <button class="btn btn-primary" id="btn-generate">Tạo key</button>
+    <button class="btn" id="btn-copy">Copy Key</button>
+  </div>
+</div>
+
+<script>
+  // Mật khẩu bảo vệ khi đưa lên Web Album
+  const ADMIN_PASSWORD = "123"; // Đổi mật khẩu của bạn tại đây
+  const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026";
+
+  const pass = prompt("Nhập mật khẩu quản trị để tạo key:");
+  if (pass === ADMIN_PASSWORD) {
+    document.getElementById("keygen-container").style.display = "block";
+  } else {
+    alert("Sai mật khẩu truy cập!");
+    document.body.innerHTML = "<h2 style='color:#ff5252; text-align:center;'>Truy cập bị từ chối!</h2>";
+  }
+
+  function generateLicenseKey(serial, durationType) {
+    if (!serial) return "";
+    let expireTimestamp = 0;
+    const now = Date.now();
+
+    switch (durationType) {
+      case "10m":  expireTimestamp = now + 10 * 60 * 1000; break;
+      case "7d":   expireTimestamp = now + 7 * 24 * 60 * 60 * 1000; break;
+      case "1M":   expireTimestamp = now + 30 * 24 * 60 * 60 * 1000; break;
+      case "3M":   expireTimestamp = now + 90 * 24 * 60 * 60 * 1000; break;
+      case "6M":   expireTimestamp = now + 180 * 24 * 60 * 60 * 1000; break;
+      case "1Y":   expireTimestamp = now + 365 * 24 * 60 * 60 * 1000; break;
+      case "LIFE": expireTimestamp = 9999999999999; break;
+    }
+
+    const payload = `${serial.trim().toUpperCase()}|${expireTimestamp}|${SECRET_SALT}`;
+    
+    let hash = 0;
+    for (let i = 0; i < payload.length; i++) {
+      hash = ((hash << 5) - hash) + payload.charCodeAt(i);
+      hash |= 0;
+    }
+    const signature = Math.abs(hash).toString(36).toUpperCase();
+    const rawKey = `${expireTimestamp.toString(36).toUpperCase()}-${signature}`;
+    return `DT-${rawKey}`;
+  }
+
+  document.getElementById("btn-generate").addEventListener("click", () => {
+    const serial = document.getElementById("input-serial").value.trim();
+    if (!serial) {
+      alert("Vui lòng nhập Số Seri!");
+      return;
+    }
+    const selected = document.querySelector('input[name="duration"]:checked').value;
+    const key = generateLicenseKey(serial, selected);
+    document.getElementById("output-key").value = key;
+  });
+
+  document.getElementById("btn-copy").addEventListener("click", () => {
+    const out = document.getElementById("output-key");
+    if (!out.value) return;
+    navigator.clipboard.writeText(out.value);
+    alert("Đã sao chép mã kích hoạt:\n" + out.value);
+  });
+</script>
+</body>
+</html>
