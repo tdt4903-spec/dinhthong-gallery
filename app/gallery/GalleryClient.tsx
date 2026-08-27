@@ -1358,40 +1358,66 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-      {/* Header */}
+     {/* Header */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/90 border-white/10' : 'bg-white/90 border-gray-100'}`}>
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 sm:py-0 sm:h-20 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
           
-          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
-            {selectedAlbum && !isSharedGuest && (
-              <button 
-                onClick={handleBackToParentFolder}
-                className={`p-1.5 sm:p-2 rounded-full border transition cursor-pointer ${
-                  isDarkMode ? 'border-white/10 hover:bg-white/10 text-white' : 'border-gray-200 hover:bg-gray-100 text-gray-700'
-                }`}
-                title="Quay lại"
-              >
-                <BackIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-              </button>
-            )}
-
+          {/* Hàng 1 trên mobile: Logo và Avatar/Theme */}
+          <div className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-3">
             <div onClick={() => !isSharedGuest && setSelectedAlbum(null)} className={`flex items-baseline gap-1 ${!isSharedGuest ? 'cursor-pointer' : ''}`}>
-              <span className="text-lg sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
-              <span className="font-serif italic text-emerald-600 text-sm sm:text-lg">gallery</span>
+              <span className="text-xl sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
+              <span className="font-serif italic text-emerald-600 text-base sm:text-lg">gallery</span>
+            </div>
+
+            {/* Các nút icon bên phải trên mobile */}
+            <div className="flex items-center gap-2 sm:hidden">
+              <button
+                onClick={() => setIsDarkMode(!isDarkMode)}
+                className={`p-2 rounded-full border transition cursor-pointer ${
+                  isDarkMode ? 'border-white/10 hover:bg-white/10 text-emerald-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
+                }`}
+              >
+                {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
+
+              {!isSharedGuest && (
+                <div className="flex items-center gap-2 pl-2 border-l border-gray-200 dark:border-white/10">
+                  {user?.user_metadata?.avatar_url ? (
+                    <img 
+                      src={user.user_metadata.avatar_url} 
+                      alt="Avatar" 
+                      className="w-7 h-7 rounded-full object-cover border border-emerald-500/50"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center text-xs font-bold">
+                      <UserIcon className="w-3.5 h-3.5" />
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleSignOut}
+                    className="p-1.5 rounded-full text-gray-400 hover:text-red-500 transition cursor-pointer"
+                    title="Đăng xuất"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+          {/* Hàng 2 trên mobile (hoặc bên phải trên PC): Các nút chức năng & Tìm kiếm */}
+          <div className="w-full sm:w-auto flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none justify-start sm:justify-end">
             {selectedAlbum ? (
               <>
-                <div className="relative w-24 xs:w-32 sm:w-56">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 sm:w-3.5 sm:h-3.5 text-gray-400" />
+                <div className="relative w-32 sm:w-56 flex-shrink-0">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                   <input 
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Tìm tệp..."
-                    className={`w-full pl-7 sm:pl-8 pr-2 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs border outline-none transition ${
+                    className={`w-full pl-8 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
                       isDarkMode 
                         ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
                         : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-sm'
@@ -1402,36 +1428,34 @@ export default function GalleryClient() {
                 <button
                   onClick={(e) => handleDownloadAlbumZip(undefined, e)}
                   disabled={isZipping}
-                  className="flex items-center gap-1 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap disabled:opacity-60"
-                  title="Nén tất cả ảnh thành file ZIP"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap disabled:opacity-60 flex-shrink-0"
                 >
                   {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                  <span className="hidden xs:inline">{isZipping ? zipProgress : 'Tải album'}</span>
+                  <span>{isZipping ? zipProgress : 'Tải album'}</span>
                 </button>
 
                 <button
                   onClick={() => setIsAdminPanelOpen(true)}
-                  className="flex items-center gap-1 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap"
-                  title="Danh sách tệp đã chọn"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap flex-shrink-0"
                 >
                   <ClipboardList className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">Ảnh chọn</span>
-                  <span className="bg-emerald-800 px-1.5 py-0.5 rounded-full text-[9px] sm:text-[10px]">
+                  <span>Ảnh chọn</span>
+                  <span className="bg-emerald-800 px-1.5 py-0.5 rounded-full text-[10px]">
                     {selectedImagesList.length}
                   </span>
                 </button>
               </>
             ) : (
               !isSharedGuest && (
-                <div className="flex items-center gap-1.5 sm:gap-2.5">
-                  <div className="relative w-24 xs:w-32 sm:w-56">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 sm:w-3.5 sm:h-3.5 text-gray-400" />
+                <div className="flex items-center gap-2 flex-nowrap sm:flex-wrap justify-start sm:justify-end w-full sm:w-auto">
+                  <div className="relative w-36 sm:w-52 flex-shrink-0">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <input 
                       type="text"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       placeholder="Tìm album..."
-                      className={`w-full pl-7 sm:pl-8 pr-2 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs border outline-none transition ${
+                      className={`w-full pl-8 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
                         isDarkMode 
                           ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
                           : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-sm'
@@ -1439,98 +1463,103 @@ export default function GalleryClient() {
                     />
                   </div>
 
-                  {/* NÚT QUÉT DRIVE CHỦ ĐỘNG[cite: 3] */}
+                  {/* NÚT QUÉT DRIVE */}
                   <button
                     type="button"
                     onClick={() => checkAllMasterFolders(masterFoldersList, true)}
                     disabled={isSyncing}
-                    className={`flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer ${
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer flex-shrink-0 ${
                       isDarkMode 
                         ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400' 
                         : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700'
                     }`}
-                    title="Kiểm tra và quét các thư mục mới trên Google Drive"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isSyncing ? 'animate-spin' : ''}`} />
-                    <span className="hidden sm:inline">{isSyncing ? 'Đang quét...' : 'Quét Drive'}</span>
+                    <span>{isSyncing ? 'Đang quét...' : 'Quét Drive'}</span>
                   </button>
 
+                  {/* NÚT THƯ MỤC TỔNG */}
                   <button
                     type="button"
                     onClick={() => setIsMasterModalOpen(true)}
-                    className={`flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer ${
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer flex-shrink-0 ${
                       isDarkMode 
                         ? 'bg-white/10 hover:bg-white/20 border-white/15 text-emerald-400' 
                         : 'bg-white hover:bg-gray-50 border-gray-200 text-emerald-700'
                     }`}
-                    title="Quản lý các Thư Mục Tổng trên Google Drive"
                   >
                     <Settings className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="hidden sm:inline">Thư Mục Tổng</span>
+                    <span>Thư Mục Tổng</span>
                   </button>
 
+                  {/* NÚT KEY PANEL */}
                   <button
                     type="button"
                     onClick={() => setIsKeyGenOpen(true)}
-                    className={`flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer ${
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer flex-shrink-0 ${
                       isDarkMode 
                         ? 'bg-white/10 hover:bg-white/20 border-white/15 text-emerald-400' 
                         : 'bg-white hover:bg-gray-50 border-gray-200 text-emerald-700'
                     }`}
-                    title="Mở bảng tạo mã kích hoạt cho Panel Retouch"
                   >
                     <KeyRound className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="hidden sm:inline">Key Panel</span>
+                    <span>Key Panel</span>
                   </button>
 
+                  {/* NÚT THÊM ALBUM */}
                   <button
                     onClick={() => setIsModalOpen(true)}
-                    className="flex items-center gap-1 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap flex-shrink-0"
                   >
-                    <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    <span className="hidden xs:inline">Thêm album</span>
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Thêm album</span>
                   </button>
                 </div>
               )
             )}
 
-            <button
-              onClick={() => setIsDarkMode(!isDarkMode)}
-              className={`p-1.5 sm:p-2 rounded-full border transition cursor-pointer ${
-                isDarkMode ? 'border-white/10 hover:bg-white/10 text-emerald-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
-              }`}
-            >
-              {isDarkMode ? <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
-            </button>
+            {/* Phần hiển thị trên máy tính (Desktop Theme & User) */}
+            <div className="hidden sm:flex items-center gap-2.5 pl-2 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
+              <button
+                onClick={() => setIsDarkMode(!isDarkMode)}
+                className={`p-2 rounded-full border transition cursor-pointer ${
+                  isDarkMode ? 'border-white/10 hover:bg-white/10 text-emerald-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
+                }`}
+              >
+                {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
 
-            {!isSharedGuest && (
-              <div className="flex items-center gap-1 sm:gap-2 pl-1 sm:pl-2 border-l border-gray-200 dark:border-white/10">
-                {user?.user_metadata?.avatar_url ? (
-                  <img 
-                    src={user.user_metadata.avatar_url} 
-                    alt="Avatar" 
-                    className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-emerald-500/50"
-                    title={user.email}
-                  />
-                ) : (
-                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center text-[10px] sm:text-xs font-bold">
-                    <UserIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  </div>
-                )}
+              {!isSharedGuest && (
+                <div className="flex items-center gap-2">
+                  {user?.user_metadata?.avatar_url ? (
+                    <img 
+                      src={user.user_metadata.avatar_url} 
+                      alt="Avatar" 
+                      className="w-8 h-8 rounded-full object-cover border border-emerald-500/50"
+                      title={user.email}
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center text-xs font-bold">
+                      <UserIcon className="w-4 h-4" />
+                    </div>
+                  )}
 
-                <button
-                  onClick={handleSignOut}
-                  className="p-1 sm:p-1.5 rounded-full text-gray-400 hover:text-red-500 transition cursor-pointer"
-                  title="Đăng xuất"
-                >
-                  <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                </button>
-              </div>
-            )}
+                  <button
+                    onClick={handleSignOut}
+                    className="p-1.5 rounded-full text-gray-400 hover:text-red-500 transition cursor-pointer"
+                    title="Đăng xuất"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+
           </div>
+
         </div>
       </header>
-
+      
       {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
         
