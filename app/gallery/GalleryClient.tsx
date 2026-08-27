@@ -56,11 +56,12 @@ const preloadedCache = new Set<string>()
 // Trích xuất ID Drive thuần túy để tạo link ngắn
 const extractDriveId = (url: string) => {
   if (!url) return ''
-  const match = url.match(/folders\/([a-zA-Z0-9_-]+)/)
-  if (match && match[1]) return match[1]
-  const matchFile = url.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  const clean = url.trim()
+  const matchFolder = clean.match(/folders\/([a-zA-Z0-9_-]+)/)
+  if (matchFolder && matchFolder[1]) return matchFolder[1]
+  const matchFile = clean.match(/\/d\/([a-zA-Z0-9_-]+)/)
   if (matchFile && matchFile[1]) return matchFile[1]
-  return url.replace(/[^a-zA-Z0-9_-]/g, '')
+  return clean.replace(/[^a-zA-Z0-9_-]/g, '')
 }
 
 function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }) {
@@ -173,11 +174,9 @@ export default function GalleryClient() {
 
   const formatDriveCoverUrl = (url: string) => {
     if (!url) return ''
-    if (url.includes('drive.google.com/file/d/')) {
-      const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)
-      if (match && match[1]) {
-        return `https://lh3.googleusercontent.com/d/${match[1]}=w1000`
-      }
+    const cleanId = extractDriveId(url)
+    if (cleanId) {
+      return `https://lh3.googleusercontent.com/d/${cleanId}=w1000`
     }
     return url
   }
@@ -217,25 +216,34 @@ export default function GalleryClient() {
   }
 
   const fetchAlbumsFromSupabase = async () => {
-    const { data, error } = await supabase.from('albums').select('*').order('id', { ascending: false })
-    if (!error && data) {
-      const formatted: Album[] = data.map((item: any) => ({
-        id: item.id,
-        title: item.title,
-        driveUrl: item.drive_url,
-        coverUrl: item.cover_url || ''
-      }))
-      setAlbums(formatted)
-      return formatted
+    try {
+      const { data, error } = await supabase.from('albums').select('*').order('id', { ascending: false })
+      if (!error && data) {
+        const formatted: Album[] = data.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          driveUrl: item.drive_url,
+          coverUrl: item.cover_url || ''
+        }))
+        setAlbums(formatted)
+        return formatted
+      }
+    } catch (e) {
+      console.error(e)
     }
+    setAlbums([])
     return []
   }
 
   const fetchMasterFoldersList = async () => {
-    const { data } = await supabase.from('master_folders').select('*').order('created_at', { ascending: false })
-    if (data) {
-      setMasterFoldersList(data)
-      return data
+    try {
+      const { data } = await supabase.from('master_folders').select('*').order('created_at', { ascending: false })
+      if (data) {
+        setMasterFoldersList(data)
+        return data
+      }
+    } catch (e) {
+      console.error(e)
     }
     return []
   }
@@ -248,16 +256,19 @@ export default function GalleryClient() {
     }
     setIsSyncing(true)
     try {
-      const currentKnown = existingKnown || knownFolderIds
+      const { data: latestKnownData } = await supabase.from('known_drive_folders').select('id')
+      const currentKnown = new Set(latestKnownData ? latestKnownData.map((i: any) => i.id) : (existingKnown || knownFolderIds))
+      
       const newFoldersDetected: { id: string; name: string; driveUrl: string; parentTitle: string }[] = []
 
       for (const f of folders) {
+        if (!f || !f.url) continue
         const res = await fetch(`/api/sync-check?masterUrl=${encodeURIComponent(f.url)}&_t=${Date.now()}`, {
           cache: 'no-store'
         })
         const data = await res.json()
         if (data.albums && Array.isArray(data.albums)) {
-          const unapproved = data.albums.filter((sub: any) => !currentKnown.has(sub.id))
+          const unapproved = data.albums.filter((sub: any) => sub && !currentKnown.has(sub.id))
           unapproved.forEach((sub: any) => {
             newFoldersDetected.push({
               id: sub.id,
@@ -274,6 +285,7 @@ export default function GalleryClient() {
       } else {
         setPendingSyncAlbums(newFoldersDetected)
         setSelectedPendingIds(new Set(newFoldersDetected.map(a => a.id)))
+        // Tự động bật Popup kiểm duyệt
         setIsSyncModalOpen(true)
       }
     } catch (e) {
@@ -282,6 +294,19 @@ export default function GalleryClient() {
       setIsSyncing(false)
     }
   }
+
+  // TỰ ĐỘNG QUÉT DRIVE NGẦM ĐỊNH KỲ 5 PHÚT / LẦN (KHÔNG CẦN RELOAD TRANG)
+  useEffect(() => {
+    if (isSharedGuest) return
+    const interval = setInterval(async () => {
+      const masters = await fetchMasterFoldersList()
+      if (masters && masters.length > 0) {
+        checkAllMasterFolders(masters, false)
+      }
+    }, 5 * 60 * 1000)
+
+    return () => clearInterval(interval)
+  }, [isSharedGuest])
 
   // THÊM THƯ MỤC TỔNG RA TRANG CHỦ (TỰ ĐỘNG GÁN ID RÚT GỌN TỪ DRIVE ID)
   const handleAddMasterFolder = async (e: React.FormEvent) => {
@@ -310,13 +335,13 @@ export default function GalleryClient() {
         }
       ], { onConflict: 'id' })
 
-      await fetchAlbumsFromSupabase()
       const updatedMasters = [newMaster, ...masterFoldersList.filter(m => m.id !== cleanId)]
       setMasterFoldersList(updatedMasters)
       setNewMasterName('')
       setNewMasterUrl('')
       setIsMasterModalOpen(false)
       
+      await fetchAlbumsFromSupabase()
       checkAllMasterFolders(updatedMasters, false)
     } catch (err: any) {
       alert('Lỗi: ' + err.message)
@@ -329,8 +354,7 @@ export default function GalleryClient() {
     if (confirm('Bạn có chắc muốn xóa thư mục tổng này khỏi danh sách quản lý?')) {
       const { error } = await supabase.from('master_folders').delete().eq('id', id)
       if (!error) {
-        const updated = masterFoldersList.filter(f => f.id !== id)
-        setMasterFoldersList(updated)
+        setMasterFoldersList(prev => prev.filter(f => f.id !== id))
       }
     }
   }
@@ -344,7 +368,7 @@ export default function GalleryClient() {
 
     const masterUrls = new Set(masterFoldersList.map(m => m.url.trim()))
     const masterIds = new Set(masterFoldersList.map(m => m.id))
-    const childAlbumsToDelete = albums.filter(a => !masterUrls.has(a.driveUrl.trim()) && !masterIds.has(a.id))
+    const childAlbumsToDelete = (albums || []).filter(a => a && !masterUrls.has(a.driveUrl.trim()) && !masterIds.has(a.id))
 
     if (childAlbumsToDelete.length === 0) {
       alert('Trang chủ đã chuẩn xác, chỉ chứa các Thư Mục Tổng!')
@@ -488,8 +512,8 @@ export default function GalleryClient() {
   }
 
   useEffect(() => {
-    albums.forEach(async (album) => {
-      if (!album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
+    (albums || []).forEach(async (album) => {
+      if (album && !album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
         try {
           const res = await fetch(`/api/drive?url=${encodeURIComponent(album.driveUrl)}`)
           const data = await res.json()
@@ -506,7 +530,7 @@ export default function GalleryClient() {
     })
   }, [albums, hiddenItemIds])
 
-  const visibleItems = items.filter(item => !hiddenItemIds.has(item.id))
+  const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
   const subFolders = visibleItems.filter(item => item.type === 'folder')
   const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
 
@@ -529,9 +553,7 @@ export default function GalleryClient() {
     const indicesToPreload = [
       (currentIndex + 1) % previewSourceList.length,
       (currentIndex + 2) % previewSourceList.length,
-      (currentIndex + 3) % previewSourceList.length,
       (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
-      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
     ]
 
     indicesToPreload.forEach(idx => {
@@ -624,7 +646,7 @@ export default function GalleryClient() {
     if (isZipping) return
 
     if (!selectedAlbum) {
-      const selectedAlbumsList = albums.filter(a => selectedAlbumIds.has(a.id))
+      const selectedAlbumsList = (albums || []).filter(a => a && selectedAlbumIds.has(a.id))
       if (selectedAlbumsList.length === 0) return
 
       setIsZipping(true)
@@ -1160,7 +1182,7 @@ export default function GalleryClient() {
         await fetchHiddenItemIds()
         const knownSet = await fetchKnownFolderIds()
         await fetchCustomNames()
-        await fetchAlbumsFromSupabase()
+        const currentAlbs = await fetchAlbumsFromSupabase()
         const masterFolders = await fetchMasterFoldersList()
 
         // TỰ ĐỘNG QUÉT KIỂM TRA DRIVE KHI ADMIN MỞ TRANG
@@ -1307,10 +1329,7 @@ export default function GalleryClient() {
     URL.revokeObjectURL(url)
   }
 
-  const filteredAlbums = albums.filter(album => 
-    album.title.toLowerCase().includes(searchTerm.toLowerCase())
-  )
-
+  const filteredAlbums = (albums || []).filter(album => album && album.title && album.title.toLowerCase().includes(searchTerm.toLowerCase()))
   const currentSelectionCount = selectedAlbum ? selectedItemIds.size : selectedAlbumIds.size
 
   if (loading) {
