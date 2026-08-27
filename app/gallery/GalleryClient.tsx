@@ -53,7 +53,7 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
-// Trích xuất ID Drive thuần túy để tạo link ngắn
+// Trích xuất ID Drive thuần túy để tạo link rút gọn /s/[id]
 const extractDriveId = (url: string) => {
   if (!url) return ''
   const clean = url.trim()
@@ -478,6 +478,7 @@ export default function GalleryClient() {
       setItems(files)
       return files
     } catch (e) {
+      console.error(e)
       setItems([])
       return []
     } finally {
@@ -548,7 +549,9 @@ export default function GalleryClient() {
     const indicesToPreload = [
       (currentIndex + 1) % previewSourceList.length,
       (currentIndex + 2) % previewSourceList.length,
+      (currentIndex + 3) % previewSourceList.length,
       (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
+      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
     ]
 
     indicesToPreload.forEach(idx => {
@@ -600,13 +603,10 @@ export default function GalleryClient() {
   const handleTouchEnd = () => {
     if (!touchStartX.current || !touchEndX.current) return
     const distance = touchStartX.current - touchEndX.current
-    const isLeftSwipe = distance > 45
-    const isRightSwipe = distance < -45
-
-    if (isLeftSwipe) {
+    if (distance > 45) {
       handleNextImage()
     }
-    if (isRightSwipe) {
+    if (distance < -45) {
       handlePrevImage()
     }
 
@@ -902,12 +902,11 @@ export default function GalleryClient() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // Chia sẻ Thư mục con: Link ngắn /s/[id_album]/[id_thu_muc]
+  // Chia sẻ Thư mục con: Link ngắn /s/[id_thu_muc] (Không ghép 2 ID)
   const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!selectedAlbum) return
-    const cleanAlbumId = extractDriveId(selectedAlbum.driveUrl) || selectedAlbum.id
-    const shareUrl = `${window.location.origin}/s/${cleanAlbumId}/${folder.id}`
+    const cleanFolderId = extractDriveId(folder.id) || folder.id
+    const shareUrl = `${window.location.origin}/s/${cleanFolderId}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(folder.id)
     setTimeout(() => setShareCopiedId(null), 2500)
@@ -1085,14 +1084,13 @@ export default function GalleryClient() {
     }
   }
 
-  // TỰ ĐỘNG NHẬN DIỆN CẢ LINK SIÊU NGẮN /s/[id]/[folderId] LẪN QUERY CŨ
+  // TỰ ĐỘNG NHẬN DIỆN CẢ LINK SIÊU NGẮN /s/[id]
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
     
     const params = new URLSearchParams(window.location.search)
     const sharedId = isShortRoute ? pathParts[1] : params.get('id')
-    const sharedFolderId = isShortRoute ? pathParts[2] : (params.get('f') || params.get('folder'))
 
     if (sharedId) {
       setIsSharedGuest(true)
@@ -1100,46 +1098,37 @@ export default function GalleryClient() {
       fetchCustomNames()
 
       // Hỗ trợ tìm album theo cả id hoặc drive_url
-      supabase.from('albums').select('*').or(`id.eq.${sharedId},drive_url.ilike.%${sharedId}%`).single().then(async ({ data }) => {
-        if (data) {
-          const sharedAlbumObj: Album = {
-            id: data.id,
-            title: data.title,
-            coverUrl: data.cover_url || '',
-            driveUrl: data.drive_url
-          }
-          setSelectedAlbum(sharedAlbumObj)
-
-          if (sharedFolderId) {
-            const folderDriveUrl = `https://drive.google.com/drive/folders/${sharedFolderId}`
-            setFolderHistory([{ id: sharedFolderId, title: data.title, driveUrl: folderDriveUrl }])
-            await fetchAlbumImages(folderDriveUrl)
-            document.title = `${data.title} - Dinh Thong Gallery`
-          } else {
+      supabase
+        .from('albums')
+        .select('*')
+        .or(`id.eq.${sharedId},drive_url.ilike.%${sharedId}%`)
+        .maybeSingle()
+        .then(async ({ data }) => {
+          if (data) {
+            const sharedAlbumObj: Album = {
+              id: data.id,
+              title: data.title,
+              coverUrl: data.cover_url || '',
+              driveUrl: data.drive_url
+            }
+            setSelectedAlbum(sharedAlbumObj)
             setFolderHistory([])
             await fetchAlbumImages(sharedAlbumObj.driveUrl)
-            document.title = `${data.title} - Dinh Thong Gallery`
-          }
-        } else {
-          // Fallback nếu link chia sẻ là thẳng folder ID Drive
-          const folderDriveUrl = `https://drive.google.com/drive/folders/${sharedId}`
-          const fallbackAlbum: Album = {
-            id: sharedId,
-            title: 'Album Chia Sẻ',
-            coverUrl: '',
-            driveUrl: folderDriveUrl
-          }
-          setSelectedAlbum(fallbackAlbum)
-          if (sharedFolderId) {
-            const subFolderUrl = `https://drive.google.com/drive/folders/${sharedFolderId}`
-            setFolderHistory([{ id: sharedFolderId, title: 'Thư mục', driveUrl: subFolderUrl }])
-            await fetchAlbumImages(subFolderUrl)
+            document.title = `${data.title}- Dinh Thong Gallery`
           } else {
+            // Mở thẳng Thư mục con
+            const folderDriveUrl = `https://drive.google.com/drive/folders/${sharedId}`
+            const fallbackAlbum: Album = {
+              id: sharedId,
+              title: 'Thư mục',
+              coverUrl: '',
+              driveUrl: folderDriveUrl
+            }
+            setSelectedAlbum(fallbackAlbum)
             await fetchAlbumImages(folderDriveUrl)
           }
-        }
-        setLoading(false)
-      })
+          setLoading(false)
+        })
       
       const savedRatings = localStorage.getItem('dinhthong_image_ratings')
       if (savedRatings) {
@@ -1177,7 +1166,7 @@ export default function GalleryClient() {
         await fetchHiddenItemIds()
         const knownSet = await fetchKnownFolderIds()
         await fetchCustomNames()
-        const currentAlbs = await fetchAlbumsFromSupabase()
+        await fetchAlbumsFromSupabase()
         const masterFolders = await fetchMasterFoldersList()
 
         // TỰ ĐỘNG QUÉT KIỂM TRA DRIVE KHI ADMIN MỞ TRANG

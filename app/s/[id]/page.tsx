@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  // 1. Kiểm tra thư mục con đổi tên
+  // 1. Kiểm tra nếu là thư mục con đã đổi tên
   const { data: customData } = await supabase
     .from('custom_item_names')
     .select('custom_name')
@@ -29,7 +29,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
     title = `${customData.custom_name}- Dinh Thong Gallery`
     coverImage = `https://lh3.googleusercontent.com/d/${id}=w1000`
   } else {
-    // 2. Kiểm tra Album
+    // 2. Kiểm tra trong danh sách Album
     const { data: albumData } = await supabase
       .from('albums')
       .select('title, cover_url')
