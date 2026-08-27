@@ -1308,7 +1308,34 @@ export default function GalleryClient() {
       }
     }
   }
+// >>> DÁN HÀM HANDLESETASCOVER VÀO ĐÂY (DÒNG 1311) <<<
+  const handleSetAsCover = async (targetId: string, imageId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const formattedCover = `https://lh3.googleusercontent.com/d/${imageId}=w1000`
+    
+    const isAlbum = albums.some(a => a.id === targetId)
 
+    if (isAlbum) {
+      const { error } = await supabase.from('albums').update({ cover_url: formattedCover }).eq('id', targetId)
+      if (!error) {
+        await fetchAlbumsFromSupabase()
+        alert('Đã cập nhật ảnh bìa album thành công! Ảnh này cũng sẽ làm thumbnail khi chia sẻ link.')
+      } else {
+        alert('Lỗi cập nhật ảnh bìa: ' + error.message)
+      }
+    } else {
+      const { error } = await supabase.from('albums').upsert([
+        { id: targetId, title: customNames[targetId] || 'Thư mục', drive_url: `https://drive.google.com/drive/folders/${targetId}`, cover_url: formattedCover }
+      ], { onConflict: 'id' })
+
+      if (!error) {
+        setAlbumCovers(prev => ({ ...prev, [targetId]: formattedCover }))
+        alert('Đã cập nhật ảnh bìa thư mục con thành công!')
+      } else {
+        alert('Lỗi cập nhật ảnh bìa: ' + error.message)
+      }
+    }
+  }
   const handleRateImage = (imageId: string, stars: number) => {
     const newRatings = { ...ratings, [imageId]: stars }
     setRatings(newRatings)
@@ -2687,6 +2714,21 @@ export default function GalleryClient() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
+              {/* NÚT ĐẶT LÀM ẢNH BÌA */}
+              {!isSharedGuest && previewMedia && previewMedia.type === 'image' && (
+                <button
+                  onClick={(e) => {
+                    const targetId = (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : selectedAlbum?.id) || previewMedia.id
+                    handleSetAsCover(targetId, previewMedia.id, e)
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow transition cursor-pointer whitespace-nowrap"
+                  title="Đặt ảnh này làm bìa album và thumbnail chia sẻ"
+                >
+                  <Star className="w-3.5 h-3.5 fill-current" />
+                  <span className="hidden xs:inline">Làm ảnh bìa</span>
+                </button>
+              )}
+
               {!isSharedGuest && (
                 <button 
                   onClick={(e) => handlePermanentlyHideItem(previewMedia.id, customNames[previewMedia.id] || previewMedia.name, e)}
@@ -2717,7 +2759,6 @@ export default function GalleryClient() {
                 <X className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
             </div>
-          </div>
 
           <div 
             onClick={(e) => e.stopPropagation()} 
