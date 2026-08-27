@@ -10,7 +10,7 @@ interface ShortPageProps {
 
 export async function generateMetadata({ params }: ShortPageProps) {
   const { id } = await params
-  let title = 'Dinh Thong Gallery'
+  let targetTitle = ''
   let coverImage = 'https://dinhthong-gallery.vercel.app/banner.jpg'
 
   const supabase = createClient(
@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  // 1. Kiểm tra nếu là thư mục con đã đổi tên
+  // 1. Kiểm tra tên tùy chỉnh do admin đặt trước trong database
   const { data: customData } = await supabase
     .from('custom_item_names')
     .select('custom_name')
@@ -26,34 +26,58 @@ export async function generateMetadata({ params }: ShortPageProps) {
     .maybeSingle()
 
   if (customData?.custom_name) {
-    title = `${customData.custom_name}- Dinh Thong Gallery`
+    targetTitle = customData.custom_name
     coverImage = `https://lh3.googleusercontent.com/d/${id}=w1000`
-  } else {
-    // 2. Kiểm tra trong danh sách Album
+  }
+
+  // 2. Nếu chưa có, kiểm tra trong bảng albums
+  if (!targetTitle) {
     const { data: albumData } = await supabase
       .from('albums')
-      .select('title, cover_url')
+      .select('title, cover_url, drive_url')
       .or(`id.eq.${id},drive_url.ilike.%${id}%`)
       .maybeSingle()
 
     if (albumData?.title) {
-      title = `${albumData.title}- Dinh Thong Gallery`
+      targetTitle = albumData.title
       if (albumData.cover_url) {
         coverImage = albumData.cover_url
       }
     }
   }
 
+  // 3. Nếu vẫn chưa có, gọi Google Drive API để lấy tên thực tế của thư mục
+  if (!targetTitle && process.env.GOOGLE_DRIVE_API_KEY) {
+    try {
+      const driveRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${id}?fields=name&key=${process.env.GOOGLE_DRIVE_API_KEY}`,
+        { cache: 'no-store' }
+      )
+      if (driveRes.ok) {
+        const driveData = await driveRes.json()
+        if (driveData.name) {
+          targetTitle = driveData.name
+          coverImage = `https://lh3.googleusercontent.com/d/${id}=w1000`
+        }
+      }
+    } catch {}
+  }
+
+  // Cú pháp chuẩn: Tên album - Dinh Thong Gallery
+  const finalTitle = targetTitle 
+    ? `${targetTitle} - Dinh Thong Gallery` 
+    : 'Dinh Thong Gallery'
+
   return {
-    title,
+    title: finalTitle,
     openGraph: {
-      title,
+      title: finalTitle,
       description: 'Khoảnh khắc lưu giữ cảm xúc',
       images: [{ url: coverImage }],
     },
     twitter: {
       card: 'summary_large_image',
-      title,
+      title: finalTitle,
       description: 'Khoảnh khắc lưu giữ cảm xúc',
       images: [coverImage],
     }

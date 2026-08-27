@@ -549,9 +549,7 @@ export default function GalleryClient() {
     const indicesToPreload = [
       (currentIndex + 1) % previewSourceList.length,
       (currentIndex + 2) % previewSourceList.length,
-      (currentIndex + 3) % previewSourceList.length,
       (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
-      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
     ]
 
     indicesToPreload.forEach(idx => {
@@ -892,21 +890,20 @@ export default function GalleryClient() {
     }
   }
 
-  // Chia sẻ Album: Link ngắn /s/[id_ngan]
+  // Chia sẻ Album: Link ngắn /s/[id] (ID số hoặc ID Drive)
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
-    const cleanId = extractDriveId(album.driveUrl) || album.id
-    const shareUrl = `${window.location.origin}/s/${cleanId}`
+    const shareId = album.id || extractDriveId(album.driveUrl)
+    const shareUrl = `${window.location.origin}/s/${shareId}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(album.id)
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // Chia sẻ Thư mục con: Link ngắn /s/[id_thu_muc] (Không ghép 2 ID)
+  // Chia sẻ Thư mục con: Link ngắn /s/[folder_id] (1 ID duy nhất)
   const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
     e.stopPropagation()
-    const cleanFolderId = extractDriveId(folder.id) || folder.id
-    const shareUrl = `${window.location.origin}/s/${cleanFolderId}`
+    const shareUrl = `${window.location.origin}/s/${folder.id}`
     navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(folder.id)
     setTimeout(() => setShareCopiedId(null), 2500)
@@ -1084,7 +1081,7 @@ export default function GalleryClient() {
     }
   }
 
-  // TỰ ĐỘNG NHẬN DIỆN CẢ LINK SIÊU NGẮN /s/[id]
+  // TỰ ĐỘNG NHẬN DIỆN CẢ LINK SIÊU NGẮN /s/[id] VÀ TÊN THỰC TẾ
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
@@ -1114,17 +1111,25 @@ export default function GalleryClient() {
             setSelectedAlbum(sharedAlbumObj)
             setFolderHistory([])
             await fetchAlbumImages(sharedAlbumObj.driveUrl)
-            document.title = `${data.title}- Dinh Thong Gallery`
+            document.title = `${data.title} - Dinh Thong Gallery`
           } else {
-            // Mở thẳng Thư mục con
+            // Lấy tên tùy chỉnh từ bảng custom_item_names
+            const { data: customData } = await supabase
+              .from('custom_item_names')
+              .select('custom_name')
+              .eq('id', sharedId)
+              .maybeSingle()
+
+            const actualTitle = customData?.custom_name || 'Thư mục'
             const folderDriveUrl = `https://drive.google.com/drive/folders/${sharedId}`
             const fallbackAlbum: Album = {
               id: sharedId,
-              title: 'Thư mục',
+              title: actualTitle,
               coverUrl: '',
               driveUrl: folderDriveUrl
             }
             setSelectedAlbum(fallbackAlbum)
+            document.title = `${actualTitle} - Dinh Thong Gallery`
             await fetchAlbumImages(folderDriveUrl)
           }
           setLoading(false)
