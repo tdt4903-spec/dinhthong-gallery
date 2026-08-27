@@ -64,7 +64,7 @@ const extractDriveId = (url: string) => {
   return clean.replace(/[^a-zA-Z0-9_-]/g, '')
 }
 
-// Chuyển đổi ID chuỗi dài thành DÃY SỐ NGẮN (6 số)[cite: 3]
+// Chuyển đổi ID chuỗi dài thành DÃY SỐ NGẮN (6 số)
 const toNumericCode = (str: string) => {
   if (!str) return ''
   if (/^\d{6}$/.test(str)) return str
@@ -560,7 +560,9 @@ export default function GalleryClient() {
     const indicesToPreload = [
       (currentIndex + 1) % previewSourceList.length,
       (currentIndex + 2) % previewSourceList.length,
+      (currentIndex + 3) % previewSourceList.length,
       (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
+      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
     ]
 
     indicesToPreload.forEach(idx => {
@@ -901,7 +903,7 @@ export default function GalleryClient() {
     }
   }
 
-  // Chia sẻ Album: Link ngắn /s/[MÃ_SỐ_NGẮN]
+  // Chia sẻ Album: Link ngắn /s/[MÃ_SỐ_NGẮN][cite: 3]
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const numericCode = toNumericCode(album.id)
@@ -911,7 +913,7 @@ export default function GalleryClient() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // Chia sẻ Thư mục con: Link ngắn /s/[MÃ_SỐ_NGẮN]
+  // Chia sẻ Thư mục con: Link ngắn /s/[MÃ_SỐ_NGẮN][cite: 3]
   const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
     e.stopPropagation()
     const numericCode = toNumericCode(folder.id)
@@ -1093,7 +1095,7 @@ export default function GalleryClient() {
     }
   }
 
-  // TỰ ĐỘNG NHẬN DIỆN CẢ LINK SIÊU NGẮN (DÃY SỐ) VÀ HIỂN THỊ TÊN ADMIN ĐẶT
+  // TỰ ĐỘNG NHẬN DIỆN CẢ LINK SIÊU NGẮN (DÃY SỐ) VÀ HIỂN THỊ TÊN ADMIN ĐẶT[cite: 3]
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
@@ -1308,7 +1310,8 @@ export default function GalleryClient() {
       }
     }
   }
-// >>> DÁN HÀM HANDLESETASCOVER VÀO ĐÂY (DÒNG 1311) <<<
+
+  // Hàm xử lý lưu ảnh bìa vào Database
   const handleSetAsCover = async (targetId: string, imageId: string, e: React.MouseEvent) => {
     e.stopPropagation()
     const formattedCover = `https://lh3.googleusercontent.com/d/${imageId}=w1000`
@@ -1336,6 +1339,7 @@ export default function GalleryClient() {
       }
     }
   }
+
   const handleRateImage = (imageId: string, stars: number) => {
     const newRatings = { ...ratings, [imageId]: stars }
     setRatings(newRatings)
@@ -1385,7 +1389,7 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-     {/* Header */}
+      {/* Header */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/90 border-white/10' : 'bg-white/90 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
           
@@ -1409,7 +1413,7 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          {/* Cụm công cụ bên phải (Tự động cuộn ngang mượt trên di động) */}
+          {/* Cụm công cụ bên phải */}
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[65vw] sm:max-w-none">
             {selectedAlbum ? (
               <>
@@ -1591,7 +1595,7 @@ export default function GalleryClient() {
 
             <div className={`w-full h-[1px] mb-8 sm:mb-12 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
-            {/* TIÊU ĐỀ THƯ MỤC ALBUM VÀ NÚT DỌN DẸP BỐ CỤC[cite: 3] */}
+            {/* TIÊU ĐỀ THƯ MỤC ALBUM VÀ NÚT DỌN DẸP BỐ CỤC */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 sm:mb-8">
               <div className="flex items-center gap-3">
                 <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
@@ -1651,7 +1655,7 @@ export default function GalleryClient() {
                       
                       <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
-                      {/* NÚT TICK CHỌN CHECKBOX TRÊN ALBUM[cite: 3] */}
+                      {/* NÚT TICK CHỌN CHECKBOX TRÊN ALBUM */}
                       <button
                         onClick={(e) => handleToggleSelectAlbum(album.id, e)}
                         className="absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
@@ -1749,7 +1753,7 @@ export default function GalleryClient() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {/* NÚT MỞ DANH SÁCH ẨN/HIỆN CHI TIẾT[cite: 3] */}
+                {/* NÚT MỞ DANH SÁCH ẨN/HIỆN CHI TIẾT */}
                 {!isSharedGuest && (
                   <button
                     onClick={handleOpenVisibilityManager}
@@ -1813,7 +1817,7 @@ export default function GalleryClient() {
               </div>
             ) : (
               <div className="space-y-10">
-                {/* 1. KHU VỰC THƯ MỤC CON[cite: 3] */}
+                {/* 1. KHU VỰC THƯ MỤC CON */}
                 {subFolders.length > 0 && (
                   <div>
                     <div className="flex items-center gap-2 mb-4">
@@ -1863,7 +1867,7 @@ export default function GalleryClient() {
 
                                 <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
-                                {/* NÚT TICK CHỌN CHECKBOX THƯ MỤC CON[cite: 3] */}
+                                {/* NÚT TICK CHỌN CHECKBOX THƯ MỤC CON */}
                                 <button
                                   onClick={(e) => handleToggleSelectItem(folder.id, e)}
                                   className="absolute bottom-2.5 left-2.5 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
@@ -1932,7 +1936,7 @@ export default function GalleryClient() {
                   </div>
                 )}
 
-                {/* 2. KHU VỰC HÌNH ẢNH & VIDEO[cite: 3] */}
+                {/* 2. KHU VỰC HÌNH ẢNH & VIDEO */}
                 {mediaFiles.length > 0 && (
                   <div>
                     {subFolders.length > 0 && (
@@ -1987,7 +1991,7 @@ export default function GalleryClient() {
                                   />
                                 )}
 
-                                {/* NÚT TICK CHỌN CHECKBOX TỪNG FILE ẢNH/VIDEO[cite: 3] */}
+                                {/* NÚT TICK CHỌN CHECKBOX TỪNG FILE ẢNH/VIDEO */}
                                 <button
                                   onClick={(e) => handleToggleSelectItem(item.id, e)}
                                   className="absolute bottom-2 left-2 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
@@ -2065,7 +2069,7 @@ export default function GalleryClient() {
         )}
       </main>
 
-      {/* THANH CÔNG CỤ NỔI KHI TICK CHỌN CHECKBOX (BATCH ACTION BAR)[cite: 3] */}
+      {/* THANH CÔNG CỤ NỔI KHI TICK CHỌN CHECKBOX (BATCH ACTION BAR) */}
       {currentSelectionCount > 0 && (
         <div className="fixed bottom-6 inset-x-0 z-40 flex justify-center px-4 animate-in slide-in-from-bottom-5 duration-200">
           <div className="flex items-center gap-2.5 sm:gap-4 px-4 sm:px-6 py-3 rounded-2xl bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white shadow-2xl border border-white/15">
@@ -2108,7 +2112,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL QUẢN LÝ ẨN / HIỆN DANH SÁCH CHI TIẾT TRONG ALBUM[cite: 3] */}
+      {/* MODAL QUẢN LÝ ẨN / HIỆN DANH SÁCH CHI TIẾT TRONG ALBUM */}
       {isManageVisibilityOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
@@ -2217,7 +2221,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* POPUP KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC CON MỚI TRÊN DRIVE[cite: 3] */}
+      {/* POPUP KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC CON MỚI TRÊN DRIVE */}
       {isSyncModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
@@ -2301,7 +2305,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL SỬA TÊN HIỂN THỊ THƯ MỤC CON[cite: 3] */}
+      {/* MODAL SỬA TÊN HIỂN THỊ THƯ MỤC CON */}
       {editingSubFolder && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
@@ -2351,7 +2355,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL QUẢN LÝ NHIỀU THƯ MỤC TỔNG[cite: 3] */}
+      {/* MODAL QUẢN LÝ NHIỀU THƯ MỤC TỔNG */}
       {isMasterModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-lg rounded-2xl p-6 shadow-2xl border transition-all ${
@@ -2443,7 +2447,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL QUẢN LÝ & TẠO KEY[cite: 3] */}
+      {/* MODAL QUẢN LÝ & TẠO KEY */}
       {isKeyGenOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4">
           <div className="bg-white text-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -2615,7 +2619,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Chỉnh Sửa Album[cite: 3] */}
+      {/* Modal Chỉnh Sửa Album */}
       {editingAlbum && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
@@ -2691,7 +2695,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Xem Trước Tệp[cite: 3] */}
+      {/* Modal Xem Trước Tệp */}
       {previewMedia && (
         <div 
           onClick={handleClosePreview}
@@ -2759,6 +2763,7 @@ export default function GalleryClient() {
                 <X className="w-5 h-5 sm:w-6 sm:h-6" />
               </button>
             </div>
+          </div>
 
           <div 
             onClick={(e) => e.stopPropagation()} 
@@ -2860,7 +2865,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Quản Lý Danh Sách Tệp Đã Chọn[cite: 3] */}
+      {/* Modal Quản Lý Danh Sách Tệp Đã Chọn */}
       {isAdminPanelOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-lg rounded-2xl p-5 sm:p-6 shadow-2xl border transition-all ${
@@ -2958,7 +2963,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Thêm Album[cite: 3] */}
+      {/* Modal Thêm Album */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-5 sm:p-6 shadow-2xl border transition-all ${
@@ -3033,7 +3038,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Footer[cite: 3] */}
+      {/* Footer */}
       <footer className={`border-t py-6 sm:py-8 text-xs transition-colors ${
         isDarkMode ? 'border-white/10 text-gray-500' : 'border-gray-100 text-gray-400'
       }`}>
