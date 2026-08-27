@@ -24,7 +24,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
       .eq('id', folderId)
       .single()
     if (customData?.custom_name) {
-      title = `${customData.custom_name} - Dinh Thong Gallery`
+      title = `${customData.custom_name}- Dinh Thong Gallery`
     }
     coverImage = `https://lh3.googleusercontent.com/d/${folderId}=w1000`
   } else if (albumId) {
@@ -34,7 +34,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
       .or(`id.eq.${albumId},drive_url.ilike.%${albumId}%`)
       .maybeSingle()
     if (albumData?.title) {
-      title = `${albumData.title} - Dinh Thong Gallery`
+      title = `${albumData.title}- Dinh Thong Gallery`
       if (albumData.cover_url) {
         coverImage = albumData.cover_url
       }
