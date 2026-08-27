@@ -1360,54 +1360,30 @@ export default function GalleryClient() {
       
      {/* Header */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/90 border-white/10' : 'bg-white/90 border-gray-100'}`}>
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 sm:py-0 sm:h-20 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
           
-          {/* Hàng 1 trên mobile: Logo và Avatar/Theme */}
-          <div className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-3">
-            <div onClick={() => !isSharedGuest && setSelectedAlbum(null)} className={`flex items-baseline gap-1 ${!isSharedGuest ? 'cursor-pointer' : ''}`}>
-              <span className="text-xl sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
-              <span className="font-serif italic text-emerald-600 text-base sm:text-lg">gallery</span>
-            </div>
-
-            {/* Các nút icon bên phải trên mobile */}
-            <div className="flex items-center gap-2 sm:hidden">
-              <button
-                onClick={() => setIsDarkMode(!isDarkMode)}
-                className={`p-2 rounded-full border transition cursor-pointer ${
-                  isDarkMode ? 'border-white/10 hover:bg-white/10 text-emerald-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
+          {/* Logo */}
+          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+            {selectedAlbum && !isSharedGuest && (
+              <button 
+                onClick={handleBackToParentFolder}
+                className={`p-1.5 sm:p-2 rounded-full border transition cursor-pointer ${
+                  isDarkMode ? 'border-white/10 hover:bg-white/10 text-white' : 'border-gray-200 hover:bg-gray-100 text-gray-700'
                 }`}
+                title="Quay lại"
               >
-                {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                <BackIcon className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
+            )}
 
-              {!isSharedGuest && (
-                <div className="flex items-center gap-2 pl-2 border-l border-gray-200 dark:border-white/10">
-                  {user?.user_metadata?.avatar_url ? (
-                    <img 
-                      src={user.user_metadata.avatar_url} 
-                      alt="Avatar" 
-                      className="w-7 h-7 rounded-full object-cover border border-emerald-500/50"
-                    />
-                  ) : (
-                    <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center text-xs font-bold">
-                      <UserIcon className="w-3.5 h-3.5" />
-                    </div>
-                  )}
-
-                  <button
-                    onClick={handleSignOut}
-                    className="p-1.5 rounded-full text-gray-400 hover:text-red-500 transition cursor-pointer"
-                    title="Đăng xuất"
-                  >
-                    <LogOut className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
+            <div onClick={() => !isSharedGuest && setSelectedAlbum(null)} className={`flex items-baseline gap-1 ${!isSharedGuest ? 'cursor-pointer' : ''}`}>
+              <span className="text-lg sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
+              <span className="font-serif italic text-emerald-600 text-sm sm:text-lg">gallery</span>
             </div>
           </div>
 
-          {/* Hàng 2 trên mobile (hoặc bên phải trên PC): Các nút chức năng & Tìm kiếm */}
-          <div className="w-full sm:w-auto flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none justify-start sm:justify-end">
+          {/* Cụm công cụ bên phải (Tự động cuộn ngang mượt trên di động) */}
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[65vw] sm:max-w-none">
             {selectedAlbum ? (
               <>
                 <div className="relative w-32 sm:w-56 flex-shrink-0">
@@ -1447,8 +1423,8 @@ export default function GalleryClient() {
               </>
             ) : (
               !isSharedGuest && (
-                <div className="flex items-center gap-2 flex-nowrap sm:flex-wrap justify-start sm:justify-end w-full sm:w-auto">
-                  <div className="relative w-36 sm:w-52 flex-shrink-0">
+                <div className="flex items-center gap-2 flex-nowrap flex-shrink-0">
+                  <div className="relative w-32 sm:w-52 flex-shrink-0">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <input 
                       type="text"
@@ -1518,11 +1494,11 @@ export default function GalleryClient() {
               )
             )}
 
-            {/* Phần hiển thị trên máy tính (Desktop Theme & User) */}
-            <div className="hidden sm:flex items-center gap-2.5 pl-2 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
+            {/* Nút Đổi Theme & User Avatar */}
+            <div className="flex items-center gap-2 pl-2 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
               <button
                 onClick={() => setIsDarkMode(!isDarkMode)}
-                className={`p-2 rounded-full border transition cursor-pointer ${
+                className={`p-2 rounded-full border transition cursor-pointer flex-shrink-0 ${
                   isDarkMode ? 'border-white/10 hover:bg-white/10 text-emerald-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
                 }`}
               >
@@ -1530,23 +1506,23 @@ export default function GalleryClient() {
               </button>
 
               {!isSharedGuest && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-shrink-0">
                   {user?.user_metadata?.avatar_url ? (
                     <img 
                       src={user.user_metadata.avatar_url} 
                       alt="Avatar" 
-                      className="w-8 h-8 rounded-full object-cover border border-emerald-500/50"
+                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-emerald-500/50 flex-shrink-0"
                       title={user.email}
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center text-xs font-bold">
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center text-xs font-bold flex-shrink-0">
                       <UserIcon className="w-4 h-4" />
                     </div>
                   )}
 
                   <button
                     onClick={handleSignOut}
-                    className="p-1.5 rounded-full text-gray-400 hover:text-red-500 transition cursor-pointer"
+                    className="p-1.5 rounded-full text-gray-400 hover:text-red-500 transition cursor-pointer flex-shrink-0"
                     title="Đăng xuất"
                   >
                     <LogOut className="w-4 h-4" />
@@ -1559,7 +1535,7 @@ export default function GalleryClient() {
 
         </div>
       </header>
-      
+
       {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
         
