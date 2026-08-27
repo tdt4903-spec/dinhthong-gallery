@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  // 1. Kiểm tra tên tùy chỉnh do admin đặt trước trong database
+  // 1. Ưu tiên 1: Tên thư mục do Admin đổi trên Web (custom_item_names)
   const { data: customData } = await supabase
     .from('custom_item_names')
     .select('custom_name')
@@ -30,11 +30,11 @@ export async function generateMetadata({ params }: ShortPageProps) {
     coverImage = `https://lh3.googleusercontent.com/d/${id}=w1000`
   }
 
-  // 2. Nếu chưa có, kiểm tra trong bảng albums
+  // 2. Ưu tiên 2: Tên Album do Admin đặt khi tạo Album trên Web (albums)
   if (!targetTitle) {
     const { data: albumData } = await supabase
       .from('albums')
-      .select('title, cover_url, drive_url')
+      .select('title, cover_url')
       .or(`id.eq.${id},drive_url.ilike.%${id}%`)
       .maybeSingle()
 
@@ -46,24 +46,21 @@ export async function generateMetadata({ params }: ShortPageProps) {
     }
   }
 
-  // 3. Nếu vẫn chưa có, gọi Google Drive API để lấy tên thực tế của thư mục
-  if (!targetTitle && process.env.GOOGLE_DRIVE_API_KEY) {
-    try {
-      const driveRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files/${id}?fields=name&key=${process.env.GOOGLE_DRIVE_API_KEY}`,
-        { cache: 'no-store' }
-      )
-      if (driveRes.ok) {
-        const driveData = await driveRes.json()
-        if (driveData.name) {
-          targetTitle = driveData.name
-          coverImage = `https://lh3.googleusercontent.com/d/${id}=w1000`
-        }
-      }
-    } catch {}
+  // 3. Ưu tiên 3: Tên đã được duyệt trong known_drive_folders
+  if (!targetTitle) {
+    const { data: knownData } = await supabase
+      .from('known_drive_folders')
+      .select('name')
+      .eq('id', id)
+      .maybeSingle()
+
+    if (knownData?.name) {
+      targetTitle = knownData.name
+      coverImage = `https://lh3.googleusercontent.com/d/${id}=w1000`
+    }
   }
 
-  // Cú pháp chuẩn: Tên album - Dinh Thong Gallery
+  // Cú pháp Thumbnail chuẩn: Tên album - Dinh Thong Gallery
   const finalTitle = targetTitle 
     ? `${targetTitle} - Dinh Thong Gallery` 
     : 'Dinh Thong Gallery'

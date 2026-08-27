@@ -549,7 +549,9 @@ export default function GalleryClient() {
     const indicesToPreload = [
       (currentIndex + 1) % previewSourceList.length,
       (currentIndex + 2) % previewSourceList.length,
+      (currentIndex + 3) % previewSourceList.length,
       (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
+      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
     ]
 
     indicesToPreload.forEach(idx => {
@@ -1094,42 +1096,58 @@ export default function GalleryClient() {
       fetchHiddenItemIds()
       fetchCustomNames()
 
-      // Hỗ trợ tìm album theo cả id hoặc drive_url
+      // 1. Kiểm tra trong bảng albums do Admin tạo
       supabase
         .from('albums')
         .select('*')
         .or(`id.eq.${sharedId},drive_url.ilike.%${sharedId}%`)
         .maybeSingle()
-        .then(async ({ data }) => {
-          if (data) {
+        .then(async ({ data: albumData }) => {
+          if (albumData) {
             const sharedAlbumObj: Album = {
-              id: data.id,
-              title: data.title,
-              coverUrl: data.cover_url || '',
-              driveUrl: data.drive_url
+              id: albumData.id,
+              title: albumData.title,
+              coverUrl: albumData.cover_url || '',
+              driveUrl: albumData.drive_url
             }
             setSelectedAlbum(sharedAlbumObj)
             setFolderHistory([])
             await fetchAlbumImages(sharedAlbumObj.driveUrl)
-            document.title = `${data.title} - Dinh Thong Gallery`
+            document.title = `${albumData.title} - Dinh Thong Gallery`
           } else {
-            // Lấy tên tùy chỉnh từ bảng custom_item_names
+            // 2. Nếu là Thư mục con: Lấy tên Admin đặt từ custom_item_names hoặc known_drive_folders
+            let adminSetTitle = ''
+
             const { data: customData } = await supabase
               .from('custom_item_names')
               .select('custom_name')
               .eq('id', sharedId)
               .maybeSingle()
 
-            const actualTitle = customData?.custom_name || 'Thư mục'
+            if (customData?.custom_name) {
+              adminSetTitle = customData.custom_name
+            } else {
+              const { data: knownData } = await supabase
+                .from('known_drive_folders')
+                .select('name')
+                .eq('id', sharedId)
+                .maybeSingle()
+              
+              if (knownData?.name) {
+                adminSetTitle = knownData.name
+              }
+            }
+
             const folderDriveUrl = `https://drive.google.com/drive/folders/${sharedId}`
             const fallbackAlbum: Album = {
               id: sharedId,
-              title: actualTitle,
+              title: adminSetTitle || 'DinhThong Album',
               coverUrl: '',
               driveUrl: folderDriveUrl
             }
+
             setSelectedAlbum(fallbackAlbum)
-            document.title = `${actualTitle} - Dinh Thong Gallery`
+            document.title = `${adminSetTitle || 'DinhThong Album'} - Dinh Thong Gallery`
             await fetchAlbumImages(folderDriveUrl)
           }
           setLoading(false)
