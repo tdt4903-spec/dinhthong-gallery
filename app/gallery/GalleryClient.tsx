@@ -361,15 +361,11 @@ export default function GalleryClient() {
 
   // DỌN DẸP TRANG CHỦ: CHỈ GIỮ LẠI ĐÚNG CÁC THƯ MỤC TỔNG
   const handleCleanHomePage = async () => {
-    if (masterFoldersList.length === 0) {
-      alert('Chưa có Thư Mục Tổng nào trong cấu hình!')
-      return
-    }
-
-    const masterUrls = new Set(masterFoldersList.map(m => m.url.trim()))
+    if (!masterFoldersList || masterFoldersList.length === 0) return
     const masterIds = new Set(masterFoldersList.map(m => m.id))
-    const childAlbumsToDelete = (albums || []).filter(a => a && !masterUrls.has(a.driveUrl.trim()) && !masterIds.has(a.id))
+    const masterUrls = new Set(masterFoldersList.map(m => m.url.trim()))
 
+    const childAlbumsToDelete = (albums || []).filter(a => a && !masterUrls.has(a.driveUrl.trim()) && !masterIds.has(a.id))
     if (childAlbumsToDelete.length === 0) {
       alert('Trang chủ đã chuẩn xác, chỉ chứa các Thư Mục Tổng!')
       return
@@ -482,7 +478,6 @@ export default function GalleryClient() {
       setItems(files)
       return files
     } catch (e) {
-      console.error(e)
       setItems([])
       return []
     } finally {
@@ -897,7 +892,7 @@ export default function GalleryClient() {
     }
   }
 
-  // TỐI ƯU CỐ ĐỊNH LINK RÚT GỌN CHO ALBUM: /s/[DRIVE_ID]
+  // Chia sẻ Album: Link ngắn /s/[id_ngan]
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const cleanId = extractDriveId(album.driveUrl) || album.id
@@ -907,7 +902,7 @@ export default function GalleryClient() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // TỐI ƯU CỐ ĐỊNH LINK RÚT GỌN CHO THƯ MỤC CON: /s/[ALBUM_ID]/[FOLDER_ID]
+  // Chia sẻ Thư mục con: Link ngắn /s/[id_album]/[id_thu_muc]
   const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!selectedAlbum) return

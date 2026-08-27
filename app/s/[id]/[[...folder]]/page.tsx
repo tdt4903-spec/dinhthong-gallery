@@ -10,7 +10,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
   const folderId = folder && folder.length > 0 ? folder[0] : null
 
   let title = 'Dinh Thong Gallery'
-  let coverImage = '/banner.jpg'
+  let coverImage = 'https://dinhthong-gallery.vercel.app/banner.jpg'
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -26,12 +26,13 @@ export async function generateMetadata({ params }: ShortPageProps) {
     if (customData?.custom_name) {
       title = `${customData.custom_name} - Dinh Thong Gallery`
     }
+    coverImage = `https://lh3.googleusercontent.com/d/${folderId}=w1000`
   } else if (albumId) {
     const { data: albumData } = await supabase
       .from('albums')
       .select('title, cover_url')
       .or(`id.eq.${albumId},drive_url.ilike.%${albumId}%`)
-      .single()
+      .maybeSingle()
     if (albumData?.title) {
       title = `${albumData.title} - Dinh Thong Gallery`
       if (albumData.cover_url) {
@@ -44,13 +45,13 @@ export async function generateMetadata({ params }: ShortPageProps) {
     title,
     openGraph: {
       title,
-      description: 'Khoảnh khắc Lưu giữ cảm xúc - Dinh Thong Gallery',
-      images: [coverImage],
+      description: 'Khoảnh khắc lưu giữ cảm xúc',
+      images: [{ url: coverImage }],
     },
     twitter: {
       card: 'summary_large_image',
       title,
-      description: 'Khoảnh khắc Lưu giữ cảm xúc - Dinh Thong Gallery',
+      description: 'Khoảnh khắc lưu giữ cảm xúc',
       images: [coverImage],
     }
   }
