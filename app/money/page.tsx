@@ -11,7 +11,8 @@ import {
   GlassWater, Plus, ChevronLeft, ChevronRight, Download, 
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
-  ChevronDown, ChevronUp, PieChart, Layers, Filter, Loader2, LogOut, User as UserIcon
+  ChevronDown, ChevronUp, PieChart, Layers, Filter, Loader2, LogOut, User as UserIcon,
+  Sparkles, RotateCcw
 } from 'lucide-react'
 
 // Ánh xạ categoryId từ file backup
@@ -71,6 +72,70 @@ const INITIAL_INCOME_CATS = [
   { id: 'thu_no', name: 'Thu nợ', color: 'text-yellow-500 bg-yellow-50 border-yellow-200' },
 ]
 
+// Mảng các nút gợi ý tiền nhanh
+const QUICK_AMOUNT_PRESETS = [
+  { label: '+10k', val: 10000 },
+  { label: '+20k', val: 20000 },
+  { label: '+50k', val: 50000 },
+  { label: '+100k', val: 100000 },
+  { label: '+200k', val: 200000 },
+  { label: '+500k', val: 500000 },
+  { label: '+1 Tr', val: 1000000 },
+  { label: '+2 Tr', val: 2000000 },
+  { label: '+5 Tr', val: 5000000 },
+  { label: '+10 Tr', val: 10000000 },
+]
+
+// Hàm chuyển số thành chữ tiếng Việt
+function readVietnameseNumber(number: number): string {
+  if (!number || isNaN(number) || number <= 0) return ''
+  const units = ['', 'nghìn', 'triệu', 'tỷ', 'nghìn tỷ', 'triệu tỷ']
+  const digits = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín']
+
+  function readGroup(group: number, full: boolean = false): string {
+    const a = Math.floor(group / 100)
+    const b = Math.floor((group % 100) / 10)
+    const c = group % 10
+    let res = ''
+    if (a > 0 || full) {
+      res += digits[a] + ' trăm '
+    }
+    if (b > 1) {
+      res += digits[b] + ' mươi '
+    } else if (b === 1) {
+      res += 'mười '
+    } else if (a > 0 && c > 0) {
+      res += 'lẻ '
+    }
+    if (b > 1 && c === 1) {
+      res += 'mốt'
+    } else if (b > 0 && c === 5) {
+      res += 'lăm'
+    } else if (c > 0 || (a === 0 && b === 0 && group === 0)) {
+      res += digits[c]
+    }
+    return res.trim()
+  }
+
+  const s = Math.floor(number).toString()
+  const groups: number[] = []
+  for (let i = s.length; i > 0; i -= 3) {
+    groups.push(parseInt(s.substring(Math.max(0, i - 3), i), 10))
+  }
+
+  let result = ''
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (groups[i] > 0) {
+      const gStr = readGroup(groups[i], i < groups.length - 1)
+      result += gStr + ' ' + units[i] + ' '
+    }
+  }
+
+  result = result.trim()
+  if (!result) return ''
+  return result.charAt(0).toUpperCase() + result.slice(1) + ' đồng'
+}
+
 interface Transaction {
   id: string
   type: 'expense' | 'income'
@@ -103,7 +168,7 @@ export default function MoneyManagerPage() {
 
   // Biểu đồ: 2 Tab Thống kê & Phân loại + Bộ lọc theo Tháng/Năm được chọn
   const [chartSubTab, setChartSubTab] = useState<'stats' | 'category'>('stats')
-  const [chartPeriodMode, setChartPeriodMode] = useState<'month' | 'year' | 'all'>('month')
+  const [chartPeriodMode, setChartPeriodMode] = useState<'year' | 'month' | 'all'>('year')
   const [chartSelectedYear, setChartSelectedYear] = useState<number>(2026)
   const [chartSelectedMonth, setChartSelectedMonth] = useState<number>(8)
 
@@ -167,6 +232,16 @@ export default function MoneyManagerPage() {
     }
   }
 
+  // Danh sách các ghi chú đã dùng trước đó để gợi ý nhanh
+  const noteSuggestions = useMemo(() => {
+    const setNotes = new Set<string>()
+    transactions
+      .filter(t => t.category === selectedCategory && t.note)
+      .slice(0, 20)
+      .forEach(t => setNotes.add(t.note))
+    return Array.from(setNotes).slice(0, 6)
+  }, [transactions, selectedCategory])
+
   // Trích xuất danh sách tất cả các năm có trong CSDL
   const availableYears = useMemo(() => {
     const yearSet = new Set<number>()
@@ -194,6 +269,30 @@ export default function MoneyManagerPage() {
 
   const formatCurrency = (val: number) => {
     return val.toLocaleString('vi-VN') + ' đ'
+  }
+
+  // Chuyển số tiền hiện tại thành chữ
+  const numericAmount = useMemo(() => {
+    return Number(amountStr.replace(/\D/g, '')) || 0
+  }, [amountStr])
+
+  const amountInWords = useMemo(() => {
+    return readVietnameseNumber(numericAmount)
+  }, [numericAmount])
+
+  // Thêm tiền nhanh qua gợi ý (+10k, +50k, ...)
+  const handleAddQuickAmount = (val: number) => {
+    const current = Number(amountStr.replace(/\D/g, '')) || 0
+    const nextVal = current + val
+    setAmountStr(nextVal.toLocaleString('vi-VN'))
+  }
+
+  const handleSetExactAmount = (val: number) => {
+    setAmountStr(val.toLocaleString('vi-VN'))
+  }
+
+  const handleClearAmount = () => {
+    setAmountStr('')
   }
 
   const handlePrevDay = () => {
@@ -431,6 +530,7 @@ export default function MoneyManagerPage() {
 
   const chartExpense = chartFiltered.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0)
   const chartIncome = chartFiltered.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0)
+  const chartRemaining = chartIncome - chartExpense
 
   // Gom phân loại danh mục trong kỳ biểu đồ
   const catStats = chartFiltered
@@ -590,7 +690,7 @@ export default function MoneyManagerPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
           {/* CỘT TRÁI: FORM NHẬP KHOẢN MỚI */}
-          <div className="lg:col-span-5 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
+          <div className="lg:col-span-5 bg-white p-6 sm:p-7 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
                 <h2 className="font-bold text-base text-slate-900 flex items-center gap-2">
@@ -598,13 +698,13 @@ export default function MoneyManagerPage() {
                   Nhập Khoản Mới
                 </h2>
 
-                <div className="flex items-center bg-slate-100 p-1 rounded-full">
+                <div className="flex items-center bg-slate-100 p-1.5 rounded-2xl">
                   <button
                     type="button"
                     onClick={() => { setType('expense'); setSelectedCategory('Ăn uống'); }}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
+                    className={`px-5 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
                       type === 'expense'
-                        ? 'bg-[#ffe8d6] text-[#e8590c] shadow-sm'
+                        ? 'bg-[#ffe8d6] text-[#e8590c] shadow-sm ring-1 ring-[#ffd8a8]'
                         : 'text-slate-500 hover:text-slate-800'
                     }`}
                   >
@@ -613,9 +713,9 @@ export default function MoneyManagerPage() {
                   <button
                     type="button"
                     onClick={() => { setType('income'); setSelectedCategory('Tiền lương'); }}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${
+                    className={`px-5 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
                       type === 'income'
-                        ? 'bg-[#e6fcf5] text-[#0ca678] shadow-sm'
+                        ? 'bg-[#e6fcf5] text-[#0ca678] shadow-sm ring-1 ring-[#b2f2bb]'
                         : 'text-slate-500 hover:text-slate-800'
                     }`}
                   >
@@ -624,22 +724,23 @@ export default function MoneyManagerPage() {
                 </div>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-                {/* Chọn ngày + Lịch trực tiếp */}
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-700 w-16">Ngày</span>
-                  <div className="flex-1 flex items-center justify-between bg-[#fff9db] border border-[#ffe066] px-3 py-2 rounded-xl font-semibold text-slate-800 relative">
-                    <button type="button" onClick={handlePrevDay} className="p-0.5 hover:text-orange-600 cursor-pointer">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                
+                {/* 1. Chọn ngày qua lịch */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Ngày thực hiện:</label>
+                  <div className="flex items-center justify-between bg-[#fff9db]/90 border border-[#ffe066] px-4 py-3 rounded-2xl font-bold text-slate-800 relative shadow-2xs hover:bg-[#fff9db] transition">
+                    <button type="button" onClick={handlePrevDay} className="p-1 hover:text-orange-600 cursor-pointer">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
                     
                     <div 
                       onClick={() => dateInputRef.current?.showPicker ? dateInputRef.current.showPicker() : dateInputRef.current?.focus()}
-                      className="flex items-center gap-1.5 cursor-pointer hover:text-orange-600 transition"
+                      className="flex items-center gap-2 cursor-pointer hover:text-orange-600 transition"
                       title="Bấm để chọn lịch"
                     >
                       <Calendar className="w-4 h-4 text-orange-500" />
-                      <span>{formatDateDisplay(currentDateStr)}</span>
+                      <span className="text-sm font-bold">{formatDateDisplay(currentDateStr)}</span>
                       <input 
                         type="date" 
                         ref={dateInputRef}
@@ -649,30 +750,65 @@ export default function MoneyManagerPage() {
                       />
                     </div>
 
-                    <button type="button" onClick={handleNextDay} className="p-0.5 hover:text-orange-600 cursor-pointer">
+                    <button type="button" onClick={handleNextDay} className="p-1 hover:text-orange-600 cursor-pointer">
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
 
-                {/* Ghi chú */}
-                <div className="flex items-center">
-                  <span className="font-semibold text-slate-700 w-16">Ghi chú</span>
+                {/* 2. Ô GHI CHÚ TO RÕ RÀNG KÈM GỢI Ý */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Nội dung chi tiết (Ghi chú):</label>
                   <input 
                     type="text"
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
-                    placeholder="Nhập nội dung chi tiết..."
-                    className="flex-1 py-2 px-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-orange-500 text-slate-800"
+                    placeholder="Ví dụ: Ăn sáng phở bò, Mua quà sinh nhật..."
+                    className="w-full py-3.5 px-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-orange-500 focus:bg-white text-sm font-medium text-slate-900 shadow-2xs transition"
                   />
+
+                  {/* Gợi ý các nội dung trước đó */}
+                  {noteSuggestions.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                      <span className="text-[11px] text-slate-400 font-semibold flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-amber-500" /> Gợi ý:
+                      </span>
+                      {noteSuggestions.map((sug, sIdx) => (
+                        <button
+                          key={sIdx}
+                          type="button"
+                          onClick={() => setNote(sug)}
+                          className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-orange-50 hover:text-orange-600 text-slate-600 text-[11px] font-medium transition cursor-pointer border border-slate-200"
+                        >
+                          {sug}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                {/* Số tiền */}
-                <div className="flex items-center">
-                  <span className="font-semibold text-slate-700 w-16">
-                    {type === 'expense' ? 'Tiền chi' : 'Tiền thu'}
-                  </span>
-                  <div className="flex-1 flex items-center bg-[#fff4e6] border border-[#ffd8a8] px-3.5 py-2.5 rounded-xl font-bold text-slate-900">
+                {/* 3. Ô NHẬP SỐ TIỀN TO LỚN KÈM ĐỌC CHỮ TIẾNG VIỆT */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700">
+                      {type === 'expense' ? 'Số tiền chi ra:' : 'Số tiền thu vào:'}
+                    </label>
+                    {numericAmount > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearAmount}
+                        className="text-[11px] text-red-500 hover:underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Xóa số tiền
+                      </button>
+                    )}
+                  </div>
+
+                  <div className={`flex items-center px-4 py-3.5 rounded-2xl border transition shadow-2xs ${
+                    type === 'expense'
+                      ? 'bg-[#fff4e6] border-[#ffd8a8] focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-200'
+                      : 'bg-[#e6fcf5] border-[#b2f2bb] focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-200'
+                  }`}>
                     <input 
                       type="text"
                       value={amountStr}
@@ -681,20 +817,46 @@ export default function MoneyManagerPage() {
                         setAmountStr(clean ? Number(clean).toLocaleString('vi-VN') : '')
                       }}
                       placeholder="0"
-                      className="w-full bg-transparent outline-none text-base font-bold text-slate-900"
+                      className={`w-full bg-transparent outline-none text-2xl sm:text-3xl font-extrabold ${
+                        type === 'expense' ? 'text-orange-600 placeholder-orange-300' : 'text-emerald-700 placeholder-emerald-300'
+                      }`}
                     />
-                    <span className="ml-1 text-slate-500 text-sm">đ</span>
+                    <span className="ml-2 font-bold text-lg text-slate-500">đ</span>
+                  </div>
+
+                  {/* Hiển thị dịch số thành chữ tiếng Việt */}
+                  {amountInWords ? (
+                    <div className="mt-1.5 px-3 py-1.5 bg-slate-100 rounded-xl text-xs font-semibold text-slate-700 italic border border-slate-200">
+                      Bằng chữ: <span className="text-slate-900 font-bold not-italic">{amountInWords}</span>
+                    </div>
+                  ) : null}
+
+                  {/* CÁC NÚT BẤM GỢI Ý CỘNG TIỀN NHANH */}
+                  <div className="mt-2.5">
+                    <p className="text-[11px] font-bold text-slate-500 mb-1.5">Gợi ý chọn / cộng dồn nhanh:</p>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {QUICK_AMOUNT_PRESETS.map((preset, pIdx) => (
+                        <button
+                          key={pIdx}
+                          type="button"
+                          onClick={() => handleAddQuickAmount(preset.val)}
+                          className="py-1.5 px-1 bg-white hover:bg-orange-500 hover:text-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer text-center"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
-                {/* Danh mục */}
+                {/* 4. Danh mục */}
                 <div className="pt-2">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-slate-700">Chọn Danh Mục:</span>
+                    <span className="font-bold text-xs text-slate-700">Chọn Danh Mục:</span>
                     <button
                       type="button"
                       onClick={() => setIsAddingCat(!isAddingCat)}
-                      className="text-orange-600 font-semibold flex items-center gap-1 hover:underline cursor-pointer"
+                      className="text-orange-600 font-bold text-xs flex items-center gap-1 hover:underline cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Thêm danh mục</span>
@@ -708,12 +870,12 @@ export default function MoneyManagerPage() {
                         value={newCatName} 
                         onChange={(e) => setNewCatName(e.target.value)} 
                         placeholder="Tên danh mục mới..."
-                        className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl outline-none text-xs"
+                        className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none text-xs"
                       />
                       <button 
                         type="button" 
                         onClick={handleAddCategory}
-                        className="px-3 py-1.5 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 cursor-pointer flex items-center gap-1"
+                        className="px-3.5 py-2 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 cursor-pointer flex items-center gap-1 text-xs shadow-sm"
                       >
                         <Check className="w-3.5 h-3.5" />
                         <span>Thêm</span>
@@ -728,7 +890,7 @@ export default function MoneyManagerPage() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-56 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-52 overflow-y-auto pr-1">
                     {currentCategories.map((cat) => {
                       const isSelected = selectedCategory === cat.name
                       return (
@@ -738,12 +900,12 @@ export default function MoneyManagerPage() {
                           onClick={() => setSelectedCategory(cat.name)}
                           className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-center transition cursor-pointer ${
                             isSelected 
-                              ? 'border-orange-500 bg-orange-50/80 shadow-sm ring-1 ring-orange-500' 
+                              ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-500/50 shadow-sm' 
                               : 'border-slate-100 bg-white hover:bg-slate-50'
                           }`}
                         >
                           <Tag className={`w-4 h-4 mb-1 ${cat.color.split(' ')[0]}`} />
-                          <span className="text-[10px] font-medium text-slate-700 truncate w-full">
+                          <span className="text-[11px] font-bold text-slate-700 truncate w-full">
                             {cat.name}
                           </span>
                         </button>
@@ -755,8 +917,10 @@ export default function MoneyManagerPage() {
                 <div className="pt-3">
                   <button
                     type="submit"
-                    className={`w-full py-3.5 rounded-2xl font-bold text-white text-sm shadow-md transition active:scale-95 cursor-pointer ${
-                      type === 'expense' ? 'bg-[#ff6b00] hover:bg-[#e8590c]' : 'bg-[#0ca678] hover:bg-[#099268]'
+                    className={`w-full py-4 rounded-2xl font-extrabold text-white text-base shadow-lg transition active:scale-95 cursor-pointer ${
+                      type === 'expense' 
+                        ? 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 shadow-orange-500/20' 
+                        : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-emerald-500/20'
                     }`}
                   >
                     {type === 'expense' ? 'Nhập Khoản Chi' : 'Nhập Khoản Thu'}
@@ -856,24 +1020,37 @@ export default function MoneyManagerPage() {
                 </div>
               )}
 
-              {/* THỐNG KÊ THU / CHI */}
+              {/* THỐNG KÊ THU / CHI / SỐ DƯ CÒN */}
               {chartSubTab === 'stats' ? (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {/* Thẻ 1: Tổng Thu */}
+                    <div className="p-4 bg-emerald-50/90 border border-emerald-200/80 rounded-2xl flex flex-col justify-between">
                       <div className="flex items-center gap-1.5 text-emerald-600 text-xs font-bold mb-1">
                         <ArrowUpRight className="w-4 h-4" />
                         <span>Tổng Thu Kỳ Này</span>
                       </div>
-                      <p className="text-lg sm:text-xl font-extrabold text-emerald-700">{formatCurrency(chartIncome)}</p>
+                      <p className="text-base sm:text-lg font-extrabold text-emerald-700 truncate">{formatCurrency(chartIncome)}</p>
                     </div>
 
-                    <div className="p-4 bg-red-50 border border-red-100 rounded-2xl">
+                    {/* Thẻ 2: Tổng Chi */}
+                    <div className="p-4 bg-red-50/90 border border-red-200/80 rounded-2xl flex flex-col justify-between">
                       <div className="flex items-center gap-1.5 text-red-600 text-xs font-bold mb-1">
                         <ArrowDownLeft className="w-4 h-4" />
                         <span>Tổng Chi Kỳ Này</span>
                       </div>
-                      <p className="text-lg sm:text-xl font-extrabold text-red-700">{formatCurrency(chartExpense)}</p>
+                      <p className="text-base sm:text-lg font-extrabold text-red-700 truncate">{formatCurrency(chartExpense)}</p>
+                    </div>
+
+                    {/* Thẻ 3: Số Dư Còn Lại */}
+                    <div className="p-4 bg-blue-50/90 border border-blue-200/80 rounded-2xl flex flex-col justify-between">
+                      <div className="flex items-center gap-1.5 text-blue-600 text-xs font-bold mb-1">
+                        <Wallet className="w-4 h-4" />
+                        <span>Số Dư Còn Kỳ Này</span>
+                      </div>
+                      <p className={`text-base sm:text-lg font-extrabold truncate ${chartRemaining >= 0 ? 'text-blue-700' : 'text-rose-600'}`}>
+                        {formatCurrency(chartRemaining)}
+                      </p>
                     </div>
                   </div>
 
@@ -886,7 +1063,7 @@ export default function MoneyManagerPage() {
                           : '0%'}
                       </span>
                     </div>
-                    <div className="w-full h-4 bg-red-400 rounded-full overflow-hidden flex">
+                    <div className="w-full h-3.5 bg-red-400 rounded-full overflow-hidden flex">
                       <div 
                         className="h-full bg-emerald-500 transition-all duration-500" 
                         style={{ width: `${chartIncome + chartExpense > 0 ? (chartIncome / (chartIncome + chartExpense)) * 100 : 50}%` }}
