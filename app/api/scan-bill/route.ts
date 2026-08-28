@@ -1,89 +1,46 @@
 import { NextResponse } from 'next/server'
+import { createWorker } from 'tesseract.js'
 
 export async function POST(req: Request) {
   try {
     const formData = await req.formData()
     const file = formData.get('file') as File
-
-    if (!file) {
-      return NextResponse.json({ success: false, error: 'Không tìm thấy file ảnh' }, { status: 400 })
-    }
+    if (!file) return NextResponse.json({ success: false, error: 'Không tìm thấy file ảnh' }, { status: 400 })
 
     const arrayBuffer = await file.arrayBuffer()
-    const base64Data = Buffer.from(arrayBuffer).toString('base64')
-    const mimeType = file.type && file.type.includes('image/') ? file.type : 'image/jpeg'
+    const worker = await createWorker('vie+eng')
+    const ret = await worker.recognize(Buffer.from(arrayBuffer))
+    await worker.terminate()
 
-    const apiKey = process.env.GEMINI_API_KEY
+    const text = ret.data.text || ''
+    const matches = text.match(/[\d,.]+/g) || []
+    const amounts: number[] = []
 
-    // Thử gọi AI Gemini để đọc chuẩn số tiền trên bill thực tế
-    if (apiKey && !apiKey.startsWith('AQ.')) {
-      try {
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
-        const aiRes = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { inline_data: { mime_type: mimeType, data: base64Data } },
-                { text: `Đọc biên lai chuyển khoản ngân hàng này và trả về ĐÚNG MỘT CHUỖI JSON thuần túy (không markdown):
-{
-  "amount": con số số tiền giao dịch chính xác dạng số nguyên, ví dụ 60000 hoặc 209000,
-  "note": "nội dung chuyển khoản hoặc ghi chú",
-  "date": "YYYY-MM-DD",
-  "type": "expense"
-}` }
-              ]
-            }]
-          })
-        })
-        const aiData = await aiRes.json()
-        const rawText = aiData?.candidates?.[0]?.content?.parts?.[0]?.text || ''
-        let cleanJson = rawText.trim().replace(/```json/g, '').replace(/```/g, '')
-        const firstOpen = cleanJson.indexOf('{')
-        const lastClose = cleanJson.lastIndexOf('}')
-        if (firstOpen !== -1 && lastClose !== -1) {
-          cleanJson = cleanJson.substring(firstOpen, lastClose + 1)
-          const parsed = JSON.parse(cleanJson)
-          if (parsed.amount && Number(parsed.amount) > 0) {
-            return NextResponse.json({
-              success: true,
-              amount: Number(parsed.amount),
-              note: parsed.note || 'Chuyển khoản bill',
-              date: parsed.date || new Date().toISOString().split('T')[0],
-              type: parsed.type || 'expense'
-            })
-          }
-        }
-      } catch (e) {
-        console.log('AI scan skipped')
+    for (const m of matches) {
+      const clean = parseInt(m.replace(/[,.]/g, ''), 10)
+      if (!isNaN(clean) && clean >= 10000 && clean <= 500000000) {
+        amounts.push(clean)
       }
     }
 
-    // BỘ NHẬN DIỆN THÔNG MINH DỰA TRÊN KÍCH THƯỚC FILE (Hỗ trợ phân biệt ảnh 60k và 209k)
-    // Nếu bạn tải ảnh 60k (VCB), dung lượng file thường khác ảnh Techcombank 209k
-    const fileSize = arrayBuffer.byteLength
-    let detectedAmount = 60000
-    let detectedNote = 'Chuyển tiền VCB'
+    const finalAmount = amounts.length > 0 ? amounts[0] : 50000
 
-    // Phân biệt dựa trên dung lượng hoặc tên file
-    if (file.name.includes('8304') || fileSize > 100000) {
-      detectedAmount = 209000
-      detectedNote = 'TRAN DINH THONG chuyen'
-    } else {
-      detectedAmount = 60000
-      detectedNote = 'TRAN DINH THONG chuyen tien'
+    let detectedDate = new Date().toISOString().split('T')[0]
+    const dateMatch = text.match(/(\d{2})[\/\-](\d{2})[\/\-](\d{4})/)
+    if (dateMatch) {
+      detectedDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`
     }
 
-    return NextResponse.json({
-      success: true,
-      amount: detectedAmount,
-      note: detectedNote,
-      date: '2026-08-27', // Khớp với ngày trên bill thực tế của bạn
-      type: 'expense'
-    })
+    let detectedNote = 'Chuyển khoản thanh toán'
+    for (const line of text.split('\n').map(l => l.trim()).filter(Boolean)) {
+      if (line.toLowerCase().includes('chuyen') || line.toLowerCase().includes('nội dung') || line.toLowerCase().includes('tran')) {
+        detectedNote = line
+        break
+      }
+    }
 
+    return NextResponse.json({ success: true, amount: finalAmount, note: detectedNote, date: detectedDate, type: 'expense' })
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
-}// update ocr
+}
