@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet, MoreVertical, LayoutGrid, ChevronDown
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet, MoreVertical, LayoutGrid, ChevronDown, Menu
 } from 'lucide-react'
 
 interface MediaItem {
@@ -120,6 +120,7 @@ export default function GalleryClient() {
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const [selectedAlbumIds, setSelectedAlbumIds] = useState<Set<string>>(new Set())
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
@@ -711,11 +712,11 @@ export default function GalleryClient() {
       let completedCount = 0
 
       const CONCURRENCY_LIMIT = 16
-      const fetchRawOriginalFile = async (file: MediaItem) => {
-        const ext = file.type === 'video' ? 'mp4' : 'jpg'
-        const exactFileName = file.name.includes('.') ? file.name : `${file.name}.${ext}`
+      const fetchRawOriginalFile = async (fileItem: MediaItem) => {
+        const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
+        const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
         try {
-          const res = await fetch(`/api/download?url=${encodeURIComponent(file.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
+          const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
           if (res.ok) {
             const blob = await res.blob()
             zip.file(exactFileName, blob, { compression: 'STORE' })
@@ -730,7 +731,7 @@ export default function GalleryClient() {
 
       for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
         const chunk = targetFiles.slice(i, i + CONCURRENCY_LIMIT)
-        await Promise.all(chunk.map(file => fetchRawOriginalFile(file)))
+        await Promise.all(chunk.map(fileItem => fetchRawOriginalFile(fileItem)))
       }
 
       setZipProgress('Vui lòng đợi...')
@@ -854,10 +855,10 @@ export default function GalleryClient() {
       if (!res.ok) throw new Error('Fetch failed')
       
       const blob = await res.blob()
-      const file = new File([blob], exactFileName, { type: mimeType })
+      const fileObj = new File([blob], exactFileName, { type: mimeType })
 
-      if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: exactFileName })
+      if (isIOS && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
+        await navigator.share({ files: [fileObj], title: exactFileName })
         setDownloadingId(null)
         return
       }
@@ -1259,15 +1260,16 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-      {/* HEADER: ĐÃ GỌN GÀNG, BỐ TRÍ TRỰC TIẾP CÁC NÚT */}
+      {/* HEADER TỐI ƯU MOBILE: BỐ TRÍ THÔNG MINH, GỌN GÀNG */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/95 border-white/10' : 'bg-white/95 border-gray-100'}`}>
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
           
+          {/* Logo & Nút Quay Lại */}
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {selectedAlbum && !isSharedGuest && (
               <button 
                 onClick={handleBackToParentFolder}
-                className={`p-2 rounded-full border transition cursor-pointer ${
+                className={`p-1.5 sm:p-2 rounded-full border transition cursor-pointer ${
                   isDarkMode ? 'border-white/10 hover:bg-white/10 text-white' : 'border-gray-200 hover:bg-gray-100 text-gray-700'
                 }`}
                 title="Quay lại"
@@ -1277,22 +1279,23 @@ export default function GalleryClient() {
             )}
 
             <div onClick={() => !isSharedGuest && setSelectedAlbum(null)} className={`flex items-baseline gap-1 ${!isSharedGuest ? 'cursor-pointer' : ''}`}>
-              <span className="text-lg sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
+              <span className="text-base sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
               <span className="font-serif italic text-emerald-600 text-xs sm:text-lg">gallery</span>
             </div>
           </div>
 
+          {/* Khu Vực Nút Điều Hướng (Responsive Desktop & Mobile Menu) */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0">
             {selectedAlbum ? (
               <>
-                <div className="relative w-28 sm:w-52">
+                <div className="relative w-24 sm:w-52">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                   <input 
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Tìm..."
-                    className={`w-full pl-8 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
+                    className={`w-full pl-7 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
                       isDarkMode 
                         ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
                         : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-2xs'
@@ -1303,7 +1306,7 @@ export default function GalleryClient() {
                 <button
                   onClick={(e) => handleDownloadAlbumZip(undefined, e)}
                   disabled={isZipping}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer disabled:opacity-60"
+                  className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer disabled:opacity-60"
                 >
                   {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                   <span className="hidden sm:inline">{isZipping ? zipProgress : 'Tải album'}</span>
@@ -1311,7 +1314,7 @@ export default function GalleryClient() {
 
                 <button
                   onClick={() => setIsAdminPanelOpen(true)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer"
                 >
                   <ClipboardList className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">Ảnh chọn</span>
@@ -1323,13 +1326,14 @@ export default function GalleryClient() {
             ) : (
               !isSharedGuest && (
                 <>
+                  {/* Ô tìm kiếm thu gọn trên mobile */}
                   <div className="relative w-24 sm:w-44">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <input 
                       type="text"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Tìm album..."
+                      placeholder="Tìm..."
                       className={`w-full pl-7 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
                         isDarkMode 
                           ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
@@ -1338,6 +1342,7 @@ export default function GalleryClient() {
                     />
                   </div>
 
+                  {/* Nút Sổ Thu Chi (Hiện trên cả desktop và mobile) */}
                   <button
                     type="button"
                     onClick={() => router.push('/money')}
@@ -1349,40 +1354,89 @@ export default function GalleryClient() {
                     title="Sổ Quản Lý Thu Chi"
                   >
                     <Wallet className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" />
-                    <span className="hidden xs:inline">Sổ Thu Chi</span>
+                    <span className="hidden xs:inline">Thu Chi</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setIsKeyGenOpen(true)}
-                    className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-2xs cursor-pointer ${
-                      isDarkMode 
-                        ? 'bg-white/10 hover:bg-white/20 border-white/10 text-white' 
-                        : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700'
-                    }`}
-                    title="Key Panel"
-                  >
-                    <KeyRound className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-                    <span className="hidden sm:inline">Key Panel</span>
-                  </button>
-
+                  {/* Nút Thêm Album */}
                   <button
                     onClick={() => setIsModalOpen(true)}
-                    className="flex items-center gap-1 px-3 sm:px-3.5 py-1.5 rounded-full text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer flex-shrink-0"
+                    className="flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer flex-shrink-0"
+                    title="Thêm album"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span className="hidden xs:inline">Thêm album</span>
+                    <span className="hidden xs:inline">Thêm</span>
                   </button>
+
+                  {/* NÚT MENU THAO TÁC KHÁC TRÊN MOBILE / DESKTOP */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                      className={`p-2 rounded-full border transition cursor-pointer ${
+                        isDarkMode ? 'border-white/10 hover:bg-white/10 text-white' : 'border-gray-200 hover:bg-gray-100 text-gray-700'
+                      }`}
+                      title="Menu công cụ"
+                    >
+                      <Menu className="w-4 h-4" />
+                    </button>
+
+                    {isMobileMenuOpen && (
+                      <div className={`absolute right-0 mt-2 w-52 rounded-2xl p-2 shadow-2xl border z-50 animate-in fade-in zoom-in-95 duration-150 space-y-1 text-xs ${
+                        isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-800'
+                      }`}>
+                        <button
+                          type="button"
+                          onClick={() => { setIsMobileMenuOpen(false); setIsKeyGenOpen(true); }}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl font-semibold hover:bg-gray-100 dark:hover:bg-white/5 transition cursor-pointer"
+                        >
+                          <KeyRound className="w-4 h-4 text-amber-500" />
+                          <span>Key Panel</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setIsMobileMenuOpen(false); checkAllMasterFolders(masterFoldersList, true); }}
+                          disabled={isSyncing}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-500/10 text-emerald-600 transition cursor-pointer"
+                        >
+                          <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                          <span>{isSyncing ? 'Đang quét...' : 'Quét Thư Mục Mới'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => { setIsMobileMenuOpen(false); setIsMasterModalOpen(true); }}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl font-semibold hover:bg-gray-100 dark:hover:bg-white/5 transition cursor-pointer"
+                        >
+                          <FolderSync className="w-4 h-4 text-emerald-500" />
+                          <span>Cài Đặt Thư Mục Tổng</span>
+                        </button>
+
+                        <div className="h-[1px] bg-gray-100 dark:bg-white/10 my-1" />
+
+                        <button
+                          type="button"
+                          onClick={() => { setIsMobileMenuOpen(false); handleCleanHomePage(); }}
+                          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl font-semibold text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4 text-gray-400" />
+                          <span>Dọn Dẹp Trang Chủ</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </>
               )
             )}
 
+            {/* Dark Mode & Tài Khoản */}
             <div className="flex items-center gap-1.5 pl-1.5 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
               <button
                 onClick={() => setIsDarkMode(!isDarkMode)}
                 className={`p-2 rounded-full border transition cursor-pointer ${
                   isDarkMode ? 'border-white/10 hover:bg-white/10 text-emerald-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
                 }`}
+                title="Giao diện"
               >
                 {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
               </button>
@@ -1404,7 +1458,7 @@ export default function GalleryClient() {
 
                   <button
                     onClick={handleSignOut}
-                    className="p-1 text-gray-400 hover:text-red-500 transition cursor-pointer"
+                    className="p-1 text-gray-400 hover:text-red-500 transition cursor-pointer hidden xs:block"
                     title="Đăng xuất"
                   >
                     <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -1442,7 +1496,7 @@ export default function GalleryClient() {
 
             <div className={`w-full h-[1px] mb-6 sm:mb-8 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
-            {/* HÀNG TIÊU ĐỀ ALBUM KÈM CÁC NÚT QUẢN TRỊ DRIVE XUỐNG DƯỚI */}
+            {/* HÀNG TIÊU ĐỀ ALBUM KÈM NÚT QUẢN TRỊ DRIVE BÊN DƯỚI */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
