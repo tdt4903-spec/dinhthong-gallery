@@ -47,7 +47,7 @@ const INITIAL_EXPENSE_CATS = [
   { id: 'phi_giao_luu', name: 'Phí giao lưu', color: 'text-amber-500 bg-amber-50 border-amber-200' },
   { id: 'y_te', name: 'Y tế', color: 'text-teal-500 bg-teal-50 border-teal-200' },
   { id: 'giao_duc', name: 'Giáo dục', color: 'text-red-500 bg-red-50 border-red-200' },
-  { id: 'tien_dien', name: 'Tiền điện', color: 'text-cyan-500 bg-cyan-50 border-cyan-200' },
+  { id: 'tien_dien', name: 'Tiền điện', color: 'text-cyan-500 bg-cyan-200' },
   { id: 'di_lai', name: 'Đi lại', color: 'text-amber-700 bg-amber-50 border-amber-200' },
   { id: 'phi_lien_lac', name: 'Phí liên lạc', color: 'text-gray-600 bg-gray-50 border-gray-200' },
   { id: 'tien_nha', name: 'Tiền nhà', color: 'text-orange-600 bg-orange-50 border-orange-200' },
@@ -84,7 +84,7 @@ const QUICK_AMOUNT_SUGGESTIONS = [
   { label: '10 Tr', val: 10000000 },
 ]
 
-function safeCalculateMath(expr: string): number {
+function safeCalculateMath(expr: string | number): number {
   if (!expr) return 0
   try {
     let clean = String(expr)
@@ -182,6 +182,7 @@ interface Transaction {
 
 export default function MoneyManagerPage() {
   const router = useRouter()
+  const [mounted, setMounted] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
@@ -200,8 +201,6 @@ export default function MoneyManagerPage() {
 
   const [isScanningBill, setIsScanningBill] = useState(false)
   const [showSummaryDropdown, setShowSummaryDropdown] = useState(false)
-  
-  // Tránh lỗi Hydration Mismatch bằng cách khởi tạo mặc định false
   const [hideBalance, setHideBalance] = useState(false)
   const [showStatsBox, setShowStatsBox] = useState(true)
 
@@ -219,24 +218,31 @@ export default function MoneyManagerPage() {
   const billInputRef = useRef<HTMLInputElement>(null)
   const dateInputRef = useRef<HTMLInputElement>(null)
 
-  const supabase = useMemo(() => createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  ), [])
+  // Khởi tạo Supabase client an toàn
+  const supabase = useMemo(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+    if (!url || !key) return null
+    return createBrowserClient(url, key)
+  }, [])
 
-  // Đọc localStorage sau khi mount ở Client để chống crash SSR
   useEffect(() => {
+    setMounted(true)
     try {
-      const saved = localStorage.getItem('dinhthong_hide_balance')
-      if (saved === 'true') setHideBalance(true)
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('dinhthong_hide_balance')
+        if (saved === 'true') setHideBalance(true)
+      }
     } catch {}
   }, [])
 
   useEffect(() => {
+    if (!mounted || !supabase) return
+
     const checkAuth = async () => {
       try {
         const { data, error } = await supabase.auth.getSession()
-        if (error || !data.session) {
+        if (error || !data?.session) {
           router.replace('/')
           return
         }
@@ -264,7 +270,7 @@ export default function MoneyManagerPage() {
     }
 
     checkAuth()
-  }, [router, supabase])
+  }, [mounted, supabase, router])
 
   const toggleHideBalance = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -276,6 +282,7 @@ export default function MoneyManagerPage() {
   }
 
   const fetchTransactions = async () => {
+    if (!supabase) return
     try {
       let allData: Transaction[] = []
       let page = 0
@@ -336,7 +343,7 @@ export default function MoneyManagerPage() {
   const noteSuggestions = useMemo(() => {
     const setNotes = new Set<string>()
     transactions
-      .filter(t => t.category === selectedCategory && t.note)
+      .filter(t => t && t.category === selectedCategory && t.note)
       .slice(0, 20)
       .forEach(t => setNotes.add(t.note))
     return Array.from(setNotes).slice(0, 5)
@@ -349,8 +356,8 @@ export default function MoneyManagerPage() {
     yearSet.add(2024)
     yearSet.add(2023)
     transactions.forEach(t => {
-      if (t.date) {
-        const y = Number(t.date.split('-')[0])
+      if (t && t.date) {
+        const y = Number(String(t.date).split('-')[0])
         if (y && !isNaN(y)) yearSet.add(y)
       }
     })
@@ -358,14 +365,22 @@ export default function MoneyManagerPage() {
   }, [transactions])
 
   const formatDateDisplay = (dateStr: string) => {
+    if (!dateStr) return 'Hôm nay'
     try {
-      const [y, m, d] = String(dateStr).split('-').map(Number)
-      const dateObj = new Date(y, (m || 1) - 1, d || 1)
-      const daysOfWeek = ['CN', 'Th 2', 'Th 3', 'Th 4', 'Th 5', 'Th 6', 'Th 7']
-      const dayName = daysOfWeek[dateObj.getDay()] || 'CN'
-      return `${String(d || 1).padStart(2, '0')}/${String(m || 1).padStart(2, '0')}/${y} (${dayName})`
-    } catch {
+      const clean = String(dateStr).split('T')[0]
+      const parts = clean.split('-')
+      if (parts.length === 3) {
+        const y = Number(parts[0]) || 2026
+        const m = Number(parts[1]) || 1
+        const d = Number(parts[2]) || 1
+        const dateObj = new Date(y, m - 1, d)
+        const daysOfWeek = ['CN', 'Th 2', 'Th 3', 'Th 4', 'Th 5', 'Th 6', 'Th 7']
+        const dayName = daysOfWeek[dateObj.getDay()] || 'CN'
+        return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y} (${dayName})`
+      }
       return dateStr
+    } catch {
+      return String(dateStr)
     }
   }
 
@@ -412,23 +427,27 @@ export default function MoneyManagerPage() {
   }
 
   const handlePrevDay = () => {
-    const [y, m, d] = currentDateStr.split('-').map(Number)
-    const dt = new Date(y, m - 1, d)
-    dt.setDate(dt.getDate() - 1)
-    const yStr = dt.getFullYear()
-    const mStr = String(dt.getMonth() + 1).padStart(2, '0')
-    const dStr = String(dt.getDate()).padStart(2, '0')
-    setCurrentDateStr(`${yStr}-${mStr}-${dStr}`)
+    try {
+      const parts = currentDateStr.split('-').map(Number)
+      const dt = new Date(parts[0], parts[1] - 1, parts[2])
+      dt.setDate(dt.getDate() - 1)
+      const yStr = dt.getFullYear()
+      const mStr = String(dt.getMonth() + 1).padStart(2, '0')
+      const dStr = String(dt.getDate()).padStart(2, '0')
+      setCurrentDateStr(`${yStr}-${mStr}-${dStr}`)
+    } catch {}
   }
 
   const handleNextDay = () => {
-    const [y, m, d] = currentDateStr.split('-').map(Number)
-    const dt = new Date(y, m - 1, d)
-    dt.setDate(dt.getDate() + 1)
-    const yStr = dt.getFullYear()
-    const mStr = String(dt.getMonth() + 1).padStart(2, '0')
-    const dStr = String(dt.getDate()).padStart(2, '0')
-    setCurrentDateStr(`${yStr}-${mStr}-${dStr}`)
+    try {
+      const parts = currentDateStr.split('-').map(Number)
+      const dt = new Date(parts[0], parts[1] - 1, parts[2])
+      dt.setDate(dt.getDate() + 1)
+      const yStr = dt.getFullYear()
+      const mStr = String(dt.getMonth() + 1).padStart(2, '0')
+      const dStr = String(dt.getDate()).padStart(2, '0')
+      setCurrentDateStr(`${yStr}-${mStr}-${dStr}`)
+    } catch {}
   }
 
   const handleAddCategory = () => {
@@ -451,6 +470,7 @@ export default function MoneyManagerPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!supabase) return
     const finalNum = safeCalculateMath(amountStr)
     if (!finalNum || finalNum <= 0) {
       alert('Vui lòng nhập số tiền hợp lệ!')
@@ -477,6 +497,7 @@ export default function MoneyManagerPage() {
   }
 
   const handleDelete = async (id: string) => {
+    if (!supabase) return
     if (confirm('Bạn có chắc muốn xóa giao dịch này không?')) {
       const { error } = await supabase.from('transactions').delete().eq('id', id)
       if (!error) {
@@ -486,6 +507,7 @@ export default function MoneyManagerPage() {
   }
 
   const handleDeleteAll = async () => {
+    if (!supabase) return
     if (transactions.length === 0) {
       alert('Hiện chưa có dữ liệu nào trong sổ để xóa!')
       return
@@ -513,6 +535,7 @@ export default function MoneyManagerPage() {
   }
 
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!supabase) return
     const file = e.target.files?.[0]
     if (!file) return
 
@@ -637,11 +660,11 @@ export default function MoneyManagerPage() {
   }
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    if (supabase) await supabase.auth.signOut()
     router.replace('/')
   }
 
-  if (authLoading) {
+  if (!mounted || authLoading) {
     return (
       <div className="min-h-screen bg-[#0f1115] flex flex-col items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
@@ -650,13 +673,15 @@ export default function MoneyManagerPage() {
     )
   }
 
-  const totalAllExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount || 0), 0)
-  const totalAllIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount || 0), 0)
+  const totalAllExpense = transactions.filter(t => t && t.type === 'expense').reduce((sum, t) => sum + Number(t.amount || 0), 0)
+  const totalAllIncome = transactions.filter(t => t && t.type === 'income').reduce((sum, t) => sum + Number(t.amount || 0), 0)
   const totalBalance = totalAllIncome - totalAllExpense
 
   const chartFiltered = transactions.filter(t => {
-    if (!t.date) return false
-    const [y, m] = t.date.split('-').map(Number)
+    if (!t || !t.date) return false
+    const parts = String(t.date).split('-').map(Number)
+    const y = parts[0]
+    const m = parts[1]
     if (chartPeriodMode === 'month') {
       return y === chartSelectedYear && m === chartSelectedMonth
     }
@@ -680,8 +705,10 @@ export default function MoneyManagerPage() {
   const currentTotalCatType = type === 'expense' ? chartExpense : chartIncome
 
   const historyFiltered = transactions.filter(t => {
-    if (!t.date) return false
-    const [y, m] = t.date.split('-').map(Number)
+    if (!t || !t.date) return false
+    const parts = String(t.date).split('-').map(Number)
+    const y = parts[0]
+    const m = parts[1]
     if (historyFilterYear !== 'all' && y !== Number(historyFilterYear)) return false
     if (historyFilterMonth !== 'all' && m !== Number(historyFilterMonth)) return false
     
@@ -689,7 +716,7 @@ export default function MoneyManagerPage() {
       const term = historySearchTerm.toLowerCase().trim()
       const matchNote = (t.note || '').toLowerCase().includes(term)
       const matchCat = (t.category || '').toLowerCase().includes(term)
-      const matchAmount = String(t.amount).includes(term)
+      const matchAmount = String(t.amount || '').includes(term)
       if (!matchNote && !matchCat && !matchAmount) return false
     }
 
@@ -714,7 +741,7 @@ export default function MoneyManagerPage() {
       else map[d].totalIncome += Number(t.amount || 0)
     })
 
-    return Object.values(map).sort((a, b) => b.date.localeCompare(a.date))
+    return Object.values(map).sort((a, b) => String(b.date).localeCompare(String(a.date)))
   }, [historyFiltered])
 
   const currentCategories = type === 'expense' ? expenseCats : incomeCats
@@ -1409,7 +1436,7 @@ export default function MoneyManagerPage() {
                 )}
               </div>
 
-              {/* DANH SÁCH LỊCH SỬ: TÁCH HEADER NGÀY */}
+              {/* DANH SÁCH LỊCH SỬ */}
               <div className="space-y-4 max-h-[520px] overflow-y-auto pr-0.5">
                 {groupedByDayHistory.length === 0 ? (
                   <p className="text-center py-10 text-xs text-slate-400">Không tìm thấy giao dịch nào trong khoảng thời gian đã lọc.</p>
