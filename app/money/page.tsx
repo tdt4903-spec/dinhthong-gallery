@@ -13,7 +13,31 @@ import {
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check
 } from 'lucide-react'
 
-// Danh sách danh mục ban đầu
+// Bảng ánh xạ ID từ app sang tên Danh mục tiếng Việt
+const CATEGORY_ID_MAP: Record<number, string> = {
+  1: 'Ăn uống',
+  2: 'Chi tiêu hàng ngày',
+  3: 'Quần áo',
+  4: 'Mỹ phẩm',
+  5: 'Phí giao lưu',
+  6: 'Y tế',
+  7: 'Giáo dục',
+  8: 'Tiền điện',
+  9: 'Đi lại',
+  10: 'Phí liên lạc',
+  11: 'Tiền nhà',
+  12: 'Tiền lương',
+  13: 'Công việc',
+  14: 'Quà cáp',
+  15: 'Đặt mb hộ',
+  16: 'Mua sắm',
+  17: 'Bể cá',
+  18: 'Xe',
+  19: 'Du lịch',
+  20: 'Film',
+  21: 'Tết',
+}
+
 const INITIAL_EXPENSE_CATS = [
   { id: 'an_uong', name: 'Ăn uống', color: 'text-orange-500 bg-orange-50 border-orange-200' },
   { id: 'chi_tieu_hang_ngay', name: 'Chi tiêu hàng ngày', color: 'text-emerald-500 bg-emerald-50 border-emerald-200' },
@@ -64,14 +88,12 @@ export default function MoneyManagerPage() {
   const [selectedCategory, setSelectedCategory] = useState('Ăn uống')
   const [transactions, setTransactions] = useState<Transaction[]>([])
   
-  // Quản lý danh mục tùy chỉnh
   const [expenseCats, setExpenseCats] = useState(INITIAL_EXPENSE_CATS)
   const [incomeCats, setIncomeCats] = useState(INITIAL_INCOME_CATS)
   const [newCatName, setNewCatName] = useState('')
   const [isAddingCat, setIsAddingCat] = useState(false)
 
-  // Bộ lọc thống kê
-  const [chartView, setChartView] = useState<'month' | 'year' | 'all'>('month')
+  const [chartView, setChartView] = useState<'month' | 'year' | 'all'>('all')
   const [selectedMonth, setSelectedMonth] = useState<number>(8)
   const [selectedYear, setSelectedYear] = useState<number>(2026)
 
@@ -110,31 +132,6 @@ export default function MoneyManagerPage() {
     const month = String(d.getMonth() + 1).padStart(2, '0')
     const day = String(d.getDate()).padStart(2, '0')
     return `${year}-${month}-${day}`
-  }
-
-  // Chuẩn hóa ngày tháng từ mọi định dạng
-  const normalizeDate = (rawDate: any) => {
-    if (!rawDate) return formatDateDb(new Date())
-    let str = String(rawDate).trim().split(' ')[0].replace(/[\.tT]/g, '-').replace(/[\/]/g, '-')
-
-    const parts = str.split('-').filter(Boolean)
-    if (parts.length === 3) {
-      if (parts[0].length === 4) {
-        // YYYY-MM-DD
-        return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`
-      }
-      if (parts[2].length === 4) {
-        // DD-MM-YYYY
-        return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`
-      }
-    }
-
-    if (!isNaN(Number(rawDate)) && Number(rawDate) > 30000) {
-      const d = new Date((Number(rawDate) - (25567 + 2)) * 86400 * 1000)
-      return formatDateDb(d)
-    }
-
-    return formatDateDb(new Date())
   }
 
   const formatCurrency = (val: number) => {
@@ -206,7 +203,109 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // Xuất file Excel / CSV
+  // XỬ LÝ NHẬP ĐÚNG FILE CSV TỪ APP CỦA BẠN
+  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = async (evt) => {
+      try {
+        const text = evt.target?.result as string
+        if (!text) {
+          alert('File rỗng!')
+          return
+        }
+
+        // Tách các dòng của file CSV
+        const lines = text.split(/\r\n|\n/)
+        const formattedToInsert: any[] = []
+
+        let headerFound = false
+        let colIndex = { date: 0, amount: 1, memo: 2, catId: 3, type: 4 }
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim()
+          if (!line) continue
+
+          // Bỏ qua dòng thẻ tag #DAILY_DATAS
+          if (line.startsWith('#')) continue
+
+          // Tìm dòng header inputDateString,amount,memo,...
+          if (line.includes('inputDateString') || line.includes('amount')) {
+            const headers = line.split(',').map(h => h.trim())
+            colIndex.date = headers.indexOf('inputDateString')
+            colIndex.amount = headers.indexOf('amount')
+            colIndex.memo = headers.indexOf('memo')
+            colIndex.catId = headers.indexOf('categoryId')
+            colIndex.type = headers.indexOf('type')
+            headerFound = true
+            continue
+          }
+
+          if (headerFound) {
+            // Tách theo dấu phẩy và xử lý trường hợp có ngoặc kép "..."
+            const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',')
+            if (!parts || parts.length < 3) continue
+
+            const rawDate = (parts[colIndex.date] || '').replace(/["']/g, '').trim()
+            const rawAmount = (parts[colIndex.amount] || '').replace(/["']/g, '').trim()
+            const rawMemo = (parts[colIndex.memo] || '').replace(/["\\n\r]/g, '').trim()
+            const rawCatId = Number((parts[colIndex.catId] || '1').replace(/["']/g, '').trim())
+            const rawType = (parts[colIndex.type] || '0').replace(/["']/g, '').trim()
+
+            const numAmount = Number(rawAmount)
+            if (!numAmount || isNaN(numAmount)) continue
+
+            // Chuẩn hóa ngày dạng 2023/11/1 -> 2023-11-01
+            let formattedDate = formatDateDb(new Date())
+            const dParts = rawDate.split('/')
+            if (dParts.length === 3) {
+              const y = dParts[0]
+              const m = dParts[1].padStart(2, '0')
+              const d = dParts[2].padStart(2, '0')
+              formattedDate = `${y}-${m}-${d}`
+            }
+
+            // type = 1 là Tiền Thu, type = 0 là Tiền Chi
+            const isIncome = rawType === '1'
+            const categoryName = CATEGORY_ID_MAP[rawCatId] || (isIncome ? 'Tiền lương' : 'Ăn uống')
+
+            formattedToInsert.push({
+              type: isIncome ? 'income' : 'expense',
+              amount: numAmount,
+              category: categoryName,
+              note: rawMemo,
+              date: formattedDate
+            })
+          }
+        }
+
+        if (formattedToInsert.length === 0) {
+          alert('Không tìm thấy dòng dữ liệu hợp lệ trong file CSV!')
+          return
+        }
+
+        // Chia theo từng lô 200 bản ghi để lưu vào Supabase
+        const CHUNK_SIZE = 200
+        for (let i = 0; i < formattedToInsert.length; i += CHUNK_SIZE) {
+          const chunk = formattedToInsert.slice(i, i + CHUNK_SIZE)
+          const { error } = await supabase.from('transactions').insert(chunk)
+          if (error) throw error
+        }
+
+        alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch vào Sổ Thu Chi!`)
+        fetchTransactions()
+      } catch (err: any) {
+        alert('Lỗi xử lý file: ' + err.message)
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = ''
+      }
+    }
+    reader.readAsText(file, 'UTF-8')
+  }
+
+  // Xuất file Excel
   const handleExportExcel = () => {
     if (transactions.length === 0) {
       alert('Chưa có dữ liệu để xuất!')
@@ -228,145 +327,11 @@ export default function MoneyManagerPage() {
     XLSX.writeFile(workbook, `Bao_Cao_Thu_Chi_${formatDateDb(new Date())}.xlsx`)
   }
 
-  // NHẬP CSV / EXCEL THÔNG MINH BẤT KỲ CẤU TRÚC NÀO
-  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = async (evt) => {
-      try {
-        let workbook: XLSX.WorkBook
-
-        if (file.name.endsWith('.csv')) {
-          const text = evt.target?.result as string
-          workbook = XLSX.read(text, { type: 'string', raw: false })
-        } else {
-          const buffer = evt.target?.result
-          workbook = XLSX.read(buffer, { type: 'binary', raw: false })
-        }
-
-        const sheetName = workbook.SheetNames[0]
-        const worksheet = workbook.Sheets[sheetName]
-        // Đọc toàn bộ các hàng dưới dạng ma trận mảng 2 chiều
-        const rawGrid: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' })
-
-        if (!rawGrid || rawGrid.length === 0) {
-          alert('File không có dữ liệu!')
-          return
-        }
-
-        // 1. Tự động tìm hàng chứa Header (tiêu đề cột)
-        let headerIndex = -1
-        let colMap = { date: -1, amount: -1, category: -1, type: -1, note: -1 }
-
-        for (let r = 0; r < Math.min(15, rawGrid.length); r++) {
-          const row = rawGrid[r].map(c => String(c).toLowerCase().trim())
-          const hasDate = row.some(c => c.includes('ngày') || c.includes('date') || c.includes('thời gian') || c.includes('time'))
-          const hasAmount = row.some(c => c.includes('tiền') || c.includes('amount') || c.includes('giá') || c.includes('chi') || c.includes('thu') || c.includes('vnđ') || c.includes('vnd'))
-
-          if (hasDate || hasAmount) {
-            headerIndex = r
-            row.forEach((colName, cIdx) => {
-              if (colName.includes('ngày') || colName.includes('date') || colName.includes('thời gian') || colName.includes('time')) colMap.date = cIdx
-              else if (colName.includes('tiền') || colName.includes('amount') || colName.includes('giá') || colName.includes('vnđ') || colName.includes('vnd')) colMap.amount = cIdx
-              else if (colName.includes('danh mục') || colName.includes('category') || colName.includes('hạng mục') || colName.includes('nhóm') || colName.includes('khoản mục')) colMap.category = cIdx
-              else if (colName.includes('loại') || colName.includes('type') || colName.includes('thu/chi')) colMap.type = cIdx
-              else if (colName.includes('ghi chú') || colName.includes('note') || colName.includes('diễn giải') || colName.includes('nội dung') || colName.includes('chi tiết')) colMap.note = cIdx
-            })
-            break
-          }
-        }
-
-        const dataRows = headerIndex !== -1 ? rawGrid.slice(headerIndex + 1) : rawGrid
-        const formattedToInsert: any[] = []
-
-        for (const row of dataRows) {
-          if (!row || row.length === 0) continue
-
-          let rawDate = colMap.date !== -1 ? row[colMap.date] : ''
-          let rawAmount = colMap.amount !== -1 ? row[colMap.amount] : ''
-          let rawCategory = colMap.category !== -1 ? row[colMap.category] : ''
-          let rawType = colMap.type !== -1 ? row[colMap.type] : ''
-          let rawNote = colMap.note !== -1 ? row[colMap.note] : ''
-
-          // Nếu không map được theo header, tự dò tìm giá trị theo từng ô trong hàng
-          if (!rawAmount || !rawDate) {
-            row.forEach(cell => {
-              const cellStr = String(cell).trim()
-              if (!rawDate && (/^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}/.test(cellStr) || /^\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}/.test(cellStr))) {
-                rawDate = cellStr
-              }
-              if (!rawAmount && (/\d{1,3}(,\d{3})+/.test(cellStr) || /\d{1,3}(\.\d{3})+/.test(cellStr) || (/^\-?\d+$/.test(cellStr) && Number(cellStr) !== 0))) {
-                rawAmount = cellStr
-              }
-            })
-          }
-
-          if (!rawAmount) continue
-
-          const amountStrClean = String(rawAmount).replace(/\s/g, '').replace(/[₫đVNDvnd]/g, '')
-          const isNegative = amountStrClean.includes('-')
-          const cleanNum = Number(amountStrClean.replace(/[^0-9]/g, ''))
-
-          if (!cleanNum || cleanNum === 0) continue
-
-          let finalType: 'expense' | 'income' = 'expense'
-          const typeStrLower = String(rawType).toLowerCase()
-
-          if (typeStrLower.includes('thu') || typeStrLower.includes('income') || typeStrLower.includes('lương') || typeStrLower.includes('thưởng')) {
-            finalType = 'income'
-          } else if (typeStrLower.includes('chi') || typeStrLower.includes('expense')) {
-            finalType = 'expense'
-          } else {
-            finalType = isNegative ? 'expense' : 'expense'
-          }
-
-          formattedToInsert.push({
-            type: finalType,
-            amount: cleanNum,
-            category: String(rawCategory || (finalType === 'expense' ? 'Ăn uống' : 'Tiền lương')).trim(),
-            note: String(rawNote || '').trim(),
-            date: normalizeDate(rawDate)
-          })
-        }
-
-        if (formattedToInsert.length === 0) {
-          alert('Không tìm thấy dòng dữ liệu số tiền hợp lệ trong file!')
-          return
-        }
-
-        const { error } = await supabase.from('transactions').insert(formattedToInsert)
-        if (!error) {
-          alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch vào sổ thu chi!`)
-          fetchTransactions()
-        } else {
-          alert('Lỗi lưu dữ liệu: ' + error.message)
-        }
-      } catch (err: any) {
-        alert('Lỗi xử lý file: ' + err.message)
-      } finally {
-        if (fileInputRef.current) fileInputRef.current.value = ''
-      }
-    }
-
-    if (file.name.endsWith('.csv')) {
-      reader.readAsText(file, 'UTF-8')
-    } else {
-      reader.readAsBinaryString(file)
-    }
-  }
-
-  // Lọc dữ liệu thống kê
   const filteredTransactions = transactions.filter(t => {
     if (!t.date) return false
     const [y, m] = t.date.split('-').map(Number)
-    if (chartView === 'month') {
-      return y === selectedYear && m === selectedMonth
-    }
-    if (chartView === 'year') {
-      return y === selectedYear
-    }
+    if (chartView === 'month') return y === selectedYear && m === selectedMonth
+    if (chartView === 'year') return y === selectedYear
     return true
   })
 
@@ -394,7 +359,7 @@ export default function MoneyManagerPage() {
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 pb-12">
       
-      {/* Top Navbar */}
+      {/* Header */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -405,12 +370,10 @@ export default function MoneyManagerPage() {
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <div>
-              <h1 className="font-bold text-lg text-slate-900 tracking-tight flex items-center gap-2">
-                <Wallet className="w-5 h-5 text-orange-500" />
-                Sổ Quản Lý Thu Chi Cá Nhân
-              </h1>
-            </div>
+            <h1 className="font-bold text-lg text-slate-900 tracking-tight flex items-center gap-2">
+              <Wallet className="w-5 h-5 text-orange-500" />
+              Sổ Quản Lý Thu Chi Cá Nhân
+            </h1>
           </div>
 
           <div className="flex items-center gap-2">
@@ -419,7 +382,7 @@ export default function MoneyManagerPage() {
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer"
             >
               <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Xuất Excel / CSV</span>
+              <span className="hidden sm:inline">Xuất Excel</span>
             </button>
 
             <button
@@ -427,24 +390,24 @@ export default function MoneyManagerPage() {
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
             >
               <Upload className="w-4 h-4" />
-              <span className="hidden sm:inline">Nhập CSV / Excel</span>
+              <span>Nhập File CSV App</span>
             </button>
 
             <input 
               type="file" 
               ref={fileInputRef} 
-              onChange={handleImportExcel} 
-              accept=".csv, .xlsx, .xls" 
+              onChange={handleImportCSV} 
+              accept=".csv, .txt" 
               className="hidden" 
             />
           </div>
         </div>
       </header>
 
-      {/* Main Content Dashboard */}
+      {/* Main Dashboard */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         
-        {/* KPI Summary Cards */}
+        {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
             <div>
@@ -479,10 +442,10 @@ export default function MoneyManagerPage() {
           </div>
         </div>
 
-        {/* 2-Column Responsive Layout */}
+        {/* 2 Cột */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
-          {/* CỘT TRÁI: FORM NHẬP KHOẢN THU / CHI */}
+          {/* CỘT TRÁI: FORM NHẬP */}
           <div className="lg:col-span-5 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
@@ -564,7 +527,7 @@ export default function MoneyManagerPage() {
                   </div>
                 </div>
 
-                {/* Danh mục + Nút Thêm danh mục */}
+                {/* Danh mục */}
                 <div className="pt-2">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-bold text-slate-700">Chọn Danh Mục:</span>
@@ -578,7 +541,6 @@ export default function MoneyManagerPage() {
                     </button>
                   </div>
 
-                  {/* Form thêm danh mục nhanh */}
                   {isAddingCat && (
                     <div className="mb-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center gap-2">
                       <input 
@@ -606,7 +568,6 @@ export default function MoneyManagerPage() {
                     </div>
                   )}
 
-                  {/* Lưới danh mục */}
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-56 overflow-y-auto pr-1">
                     {currentCategories.map((cat) => {
                       const isSelected = selectedCategory === cat.name
@@ -645,10 +606,9 @@ export default function MoneyManagerPage() {
             </div>
           </div>
 
-          {/* CỘT PHẢI: THỐNG KÊ BIỂU ĐỒ & LỊCH SỬ GIAO DỊCH */}
+          {/* CỘT PHẢI: BIỂU ĐỒ & LỊCH SỬ */}
           <div className="lg:col-span-7 space-y-6">
             
-            {/* Box Biểu đồ & Phân loại tỷ trọng */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 mb-5">
                 <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
@@ -656,7 +616,6 @@ export default function MoneyManagerPage() {
                   Biểu Đồ Thống Kê Phân Loại
                 </h3>
 
-                {/* Bộ lọc Tháng / Năm / Toàn bộ */}
                 <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
                   <button
                     onClick={() => setChartView('month')}
@@ -699,7 +658,6 @@ export default function MoneyManagerPage() {
                             {formatCurrency(amount)} ({percentage}%)
                           </span>
                         </div>
-                        {/* Thanh progress bar */}
                         <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                           <div 
                             className={`h-full rounded-full transition-all duration-500 ${
@@ -715,7 +673,6 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
-            {/* Box Lịch sử giao dịch */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
                 <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
