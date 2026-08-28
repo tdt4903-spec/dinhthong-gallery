@@ -26,12 +26,22 @@ export async function POST(req: Request) {
   "type": "expense"
 }`
 
-    // Sử dụng endpoint chuẩn của v1 cho gemini-1.5-flash
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+    // Đối với khóa định dạng AQ... (OAuth/Bearer token hoặc IAM), ta dùng chuẩn Header Authorization Bearer
+    const isBearerToken = apiKey.startsWith('AQ.') || apiKey.startsWith('ya29.')
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent${isBearerToken ? '' : `?key=${apiKey}`}`
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+
+    if (isBearerToken) {
+      headers['Authorization'] = `Bearer ${apiKey}`
+    }
+
+    const response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         contents: [
           {
@@ -59,9 +69,7 @@ export async function POST(req: Request) {
     }
 
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
-    console.log('AI raw response:', rawText)
 
-    // Xử lý làm sạch chuỗi JSON trả về từ AI
     let cleanJson = rawText.trim()
     if (cleanJson.includes('```json')) {
       cleanJson = cleanJson.split('```json')[1].split('```')[0].trim()
@@ -73,7 +81,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      amount: Number(parsed.amount) || 50000,
+      amount: Number(parsed.amount) || 0,
       note: parsed.note || 'Chuyển khoản bill',
       date: parsed.date || new Date().toISOString().split('T')[0],
       type: parsed.type || 'expense'
