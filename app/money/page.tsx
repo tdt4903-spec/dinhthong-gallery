@@ -72,7 +72,7 @@ export default function MoneyManagerPage() {
 
   // Bộ lọc thống kê
   const [chartView, setChartView] = useState<'month' | 'year' | 'all'>('month')
-  const [selectedMonth, setSelectedMonth] = useState<number>(8) // Tháng 8
+  const [selectedMonth, setSelectedMonth] = useState<number>(8)
   const [selectedYear, setSelectedYear] = useState<number>(2026)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -110,6 +110,38 @@ export default function MoneyManagerPage() {
     const month = String(d.getMonth() + 1).padStart(2, '0')
     const day = String(d.getDate()).padStart(2, '0')
     return `${year}-${month}-${day}`
+  }
+
+  // Hàm chuyển đổi mọi định dạng ngày từ CSV về YYYY-MM-DD
+  const normalizeDate = (rawDate: any) => {
+    if (!rawDate) return formatDateDb(new Date())
+    const str = String(rawDate).trim().split(' ')[0] // Bỏ phần giờ nếu có
+
+    // Định dạng DD/MM/YYYY hoặc DD-MM-YYYY
+    if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(str)) {
+      const parts = str.split(/[\/\-]/)
+      const d = parts[0].padStart(2, '0')
+      const m = parts[1].padStart(2, '0')
+      const y = parts[2]
+      return `${y}-${m}-${d}`
+    }
+
+    // Định dạng YYYY/MM/DD hoặc YYYY-MM-DD
+    if (/^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(str)) {
+      const parts = str.split(/[\/\-]/)
+      const y = parts[0]
+      const m = parts[1].padStart(2, '0')
+      const d = parts[2].padStart(2, '0')
+      return `${y}-${m}-${d}`
+    }
+
+    // Nếu Excel trả về số timestamp ngày
+    if (!isNaN(Number(str)) && Number(str) > 30000) {
+      const d = new Date((Number(str) - (25567 + 2)) * 86400 * 1000)
+      return formatDateDb(d)
+    }
+
+    return formatDateDb(new Date())
   }
 
   const formatCurrency = (val: number) => {
@@ -181,7 +213,7 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // Xuất file Excel
+  // XUẤT FILE EXCEL / CSV
   const handleExportExcel = () => {
     if (transactions.length === 0) {
       alert('Chưa có dữ liệu để xuất!')
@@ -203,7 +235,7 @@ export default function MoneyManagerPage() {
     XLSX.writeFile(workbook, `Bao_Cao_Thu_Chi_${formatDateDb(new Date())}.xlsx`)
   }
 
-  // Nhập file Excel
+  // NHẬP FILE CSV / EXCEL THÔNG MINH
   const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -211,33 +243,95 @@ export default function MoneyManagerPage() {
     const reader = new FileReader()
     reader.onload = async (evt) => {
       try {
-        const bstr = evt.target?.result
-        const workbook = XLSX.read(bstr, { type: 'binary' })
-        const firstSheetName = workbook.SheetNames[0]
-        const rawRows: any[] = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName])
+        let rawRows: any[] = []
+        
+        // Đọc dữ liệu từ file dạng text UTF-8 (dành cho CSV) hoặc binary (dành cho XLSX)
+        if (file.name.endsWith('.csv')) {
+          const textContent = evt.target?.result as string
+          const workbook = XLSX.read(textContent, { type: 'string', raw: true })
+          const sheetName = workbook.SheetNames[0]
+          rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' })
+        } else {
+          const binaryContent = evt.target?.result
+          const workbook = XLSX.read(binaryContent, { type: 'binary' })
+          const sheetName = workbook.SheetNames[0]
+          rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' })
+        }
 
+        if (!rawRows || rawRows.length === 0) {
+          alert('File trống hoặc không đọc được dữ liệu!')
+          return
+        }
+
+        // Tự động nhận dạng cột thông minh cho mọi app thu chi
         const formattedToInsert = rawRows.map((row) => {
-          const typeStr = String(row['Loại'] || row['type'] || '').toLowerCase()
-          const isExpense = typeStr.includes('chi') || typeStr === 'expense'
-          const num = Number(String(row['Số tiền (VNĐ)'] || row['Số tiền'] || row['amount'] || 0).replace(/\D/g, ''))
+          // 1. Tìm giá trị số tiền
+          let rawAmount = ''
+          let rawType = ''
+          let rawCategory = ''
+          let rawNote = ''
+          let rawDate = ''
+
+          Object.keys(row).forEach((key) => {
+            const lowerKey = key.toLowerCase().trim()
+            const val = String(row[key]).trim()
+
+            // Nhận diện Số tiền
+            if (lowerKey.includes('tiền') || lowerKey.includes('amount') || lowerKey.includes('số tiền') || lowerKey.includes('money') || lowerKey.includes('giá trị')) {
+              rawAmount = val
+            }
+            // Nhận diện Loại
+            if (lowerKey.includes('loại') || lowerKey.includes('type') || lowerKey.includes('thu/chi') || lowerKey.includes('khoản')) {
+              rawType = val
+            }
+            // Nhận diện Danh mục
+            if (lowerKey.includes('danh mục') || lowerKey.includes('category') || lowerKey.includes('hạng mục') || lowerKey.includes('nhóm')) {
+              rawCategory = val
+            }
+            // Nhận diện Ghi chú
+            if (lowerKey.includes('ghi chú') || lowerKey.includes('note') || lowerKey.includes('diễn giải') || lowerKey.includes('nội dung') || lowerKey.includes('description')) {
+              rawNote = val
+            }
+            // Nhận diện Ngày
+            if (lowerKey.includes('ngày') || lowerKey.includes('date') || lowerKey.includes('thời gian') || lowerKey.includes('time')) {
+              rawDate = val
+            }
+          })
+
+          // Xử lý làm sạch số tiền
+          const isNegative = rawAmount.includes('-')
+          const cleanAmountNum = Number(rawAmount.replace(/[^0-9]/g, ''))
+
+          // Phân loại Thu / Chi
+          let finalType: 'expense' | 'income' = 'expense'
+          const lowerTypeStr = rawType.toLowerCase()
+
+          if (lowerTypeStr.includes('thu') || lowerTypeStr.includes('income') || lowerTypeStr.includes('lương') || lowerTypeStr.includes('thưởng')) {
+            finalType = 'income'
+          } else if (lowerTypeStr.includes('chi') || lowerTypeStr.includes('expense')) {
+            finalType = 'expense'
+          } else {
+            // Nếu không có cột Loại, dựa vào dấu âm/dương của số tiền
+            finalType = isNegative ? 'expense' : (cleanAmountNum > 0 ? 'expense' : 'income')
+          }
 
           return {
-            type: isExpense ? 'expense' : 'income',
-            amount: num || 0,
-            category: row['Danh mục'] || row['category'] || 'Ăn uống',
-            note: row['Ghi chú'] || row['note'] || '',
-            date: row['Ngày'] || row['date'] || formatDateDb(new Date())
+            type: finalType,
+            amount: cleanAmountNum || 0,
+            category: rawCategory || (finalType === 'expense' ? 'Ăn uống' : 'Tiền lương'),
+            note: rawNote || '',
+            date: normalizeDate(rawDate)
           }
         }).filter(r => r.amount > 0)
 
         if (formattedToInsert.length === 0) {
-          alert('Không tìm thấy dòng dữ liệu hợp lệ trong file Excel!')
+          alert('Không tìm thấy dòng dữ liệu hợp lệ trong file CSV/Excel!')
           return
         }
 
         const { error } = await supabase.from('transactions').insert(formattedToInsert)
         if (!error) {
-          alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch từ Excel!`)
+          alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch từ file CSV!`)
           fetchTransactions()
         } else {
           alert('Lỗi import: ' + error.message)
@@ -248,7 +342,13 @@ export default function MoneyManagerPage() {
         if (fileInputRef.current) fileInputRef.current.value = ''
       }
     }
-    reader.readAsBinaryString(file)
+
+    // Đọc dạng text UTF-8 nếu là file CSV để giữ nguyên dấu tiếng Việt
+    if (file.name.endsWith('.csv')) {
+      reader.readAsText(file, 'UTF-8')
+    } else {
+      reader.readAsBinaryString(file)
+    }
   }
 
   // Lọc dữ liệu phục vụ thống kê & biểu đồ
@@ -314,7 +414,7 @@ export default function MoneyManagerPage() {
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer"
             >
               <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Xuất Excel</span>
+              <span className="hidden sm:inline">Xuất Excel / CSV</span>
             </button>
 
             <button
@@ -322,14 +422,14 @@ export default function MoneyManagerPage() {
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
             >
               <Upload className="w-4 h-4" />
-              <span className="hidden sm:inline">Nhập Excel</span>
+              <span className="hidden sm:inline">Nhập CSV / Excel</span>
             </button>
 
             <input 
               type="file" 
               ref={fileInputRef} 
               onChange={handleImportExcel} 
-              accept=".xlsx, .xls, .csv" 
+              accept=".csv, .xlsx, .xls" 
               className="hidden" 
             />
           </div>
