@@ -43,7 +43,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  // 1. Quét bảng custom_covers (ảnh bìa riêng của thư mục con)
+  // 1. Quét bảng custom_covers (ảnh bìa riêng của thư mục con do admin đặt)
   const { data: allCovers } = await supabase.from('custom_covers').select('id, cover_url')
   if (allCovers) {
     const matched = allCovers.find(c => c.id === inputCode || toNumericCode(c.id) === inputCode)
@@ -53,7 +53,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
     }
   }
 
-  // 2. Quét bảng custom_item_names (tên tiếng Việt Admin đặt)
+  // 2. Quét bảng custom_item_names (tên thư mục do admin đặt)
   const { data: allNames } = await supabase.from('custom_item_names').select('id, custom_name')
   if (allNames) {
     const matched = allNames.find(n => n.id === inputCode || toNumericCode(n.id) === inputCode || n.id === targetRealId)
@@ -91,10 +91,10 @@ export async function generateMetadata({ params }: ShortPageProps) {
     ? `${targetTitle} - Dinh Thong Gallery` 
     : 'Dinh Thong Gallery'
 
-  const encodedTitle = encodeURIComponent(targetTitle || 'Dinh Thong Gallery')
-  const ogImageUrl = coverImageDriveId 
-    ? `${baseUrl}/api/og?id=${coverImageDriveId}&title=${encodedTitle}` 
-    : `${baseUrl}/api/og?title=${encodedTitle}`
+  // Sử dụng link trực tiếp từ CDN Google Photos/Drive không qua API trung gian
+  const directImageUrl = coverImageDriveId 
+    ? `https://lh3.googleusercontent.com/d/${coverImageDriveId}=w1200` 
+    : `${baseUrl}/banner.jpg`
 
   return {
     title: finalTitle,
@@ -108,8 +108,8 @@ export async function generateMetadata({ params }: ShortPageProps) {
       siteName: 'Dinh Thong Gallery',
       images: [
         {
-          url: ogImageUrl,
-          secureUrl: ogImageUrl,
+          url: directImageUrl,
+          secureUrl: directImageUrl,
           width: 1200,
           height: 630,
           alt: finalTitle,
@@ -121,7 +121,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
       card: 'summary_large_image',
       title: finalTitle,
       description: 'Khoảnh khắc lưu giữ cảm xúc',
-      images: [ogImageUrl],
+      images: [directImageUrl],
     },
   }
 }
