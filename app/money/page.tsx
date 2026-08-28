@@ -667,64 +667,78 @@ export default function MoneyManagerPage() {
     router.replace('/')
   }
 
-  if (!mounted || authLoading) {
-    return (
-      <div className="min-h-screen bg-[#0f1115] flex flex-col items-center justify-center text-white">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
-        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang tải dữ liệu...</p>
-      </div>
-    )
-  }
+  // Toàn bộ các useMemo Hook bắt buộc gọi trên này (trước return) để tuân thủ Rules of Hooks
+  const totalAllExpense = useMemo(() => {
+    return transactions.filter(t => t && t.type === 'expense').reduce((sum, t) => sum + Number(t.amount || 0), 0)
+  }, [transactions])
 
-  const totalAllExpense = transactions.filter(t => t && t.type === 'expense').reduce((sum, t) => sum + Number(t.amount || 0), 0)
-  const totalAllIncome = transactions.filter(t => t && t.type === 'income').reduce((sum, t) => sum + Number(t.amount || 0), 0)
+  const totalAllIncome = useMemo(() => {
+    return transactions.filter(t => t && t.type === 'income').reduce((sum, t) => sum + Number(t.amount || 0), 0)
+  }, [transactions])
+
   const totalBalance = totalAllIncome - totalAllExpense
 
-  const chartFiltered = transactions.filter(t => {
-    if (!t || !t.date) return false
-    const parts = String(t.date).split('-').map(Number)
-    const y = parts[0]
-    const m = parts[1]
-    if (chartPeriodMode === 'month') {
-      return y === chartSelectedYear && m === chartSelectedMonth
-    }
-    if (chartPeriodMode === 'year') {
-      return y === chartSelectedYear
-    }
-    return true
-  })
+  const chartFiltered = useMemo(() => {
+    return transactions.filter(t => {
+      if (!t || !t.date) return false
+      const parts = String(t.date).split('-').map(Number)
+      const y = parts[0]
+      const m = parts[1]
+      if (chartPeriodMode === 'month') {
+        return y === chartSelectedYear && m === chartSelectedMonth
+      }
+      if (chartPeriodMode === 'year') {
+        return y === chartSelectedYear
+      }
+      return true
+    })
+  }, [transactions, chartPeriodMode, chartSelectedYear, chartSelectedMonth])
 
-  const chartExpense = chartFiltered.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0)
-  const chartIncome = chartFiltered.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0)
+  const chartExpense = useMemo(() => {
+    return chartFiltered.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0)
+  }, [chartFiltered])
+
+  const chartIncome = useMemo(() => {
+    return chartFiltered.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0)
+  }, [chartFiltered])
+
   const chartRemaining = chartIncome - chartExpense
 
-  const catStats = chartFiltered
-    .filter(t => t.type === type)
-    .reduce((acc: Record<string, number>, curr) => {
-      acc[curr.category] = (acc[curr.category] || 0) + Number(curr.amount || 0)
-      return acc
-    }, {})
-  const catEntries = Object.entries(catStats).sort((a, b) => b[1] - a[1])
+  const catStats = useMemo(() => {
+    return chartFiltered
+      .filter(t => t.type === type)
+      .reduce((acc: Record<string, number>, curr) => {
+        acc[curr.category] = (acc[curr.category] || 0) + Number(curr.amount || 0)
+        return acc
+      }, {})
+  }, [chartFiltered, type])
+
+  const catEntries = useMemo(() => {
+    return Object.entries(catStats).sort((a, b) => b[1] - a[1])
+  }, [catStats])
+
   const currentTotalCatType = type === 'expense' ? chartExpense : chartIncome
 
-  const historyFiltered = transactions.filter(t => {
-    if (!t || !t.date) return false
-    const parts = String(t.date).split('-').map(Number)
-    const y = parts[0]
-    const m = parts[1]
-    if (historyFilterYear !== 'all' && y !== Number(historyFilterYear)) return false
-    if (historyFilterMonth !== 'all' && m !== Number(historyFilterMonth)) return false
-    
-    if (historySearchTerm.trim()) {
-      const term = historySearchTerm.toLowerCase().trim()
-      const matchNote = (t.note || '').toLowerCase().includes(term)
-      const matchCat = (t.category || '').toLowerCase().includes(term)
-      const matchAmount = String(t.amount || '').includes(term)
-      if (!matchNote && !matchCat && !matchAmount) return false
-    }
+  const historyFiltered = useMemo(() => {
+    return transactions.filter(t => {
+      if (!t || !t.date) return false
+      const parts = String(t.date).split('-').map(Number)
+      const y = parts[0]
+      const m = parts[1]
+      if (historyFilterYear !== 'all' && y !== Number(historyFilterYear)) return false
+      if (historyFilterMonth !== 'all' && m !== Number(historyFilterMonth)) return false
+      
+      if (historySearchTerm.trim()) {
+        const term = historySearchTerm.toLowerCase().trim()
+        const matchNote = (t.note || '').toLowerCase().includes(term)
+        const matchCat = (t.category || '').toLowerCase().includes(term)
+        const matchAmount = String(t.amount || '').includes(term)
+        if (!matchNote && !matchCat && !matchAmount) return false
+      }
 
-    return true
-  })
+      return true
+    })
+  }, [transactions, historyFilterYear, historyFilterMonth, historySearchTerm])
 
   const groupedByDayHistory = useMemo(() => {
     const map: Record<string, { date: string; items: Transaction[]; totalExpense: number; totalIncome: number }> = {}
@@ -748,6 +762,16 @@ export default function MoneyManagerPage() {
   }, [historyFiltered])
 
   const currentCategories = type === 'expense' ? expenseCats : incomeCats
+
+  // Đặt điều kiện loading ở đây (sau khi TẤT CẢ các Hook đã được gọi đầy đủ)
+  if (!mounted || authLoading) {
+    return (
+      <div className="min-h-screen bg-[#0f1115] flex flex-col items-center justify-center text-white">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
+        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang tải dữ liệu...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 pb-28 sm:pb-12">
