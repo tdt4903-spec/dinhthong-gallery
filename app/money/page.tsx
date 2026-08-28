@@ -9,7 +9,7 @@ import {
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
   ChevronDown, ChevronUp, PieChart, Filter, Loader2, LogOut, User as UserIcon,
-  Sparkles, RotateCcw, PenSquare, History, Camera, Eye, EyeOff, Calculator, Equal, Search
+  Sparkles, RotateCcw, PenSquare, History, Eye, EyeOff, Calculator, Equal, Search
 } from 'lucide-react'
 
 const CATEGORY_ID_MAP: Record<number, string> = {
@@ -196,7 +196,6 @@ export default function MoneyManagerPage() {
   const [newCatName, setNewCatName] = useState('')
   const [isAddingCat, setIsAddingCat] = useState(false)
 
-  const [isScanningBill, setIsScanningBill] = useState(false)
   const [showSummaryDropdown, setShowSummaryDropdown] = useState(false)
   const [hideBalance, setHideBalance] = useState(false)
   const [showStatsBox, setShowStatsBox] = useState(true)
@@ -212,7 +211,6 @@ export default function MoneyManagerPage() {
 
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const billInputRef = useRef<HTMLInputElement>(null)
   const dateInputRef = useRef<HTMLInputElement>(null)
 
   const supabaseRef = useRef<any>(null)
@@ -309,38 +307,6 @@ export default function MoneyManagerPage() {
     try {
       localStorage.setItem('dinhthong_hide_balance', String(nextState))
     } catch {}
-  }
-
-  const handleScanBill = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    setIsScanningBill(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const res = await fetch('/api/scan-bill', { method: 'POST', body: formData })
-      const data = await res.json()
-
-      if (data.success) {
-        if (data.amount) setAmountStr(Number(data.amount).toLocaleString('vi-VN'))
-        if (data.note) setNote(data.note)
-        if (data.date) setCurrentDateStr(data.date)
-        if (data.type) {
-          setType(data.type)
-          setSelectedCategory(data.type === 'expense' ? 'Ăn uống' : 'Tiền lương')
-        }
-        alert('✨ Đã nhận diện bill thành công!')
-      } else {
-        alert('Không nhận diện được ảnh bill này. Vui lòng nhập tay.')
-      }
-    } catch (err: any) {
-      alert('Lỗi quét bill: ' + err.message)
-    } finally {
-      setIsScanningBill(false)
-      if (billInputRef.current) billInputRef.current.value = ''
-    }
   }
 
   const noteSuggestions = useMemo(() => {
@@ -667,7 +633,6 @@ export default function MoneyManagerPage() {
     router.replace('/')
   }
 
-  // Toàn bộ các useMemo Hook bắt buộc gọi trên này (trước return) để tuân thủ Rules of Hooks
   const totalAllExpense = useMemo(() => {
     return transactions.filter(t => t && t.type === 'expense').reduce((sum, t) => sum + Number(t.amount || 0), 0)
   }, [transactions])
@@ -763,7 +728,6 @@ export default function MoneyManagerPage() {
 
   const currentCategories = type === 'expense' ? expenseCats : incomeCats
 
-  // Đặt điều kiện loading ở đây (sau khi TẤT CẢ các Hook đã được gọi đầy đủ)
   if (!mounted || authLoading) {
     return (
       <div className="min-h-screen bg-[#0f1115] flex flex-col items-center justify-center text-white">
@@ -776,61 +740,45 @@ export default function MoneyManagerPage() {
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 pb-28 sm:pb-12">
       
-      {/* Header Sticky */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200 shadow-2xs">
+      {/* HEADER TỐI ƯU TOÀN DIỆN CHO MOBILE & DESKTOP */}
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-2xs">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
           
-          <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Cụm Logo & Quay lại */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <button
               onClick={() => router.push('/gallery')}
-              className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
               title="Quay lại Thư viện ảnh"
             >
               <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
-            <h1 className="font-bold text-sm sm:text-lg text-slate-900 tracking-tight flex items-center gap-1.5 truncate">
+            <h1 className="font-bold text-xs sm:text-base text-slate-900 tracking-tight flex items-center gap-1.5 truncate">
               <Wallet className="w-4 h-4 text-orange-500 flex-shrink-0" />
               <span className="truncate">Sổ Thu Chi ({transactions.length})</span>
             </h1>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Nút Quét Ảnh Bill */}
-            <button
-              type="button"
-              onClick={() => billInputRef.current?.click()}
-              disabled={isScanningBill}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 text-white hover:bg-amber-600 transition shadow-2xs cursor-pointer disabled:opacity-50"
-              title="Chụp hoặc tải ảnh bill chuyển khoản"
-            >
-              {isScanningBill ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
-              <span className="hidden xs:inline">{isScanningBill ? 'Đang đọc...' : 'Quét Bill'}</span>
-            </button>
-            <input 
-              type="file" 
-              ref={billInputRef} 
-              onChange={handleScanBill} 
-              accept="image/*" 
-              className="hidden" 
-            />
-
-            {/* Nút tóm tắt số dư (CÓ ICON ẨN / HIỆN) */}
-            <div className="relative">
+          {/* Thanh công cụ tối ưu cuộn ngang trên điện thoại */}
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[62vw] sm:max-w-none justify-end">
+            
+            {/* Box Số Dư & Dropdown Thống Kê */}
+            <div className="relative flex-shrink-0">
               <div className="flex items-center bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition shadow-2xs">
                 <button
                   type="button"
                   onClick={() => setShowSummaryDropdown(!showSummaryDropdown)}
-                  className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs font-bold text-slate-800 cursor-pointer"
+                  className="flex items-center gap-1 px-2 sm:px-3 py-1.5 sm:py-2 text-[11px] sm:text-xs font-bold text-slate-800 cursor-pointer"
                 >
                   <TrendingUp className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-                  <span className="max-w-[85px] sm:max-w-none truncate">{formatDisplayCurrencyOrHidden(totalBalance)}</span>
+                  <span className="max-w-[70px] xs:max-w-[90px] sm:max-w-none truncate">{formatDisplayCurrencyOrHidden(totalBalance)}</span>
                   {showSummaryDropdown ? <ChevronUp className="w-3 h-3 text-slate-400" /> : <ChevronDown className="w-3 h-3 text-slate-400" />}
                 </button>
 
                 <button
                   type="button"
                   onClick={toggleHideBalance}
-                  className="pr-2 pl-1 py-1.5 text-slate-400 hover:text-slate-700 transition cursor-pointer"
+                  className="pr-1.5 pl-0.5 py-1.5 text-slate-400 hover:text-slate-700 transition cursor-pointer"
                   title={hideBalance ? 'Hiện số tiền' : 'Ẩn số tiền để bảo mật'}
                 >
                   {hideBalance ? <EyeOff className="w-3.5 h-3.5 text-slate-500" /> : <Eye className="w-3.5 h-3.5 text-emerald-600" />}
@@ -868,9 +816,10 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
+            {/* Các nút trên màn hình Desktop */}
             <button
               onClick={handleExportExcel}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer flex-shrink-0"
             >
               <Download className="w-4 h-4" />
               <span>Xuất File</span>
@@ -878,16 +827,17 @@ export default function MoneyManagerPage() {
 
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer flex-shrink-0"
             >
               <Upload className="w-4 h-4" />
               <span>Nhập File</span>
             </button>
 
+            {/* Nút Xóa Dữ Liệu */}
             <button
               onClick={handleDeleteAll}
               disabled={isDeletingAll || transactions.length === 0}
-              className="p-1.5 sm:p-2 rounded-xl text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition cursor-pointer disabled:opacity-50"
+              className="p-1.5 sm:p-2 rounded-xl text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition cursor-pointer disabled:opacity-50 flex-shrink-0"
               title="Xóa tất cả các khoản đã nhập"
             >
               <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -901,27 +851,29 @@ export default function MoneyManagerPage() {
               className="hidden" 
             />
 
-            <div className="flex items-center gap-1.5 pl-1.5 border-l border-slate-200">
+            {/* Tài Khoản & Đăng Xuất */}
+            <div className="flex items-center gap-1 pl-1 sm:pl-1.5 border-l border-slate-200 flex-shrink-0">
               {user?.user_metadata?.avatar_url ? (
                 <img 
                   src={user.user_metadata.avatar_url} 
                   alt="Avatar" 
-                  className="w-6 h-6 sm:w-7 sm:h-7 rounded-full object-cover border border-emerald-500/50"
+                  className="w-6 h-6 sm:w-7 sm:h-7 rounded-full object-cover border border-emerald-500/50 flex-shrink-0"
                   title={user.email}
                 />
               ) : (
-                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center text-[10px] font-bold">
+                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
                   <UserIcon className="w-3 h-3" />
                 </div>
               )}
               <button
                 onClick={handleSignOut}
-                className="p-1 text-slate-400 hover:text-red-500 transition cursor-pointer"
+                className="p-1 text-slate-400 hover:text-red-500 transition cursor-pointer flex-shrink-0"
                 title="Đăng xuất"
               >
                 <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
             </div>
+
           </div>
         </div>
       </header>
