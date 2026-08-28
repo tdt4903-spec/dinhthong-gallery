@@ -10,7 +10,7 @@ import {
   Briefcase, Gift, Plane, Star, Fish, Car, Clapperboard, 
   GlassWater, Plus, ChevronLeft, ChevronRight, Download, 
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
-  ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check
+  ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check, AlertTriangle
 } from 'lucide-react'
 
 // Bảng ánh xạ ID từ app sang tên Danh mục tiếng Việt
@@ -97,6 +97,7 @@ export default function MoneyManagerPage() {
   const [selectedMonth, setSelectedMonth] = useState<number>(8)
   const [selectedYear, setSelectedYear] = useState<number>(2026)
 
+  const [isDeletingAll, setIsDeletingAll] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const supabase = createBrowserClient(
@@ -203,6 +204,35 @@ export default function MoneyManagerPage() {
     }
   }
 
+  // TÍNH NĂNG: XÓA TOÀN BỘ DỮ LIỆU ĐÃ NHẬP
+  const handleDeleteAll = async () => {
+    if (transactions.length === 0) {
+      alert('Hiện chưa có dữ liệu nào trong sổ để xóa!')
+      return
+    }
+
+    const confirm1 = confirm(`CẢNH BÁO: Bạn có chắc chắn muốn XÓA TOÀN BỘ ${transactions.length} giao dịch đã nhập vào không?`)
+    if (!confirm1) return
+
+    const confirm2 = confirm('Hành động này KHÔNG THỂ HOÀN TÁC. Bạn có thực sự muốn xóa sạch sổ thu chi?')
+    if (!confirm2) return
+
+    setIsDeletingAll(true)
+    try {
+      const { error } = await supabase.from('transactions').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      if (!error) {
+        setTransactions([])
+        alert('Đã xóa toàn bộ dữ liệu trong Sổ Thu Chi thành công!')
+      } else {
+        alert('Lỗi khi xóa dữ liệu: ' + error.message)
+      }
+    } catch (e: any) {
+      alert('Lỗi: ' + e.message)
+    } finally {
+      setIsDeletingAll(false)
+    }
+  }
+
   // XỬ LÝ NHẬP ĐÚNG FILE CSV TỪ APP CỦA BẠN
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -217,7 +247,6 @@ export default function MoneyManagerPage() {
           return
         }
 
-        // Tách các dòng của file CSV
         const lines = text.split(/\r\n|\n/)
         const formattedToInsert: any[] = []
 
@@ -228,10 +257,8 @@ export default function MoneyManagerPage() {
           const line = lines[i].trim()
           if (!line) continue
 
-          // Bỏ qua dòng thẻ tag #DAILY_DATAS
           if (line.startsWith('#')) continue
 
-          // Tìm dòng header inputDateString,amount,memo,...
           if (line.includes('inputDateString') || line.includes('amount')) {
             const headers = line.split(',').map(h => h.trim())
             colIndex.date = headers.indexOf('inputDateString')
@@ -244,7 +271,6 @@ export default function MoneyManagerPage() {
           }
 
           if (headerFound) {
-            // Tách theo dấu phẩy và xử lý trường hợp có ngoặc kép "..."
             const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',')
             if (!parts || parts.length < 3) continue
 
@@ -257,7 +283,6 @@ export default function MoneyManagerPage() {
             const numAmount = Number(rawAmount)
             if (!numAmount || isNaN(numAmount)) continue
 
-            // Chuẩn hóa ngày dạng 2023/11/1 -> 2023-11-01
             let formattedDate = formatDateDb(new Date())
             const dParts = rawDate.split('/')
             if (dParts.length === 3) {
@@ -267,7 +292,6 @@ export default function MoneyManagerPage() {
               formattedDate = `${y}-${m}-${d}`
             }
 
-            // type = 1 là Tiền Thu, type = 0 là Tiền Chi
             const isIncome = rawType === '1'
             const categoryName = CATEGORY_ID_MAP[rawCatId] || (isIncome ? 'Tiền lương' : 'Ăn uống')
 
@@ -286,7 +310,6 @@ export default function MoneyManagerPage() {
           return
         }
 
-        // Chia theo từng lô 200 bản ghi để lưu vào Supabase
         const CHUNK_SIZE = 200
         for (let i = 0; i < formattedToInsert.length; i += CHUNK_SIZE) {
           const chunk = formattedToInsert.slice(i, i + CHUNK_SIZE)
@@ -391,6 +414,16 @@ export default function MoneyManagerPage() {
             >
               <Upload className="w-4 h-4" />
               <span>Nhập File CSV App</span>
+            </button>
+
+            <button
+              onClick={handleDeleteAll}
+              disabled={isDeletingAll || transactions.length === 0}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition cursor-pointer disabled:opacity-50"
+              title="Xóa tất cả các khoản đã nhập"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Xóa tất cả</span>
             </button>
 
             <input 
@@ -679,6 +712,16 @@ export default function MoneyManagerPage() {
                   <Calendar className="w-5 h-5 text-emerald-500" />
                   Lịch Sử Giao Dịch ({filteredTransactions.length})
                 </h3>
+
+                {filteredTransactions.length > 0 && (
+                  <button
+                    onClick={handleDeleteAll}
+                    className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-semibold cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Xóa tất cả</span>
+                  </button>
+                )}
               </div>
 
               <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
