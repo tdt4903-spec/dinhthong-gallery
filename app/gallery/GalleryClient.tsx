@@ -177,17 +177,18 @@ export default function GalleryClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
+  // CẬP NHẬT TIÊU ĐỀ TAB TRÌNH DUYỆT ĐỘNG
   useEffect(() => {
     if (previewMedia) {
       const fileName = customNames[previewMedia.id] || previewMedia.name
-      document.title = `${fileName} - Dinh Thong Workspace`
+      document.title = `${fileName} - Dinh Thong Gallery`
     } else if (folderHistory.length > 0) {
       const currentFolder = folderHistory[folderHistory.length - 1]
-      document.title = `${currentFolder.title} - Dinh Thong Workspace`
+      document.title = `${currentFolder.title} - Dinh Thong Gallery`
     } else if (selectedAlbum) {
-      document.title = `${selectedAlbum.title} - Dinh Thong Workspace`
+      document.title = `${selectedAlbum.title} - Dinh Thong Gallery`
     } else {
-      document.title = 'Dinh Thong Workspace'
+      document.title = 'Dinh Thong Gallery'
     }
   }, [previewMedia, folderHistory, selectedAlbum, customNames])
 
@@ -1270,7 +1271,7 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-      {/* HEADER TỐI ƯU MOBILE */}
+      {/* HEADER TỐI ƯU MOBILE: HỖ TRỢ CUỘN NGANG VÀ HIỂN THỊ ĐỦ THÔNG TIN */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/95 border-white/10' : 'bg-white/95 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
           
@@ -1288,9 +1289,9 @@ export default function GalleryClient() {
               </button>
             )}
 
-            <div onClick={() => !isSharedGuest && setSelectedAlbum(null)} className={`flex items-baseline gap-1.5 ${!isSharedGuest ? 'cursor-pointer' : ''}`}>
-              <span className="text-base sm:text-2xl font-serif font-bold tracking-tight">Dinh Thong</span>
-              <span className="font-serif italic text-emerald-600 text-xs sm:text-lg">Workspace</span>
+            <div onClick={() => !isSharedGuest && setSelectedAlbum(null)} className={`flex items-baseline gap-1 ${!isSharedGuest ? 'cursor-pointer' : ''}`}>
+              <span className="text-base sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
+              <span className="font-serif italic text-emerald-600 text-xs sm:text-lg">gallery</span>
             </div>
           </div>
 
@@ -1446,7 +1447,7 @@ export default function GalleryClient() {
 
               <div className="relative z-10 p-6 sm:p-14 max-w-xl text-gray-900 dark:text-white transform transition-all duration-700 ease-out">
                 <span className="text-[10px] sm:text-[11px] font-bold tracking-[0.2em] sm:tracking-[0.25em] text-emerald-600 dark:text-emerald-400 uppercase drop-shadow-sm block">
-                  DINH THONG WORKSPACE
+                  DINHTHONG GALLERY
                 </span>
                 <h1 className="text-2xl sm:text-4xl lg:text-5xl font-serif font-medium tracking-tight mt-2 sm:mt-3 leading-tight drop-shadow-sm">
                   Khoảnh khắc <br />
@@ -1457,10 +1458,10 @@ export default function GalleryClient() {
 
             <div className={`w-full h-[1px] mb-6 sm:mb-8 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
-            {/* HÀNG TIÊU ĐỀ ALBUM */}
+            {/* HÀNG TIÊU ĐỀ ALBUM KÈM CÁC NÚT QUẢN TRỊ DRIVE */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div className="flex items-center gap-2">
-                <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album Gallery</h2>
+                <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
                 <span className="text-xs text-gray-400">({filteredAlbums.length})</span>
               </div>
 
@@ -1806,7 +1807,7 @@ export default function GalleryClient() {
                                     {displayName}
                                   </h4>
                                   <p className="text-[10px] text-gray-400 mt-0.5">
-                                    {hasCover ? 'Album ảnh Gallery' : 'Thư mục con'}
+                                    {hasCover ? 'Album ảnh' : 'Thư mục con'}
                                   </p>
                                 </div>
 
@@ -2016,7 +2017,7 @@ export default function GalleryClient() {
                 <div>
                   <h3 className="font-serif font-bold text-base sm:text-lg">Quản Lý Ẩn / Hiện Mục Trong Album</h3>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Tick chọn để hiển thị, bỏ tick để ẩn mục khỏi web.
+                    Tick chọn để hiển thị, bỏ tick để ẩn mục khỏi web gallery.
                   </p>
                 </div>
               </div>
@@ -2513,7 +2514,7 @@ export default function GalleryClient() {
         isDarkMode ? 'border-white/10 text-gray-500' : 'border-gray-100 text-gray-400'
       }`}>
         <div className="max-w-7xl mx-auto px-6 text-center">
-          <p>© 2026 Dinh Thong Workspace</p>
+          <p>© 2026 DinhThong Gallery</p>
         </div>
       </footer>
 
