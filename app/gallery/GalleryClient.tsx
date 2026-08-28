@@ -53,7 +53,6 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
-// Trích xuất ID Drive thuần túy
 const extractDriveId = (url: string) => {
   if (!url) return ''
   const clean = url.trim()
@@ -64,7 +63,6 @@ const extractDriveId = (url: string) => {
   return clean.replace(/[^a-zA-Z0-9_-]/g, '')
 }
 
-// Chuyển đổi ID chuỗi dài thành DÃY SỐ NGẮN (6 số)
 const toNumericCode = (str: string) => {
   if (!str) return ''
   if (/^\d{6}$/.test(str)) return str
@@ -123,7 +121,6 @@ export default function GalleryClient() {
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
-  // State chọn nhiều (Batch Selection)
   const [selectedAlbumIds, setSelectedAlbumIds] = useState<Set<string>>(new Set())
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
 
@@ -138,24 +135,20 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  // Quản lý Thư Mục Tổng
   const [masterFoldersList, setMasterFoldersList] = useState<MasterFolderItem[]>([])
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false)
   const [newMasterName, setNewMasterName] = useState('')
   const [newMasterUrl, setNewMasterUrl] = useState('')
   const [isSyncing, setIsSyncing] = useState(false)
 
-  // Quản lý kiểm duyệt đồng bộ thư mục mới từ Drive
   const [pendingSyncAlbums, setPendingSyncAlbums] = useState<{ id: string; name: string; driveUrl: string; parentTitle: string }[]>([])
   const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(new Set())
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
 
-  // Quản lý danh sách ẩn / hiện chi tiết trong từng album
   const [isManageVisibilityOpen, setIsManageVisibilityOpen] = useState(false)
   const [tempVisibleIds, setTempVisibleIds] = useState<Set<string>>(new Set())
   const [isSavingVisibility, setIsSavingVisibility] = useState(false)
 
-  // Modal Quản lý Key Panel
   const [isKeyGenOpen, setIsKeyGenOpen] = useState(false)
   const [customerName, setCustomerName] = useState('')
   const [serialInput, setSerialInput] = useState('')
@@ -196,9 +189,7 @@ export default function GalleryClient() {
   const fetchHiddenItemIds = async () => {
     try {
       const { data } = await supabase.from('hidden_items').select('id')
-      if (data) {
-        setHiddenItemIds(new Set(data.map((item: any) => item.id)))
-      }
+      if (data) setHiddenItemIds(new Set(data.map((item: any) => item.id)))
     } catch {}
   }
 
@@ -219,10 +210,21 @@ export default function GalleryClient() {
       const { data } = await supabase.from('custom_item_names').select('id, custom_name')
       if (data) {
         const nameMap: Record<string, string> = {}
-        data.forEach((item: any) => {
-          nameMap[item.id] = item.custom_name
-        })
+        data.forEach((item: any) => { nameMap[item.id] = item.custom_name })
         setCustomNames(nameMap)
+      }
+    } catch {}
+  }
+
+  const fetchCustomCovers = async () => {
+    try {
+      const { data } = await supabase.from('custom_covers').select('id, cover_url')
+      if (data) {
+        setAlbumCovers(prev => {
+          const next = { ...prev }
+          data.forEach((item: any) => { next[item.id] = item.cover_url })
+          return next
+        })
       }
     } catch {}
   }
@@ -260,7 +262,6 @@ export default function GalleryClient() {
     return []
   }
 
-  // Quét đối chiếu kiểm tra thư mục con mới trên Drive[cite: 3]
   const checkAllMasterFolders = async (folders: MasterFolderItem[], isManual = false, existingKnown?: Set<string>) => {
     if (!folders || folders.length === 0) {
       if (isManual) alert('Vui lòng thêm ít nhất 1 Thư Mục Tổng trước khi quét!')
@@ -270,24 +271,16 @@ export default function GalleryClient() {
     try {
       const { data: latestKnownData } = await supabase.from('known_drive_folders').select('id')
       const currentKnown = new Set(latestKnownData ? latestKnownData.map((i: any) => i.id) : (existingKnown || knownFolderIds))
-      
       const newFoldersDetected: { id: string; name: string; driveUrl: string; parentTitle: string }[] = []
 
       for (const f of folders) {
         if (!f || !f.url) continue
-        const res = await fetch(`/api/sync-check?masterUrl=${encodeURIComponent(f.url)}&_t=${Date.now()}`, {
-          cache: 'no-store'
-        })
+        const res = await fetch(`/api/sync-check?masterUrl=${encodeURIComponent(f.url)}&_t=${Date.now()}`, { cache: 'no-store' })
         const data = await res.json()
         if (data.albums && Array.isArray(data.albums)) {
           const unapproved = data.albums.filter((sub: any) => sub && !currentKnown.has(sub.id))
           unapproved.forEach((sub: any) => {
-            newFoldersDetected.push({
-              id: sub.id,
-              name: sub.title,
-              driveUrl: sub.driveUrl,
-              parentTitle: f.name
-            })
+            newFoldersDetected.push({ id: sub.id, name: sub.title, driveUrl: sub.driveUrl, parentTitle: f.name })
           })
         }
       }
@@ -306,7 +299,6 @@ export default function GalleryClient() {
     }
   }
 
-  // TỰ ĐỘNG QUÉT DRIVE NGẦM ĐỊNH KỲ 5 PHÚT / LẦN[cite: 3]
   useEffect(() => {
     if (isSharedGuest) return
     const interval = setInterval(async () => {
@@ -315,11 +307,9 @@ export default function GalleryClient() {
         checkAllMasterFolders(masters, false)
       }
     }, 5 * 60 * 1000)
-
     return () => clearInterval(interval)
   }, [isSharedGuest])
 
-  // THÊM THƯ MỤC TỔNG RA TRANG CHỦ[cite: 3]
   const handleAddMasterFolder = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newMasterName.trim() || !newMasterUrl.trim()) return
@@ -330,28 +320,15 @@ export default function GalleryClient() {
     const cleanId = extractDriveId(cleanUrl) || Date.now().toString()
 
     try {
-      const newMaster: MasterFolderItem = {
-        id: cleanId,
-        name: cleanName,
-        url: cleanUrl
-      }
+      const newMaster: MasterFolderItem = { id: cleanId, name: cleanName, url: cleanUrl }
       await supabase.from('master_folders').upsert([newMaster], { onConflict: 'id' })
-
-      await supabase.from('albums').upsert([
-        {
-          id: cleanId,
-          title: cleanName,
-          drive_url: cleanUrl,
-          cover_url: ''
-        }
-      ], { onConflict: 'id' })
+      await supabase.from('albums').upsert([{ id: cleanId, title: cleanName, drive_url: cleanUrl, cover_url: '' }], { onConflict: 'id' })
 
       const updatedMasters = [newMaster, ...masterFoldersList.filter(m => m.id !== cleanId)]
       setMasterFoldersList(updatedMasters)
       setNewMasterName('')
       setNewMasterUrl('')
       setIsMasterModalOpen(false)
-      
       await fetchAlbumsFromSupabase()
       checkAllMasterFolders(updatedMasters, false)
     } catch (err: any) {
@@ -364,13 +341,10 @@ export default function GalleryClient() {
   const handleDeleteMasterFolder = async (id: string) => {
     if (confirm('Bạn có chắc muốn xóa thư mục tổng này khỏi danh sách quản lý?')) {
       const { error } = await supabase.from('master_folders').delete().eq('id', id)
-      if (!error) {
-        setMasterFoldersList(prev => prev.filter(f => f.id !== id))
-      }
+      if (!error) setMasterFoldersList(prev => prev.filter(f => f.id !== id))
     }
   }
 
-  // DỌN DẸP TRANG CHỦ[cite: 3]
   const handleCleanHomePage = async () => {
     if (!masterFoldersList || masterFoldersList.length === 0) return
     const masterIds = new Set(masterFoldersList.map(m => m.id))
@@ -411,21 +385,13 @@ export default function GalleryClient() {
     }
   }
 
-  // XÁC NHẬN DUYỆT THƯ MỤC CON[cite: 3]
   const handleConfirmSync = async () => {
     setIsSyncing(true)
     try {
-      const recordsToInsert = pendingSyncAlbums.map(f => ({
-        id: f.id,
-        name: f.name,
-        parent_url: f.driveUrl
-      }))
+      const recordsToInsert = pendingSyncAlbums.map(f => ({ id: f.id, name: f.name, parent_url: f.driveUrl }))
       await supabase.from('known_drive_folders').upsert(recordsToInsert, { onConflict: 'id' })
 
-      const unselectedIds = pendingSyncAlbums
-        .filter(f => !selectedPendingIds.has(f.id))
-        .map(f => ({ id: f.id }))
-
+      const unselectedIds = pendingSyncAlbums.filter(f => !selectedPendingIds.has(f.id)).map(f => ({ id: f.id }))
       if (unselectedIds.length > 0) {
         await supabase.from('hidden_items').upsert(unselectedIds, { onConflict: 'id' })
         setHiddenItemIds(prev => {
@@ -461,22 +427,14 @@ export default function GalleryClient() {
   }
 
   const fetchLicenses = async () => {
-    const { data, error } = await supabase
-      .from('panel_licenses')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (!error && data) {
-      setKeyRecords(data)
-    }
+    const { data, error } = await supabase.from('panel_licenses').select('*').order('created_at', { ascending: false })
+    if (!error && data) setKeyRecords(data)
   }
 
   useEffect(() => {
-    if (isKeyGenOpen) {
-      fetchLicenses()
-    }
+    if (isKeyGenOpen) fetchLicenses()
   }, [isKeyGenOpen])
 
-  // LẤY DỮ LIỆU BÊN TRONG ALBUM (ẢNH VÀ THƯ MỤC CON)[cite: 3]
   const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
@@ -549,11 +507,9 @@ export default function GalleryClient() {
 
   const totalPages = Math.ceil(filteredMediaFiles.length / itemsPerPage)
   const paginatedImages = filteredMediaFiles.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-
   const previewSourceList = filteredMediaFiles
   const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
 
-  // PRELOAD BUFFER ±3 ẢNH[cite: 3]
   useEffect(() => {
     if (currentIndex === -1 || previewSourceList.length === 0) return
 
@@ -579,53 +535,33 @@ export default function GalleryClient() {
 
     if (thumbnailRef.current) {
       const activeThumb = thumbnailRef.current.children[currentIndex] as HTMLElement
-      if (activeThumb) {
-        activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
-      }
+      if (activeThumb) activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
     }
   }, [currentIndex, previewSourceList])
 
   const handlePrevImage = useCallback(() => {
     if (previewSourceList.length === 0) return
-    if (currentIndex > 0) {
-      setPreviewMedia(previewSourceList[currentIndex - 1])
-    } else {
-      setPreviewMedia(previewSourceList[previewSourceList.length - 1])
-    }
+    if (currentIndex > 0) setPreviewMedia(previewSourceList[currentIndex - 1])
+    else setPreviewMedia(previewSourceList[previewSourceList.length - 1])
   }, [currentIndex, previewSourceList])
 
   const handleNextImage = useCallback(() => {
     if (previewSourceList.length === 0) return
-    if (currentIndex < previewSourceList.length - 1) {
-      setPreviewMedia(previewSourceList[currentIndex + 1])
-    } else {
-      setPreviewMedia(previewSourceList[0])
-    }
+    if (currentIndex < previewSourceList.length - 1) setPreviewMedia(previewSourceList[currentIndex + 1])
+    else setPreviewMedia(previewSourceList[0])
   }, [currentIndex, previewSourceList])
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.targetTouches[0].clientX
-  }
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    touchEndX.current = e.targetTouches[0].clientX
-  }
-
+  const handleTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.targetTouches[0].clientX }
+  const handleTouchMove = (e: React.TouchEvent) => { touchEndX.current = e.targetTouches[0].clientX }
   const handleTouchEnd = () => {
     if (!touchStartX.current || !touchEndX.current) return
     const distance = touchStartX.current - touchEndX.current
-    if (distance > 45) {
-      handleNextImage()
-    }
-    if (distance < -45) {
-      handlePrevImage()
-    }
-
+    if (distance > 45) handleNextImage()
+    if (distance < -45) handlePrevImage()
     touchStartX.current = null
     touchEndX.current = null
   }
 
-  // CHECKBOX CHỌN NHIỀU ALBUM TRANG CHỦ[cite: 3]
   const handleToggleSelectAlbum = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     setSelectedAlbumIds(prev => {
@@ -636,7 +572,6 @@ export default function GalleryClient() {
     })
   }
 
-  // CHECKBOX CHỌN NHIỀU FILE / THƯ MỤC CON[cite: 3]
   const handleToggleSelectItem = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     setSelectedItemIds(prev => {
@@ -647,10 +582,8 @@ export default function GalleryClient() {
     })
   }
 
-  // TẢI ZIP HÀNG LOẠT[cite: 3]
   const handleBatchDownload = async () => {
     if (isZipping) return
-
     if (!selectedAlbum) {
       const selectedAlbumsList = (albums || []).filter(a => a && selectedAlbumIds.has(a.id))
       if (selectedAlbumsList.length === 0) return
@@ -716,10 +649,8 @@ export default function GalleryClient() {
     }
   }
 
-  // XÓA HÀNG LOẠT[cite: 3]
   const handleBatchDelete = async () => {
     if (isSharedGuest) return
-
     if (!selectedAlbum) {
       if (selectedAlbumIds.size === 0) return
       if (confirm(`Bạn có chắc muốn XÓA ${selectedAlbumIds.size} album đã chọn khỏi hệ thống?`)) {
@@ -763,7 +694,6 @@ export default function GalleryClient() {
 
     try {
       let targetFiles = visibleItems.filter(f => f.type !== 'folder')
-      
       if (targetInfo && targetInfo.driveUrl !== (currentFolder?.driveUrl || selectedAlbum?.driveUrl)) {
         const res = await fetch(`/api/drive?url=${encodeURIComponent(targetInfo.driveUrl)}`)
         const data = await res.json()
@@ -784,7 +714,6 @@ export default function GalleryClient() {
       const fetchRawOriginalFile = async (file: MediaItem) => {
         const ext = file.type === 'video' ? 'mp4' : 'jpg'
         const exactFileName = file.name.includes('.') ? file.name : `${file.name}.${ext}`
-        
         try {
           const res = await fetch(`/api/download?url=${encodeURIComponent(file.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
           if (res.ok) {
@@ -805,18 +734,9 @@ export default function GalleryClient() {
       }
 
       setZipProgress('Vui lòng đợi...')
-      
-      const zipContent = await zip.generateAsync(
-        { 
-          type: 'blob', 
-          compression: 'STORE',
-          streamFiles: true 
-        }, 
-        (metadata) => {
-          setZipProgress(`${Math.floor(metadata.percent)}%`)
-        }
-      )
-
+      const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE', streamFiles: true }, (metadata) => {
+        setZipProgress(`${Math.floor(metadata.percent)}%`)
+      })
       saveAs(zipContent, `${target.title}.zip`)
     } catch (err: any) {
       alert('Có lỗi xảy ra khi tải album: ' + err.message)
@@ -826,7 +746,6 @@ export default function GalleryClient() {
     }
   }
 
-  // XÓA HIỂN THỊ DỨT ĐIỂM (SUPABASE)[cite: 3]
   const handlePermanentlyHideItem = async (itemId: string, itemName: string, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -837,16 +756,13 @@ export default function GalleryClient() {
       const { error } = await supabase.from('hidden_items').insert([{ id: itemId }])
       if (!error) {
         setHiddenItemIds(prev => new Set([...Array.from(prev), itemId]))
-        if (previewMedia?.id === itemId) {
-          setPreviewMedia(null)
-        }
+        if (previewMedia?.id === itemId) setPreviewMedia(null)
       } else {
         alert('Lỗi khi xóa: ' + error.message)
       }
     }
   }
 
-  // SỬA TÊN HIỂN THỊ THƯ MỤC CON[cite: 3]
   const handleSaveSubFolderName = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingSubFolder) return
@@ -864,14 +780,12 @@ export default function GalleryClient() {
     }
   }
 
-  // MỞ MODAL QUẢN LÝ ẨN / HIỆN DANH SÁCH CHI TIẾT[cite: 3]
   const handleOpenVisibilityManager = () => {
     const visibleSet = new Set(items.map(i => i.id).filter(id => !hiddenItemIds.has(id)))
     setTempVisibleIds(visibleSet)
     setIsManageVisibilityOpen(true)
   }
 
-  // LƯU THAY ĐỔI ẨN / HIỆN DANH SÁCH[cite: 3]
   const handleSaveVisibilityChanges = async () => {
     setIsSavingVisibility(true)
     try {
@@ -882,7 +796,6 @@ export default function GalleryClient() {
       if (newlyHiddenIds.length > 0) {
         await supabase.from('hidden_items').upsert(newlyHiddenIds.map(id => ({ id })), { onConflict: 'id' })
       }
-
       if (newlyShownIds.length > 0) {
         await supabase.from('hidden_items').delete().in('id', newlyShownIds)
       }
@@ -903,7 +816,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Chia sẻ Album: Link ngắn /s/[MÃ_SỐ_NGẮN][cite: 3]
   const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
     e.stopPropagation()
     const numericCode = toNumericCode(album.id)
@@ -913,7 +825,6 @@ export default function GalleryClient() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // Chia sẻ Thư mục con: Link ngắn /s/[MÃ_SỐ_NGẮN][cite: 3]
   const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
     e.stopPropagation()
     const numericCode = toNumericCode(folder.id)
@@ -946,10 +857,7 @@ export default function GalleryClient() {
       const file = new File([blob], exactFileName, { type: mimeType })
 
       if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: exactFileName,
-        })
+        await navigator.share({ files: [file], title: exactFileName })
         setDownloadingId(null)
         return
       }
@@ -1006,14 +914,8 @@ export default function GalleryClient() {
   ]
 
   const handleGenerateKey = async () => {
-    if (!customerName.trim()) {
-      alert('Vui lòng nhập Tên khách hàng!')
-      return
-    }
-    if (!serialInput.trim()) {
-      alert('Vui lòng nhập Số Seri máy của khách!')
-      return
-    }
+    if (!customerName.trim()) { alert('Vui lòng nhập Tên khách hàng!'); return; }
+    if (!serialInput.trim()) { alert('Vui lòng nhập Số Seri máy của khách!'); return; }
 
     setIsSavingKey(true)
     let expireTimestamp = 0
@@ -1050,15 +952,9 @@ export default function GalleryClient() {
       status: 'active',
     }
 
-    const { error } = await supabase
-      .from('panel_licenses')
-      .upsert(newRecord, { onConflict: 'serial' })
-
-    if (!error) {
-      await fetchLicenses()
-    } else {
-      alert('Lỗi lưu Supabase: ' + error.message)
-    }
+    const { error } = await supabase.from('panel_licenses').upsert(newRecord, { onConflict: 'serial' })
+    if (!error) await fetchLicenses()
+    else alert('Lỗi lưu Supabase: ' + error.message)
     setIsSavingKey(false)
   }
 
@@ -1067,39 +963,23 @@ export default function GalleryClient() {
     const actionName = newStatus === 'revoked' ? 'khóa máy và thu hồi quyền' : 'mở khóa lại cho'
     
     if (confirm(`Bạn có chắc muốn ${actionName} khách hàng: ${record.customer_name} (${record.serial})?`)) {
-      const { error } = await supabase
-        .from('panel_licenses')
-        .update({ status: newStatus })
-        .eq('id', record.id)
-
-      if (!error) {
-        await fetchLicenses()
-      } else {
-        alert('Lỗi cập nhật: ' + error.message)
-      }
+      const { error } = await supabase.from('panel_licenses').update({ status: newStatus }).eq('id', record.id)
+      if (!error) await fetchLicenses()
+      else alert('Lỗi cập nhật: ' + error.message)
     }
   }
 
   const handleDeleteRecord = async (id: string) => {
     if (confirm('Bạn có chắc muốn xóa bản ghi này khỏi danh sách quản lý?')) {
-      const { error } = await supabase
-        .from('panel_licenses')
-        .delete()
-        .eq('id', id)
-
-      if (!error) {
-        await fetchLicenses()
-      } else {
-        alert('Lỗi khi xóa: ' + error.message)
-      }
+      const { error } = await supabase.from('panel_licenses').delete().eq('id', id)
+      if (!error) await fetchLicenses()
+      else alert('Lỗi khi xóa: ' + error.message)
     }
   }
 
-  // TỰ ĐỘNG NHẬN DIỆN CẢ LINK SIÊU NGẮN (DÃY SỐ) VÀ HIỂN THỊ TÊN ADMIN ĐẶT[cite: 3]
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
-    
     const params = new URLSearchParams(window.location.search)
     const sharedId = isShortRoute ? pathParts[1] : params.get('id')
 
@@ -1107,8 +987,8 @@ export default function GalleryClient() {
       setIsSharedGuest(true)
       fetchHiddenItemIds()
       fetchCustomNames()
+      fetchCustomCovers()
 
-      // 1. Tìm xem có khớp Album nào không
       supabase
         .from('albums')
         .select('*')
@@ -1130,7 +1010,6 @@ export default function GalleryClient() {
             return
           }
 
-          // 2. Nếu không phải Album thì là Thư mục con -> Tìm trong custom_item_names và known_drive_folders
           let realFolderId = sharedId
           let adminSetTitle = ''
 
@@ -1180,12 +1059,7 @@ export default function GalleryClient() {
         }
 
         const loggedInEmail = data.session.user.email
-
-        const { data: whitelist, error } = await supabase
-          .from('allowed_emails')
-          .select('email')
-          .eq('email', loggedInEmail)
-          .single()
+        const { data: whitelist, error } = await supabase.from('allowed_emails').select('email').eq('email', loggedInEmail).single()
 
         if (error || !whitelist) {
           alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
@@ -1199,6 +1073,7 @@ export default function GalleryClient() {
         await fetchHiddenItemIds()
         const knownSet = await fetchKnownFolderIds()
         await fetchCustomNames()
+        await fetchCustomCovers()
         await fetchAlbumsFromSupabase()
         const masterFolders = await fetchMasterFoldersList()
 
@@ -1303,39 +1178,35 @@ export default function GalleryClient() {
     if (isSharedGuest) return
     if (confirm('Bạn có chắc muốn xóa album này không?')) {
       const { error } = await supabase.from('albums').delete().eq('id', id)
-      if (!error) {
-        await fetchAlbumsFromSupabase()
-      } else {
-        alert('Lỗi khi xóa: ' + error.message)
-      }
+      if (!error) await fetchAlbumsFromSupabase()
+      else alert('Lỗi khi xóa: ' + error.message)
     }
   }
 
-  // Hàm xử lý lưu ảnh bìa vào Database
+  // Hàm xử lý lưu ảnh bìa: Album gốc lưu vào albums, thư mục con lưu riêng vào custom_covers
   const handleSetAsCover = async (targetId: string, imageId: string, e: React.MouseEvent) => {
     e.stopPropagation()
     const formattedCover = `https://lh3.googleusercontent.com/d/${imageId}=w1000`
-    
-    const isAlbum = albums.some(a => a.id === targetId)
+    const isMasterAlbum = masterFoldersList.some(m => m.id === targetId) || albums.some(a => a.id === targetId && folderHistory.length === 0)
 
-    if (isAlbum) {
+    if (isMasterAlbum) {
       const { error } = await supabase.from('albums').update({ cover_url: formattedCover }).eq('id', targetId)
       if (!error) {
         await fetchAlbumsFromSupabase()
-        alert('Đã cập nhật ảnh bìa album thành công! Ảnh này cũng sẽ làm thumbnail khi chia sẻ link.')
+        alert('Đã cập nhật ảnh bìa Album trang chủ thành công!')
       } else {
         alert('Lỗi cập nhật ảnh bìa: ' + error.message)
       }
     } else {
-      const { error } = await supabase.from('albums').upsert([
-        { id: targetId, title: customNames[targetId] || 'Thư mục', drive_url: `https://drive.google.com/drive/folders/${targetId}`, cover_url: formattedCover }
+      const { error } = await supabase.from('custom_covers').upsert([
+        { id: targetId, cover_url: formattedCover }
       ], { onConflict: 'id' })
 
       if (!error) {
         setAlbumCovers(prev => ({ ...prev, [targetId]: formattedCover }))
-        alert('Đã cập nhật ảnh bìa thư mục con thành công!')
+        alert('Đã đặt ảnh bìa cho thư mục con & ảnh xem trước link chia sẻ thành công!')
       } else {
-        alert('Lỗi cập nhật ảnh bìa: ' + error.message)
+        alert('Lỗi lưu ảnh bìa: ' + error.message)
       }
     }
   }
@@ -1393,7 +1264,6 @@ export default function GalleryClient() {
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/90 border-white/10' : 'bg-white/90 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
           
-          {/* Logo */}
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {selectedAlbum && !isSharedGuest && (
               <button 
@@ -1413,7 +1283,6 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          {/* Cụm công cụ bên phải */}
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[65vw] sm:max-w-none">
             {selectedAlbum ? (
               <>
@@ -1470,7 +1339,6 @@ export default function GalleryClient() {
                     />
                   </div>
 
-                  {/* NÚT QUÉT DRIVE */}
                   <button
                     type="button"
                     onClick={() => checkAllMasterFolders(masterFoldersList, true)}
@@ -1485,7 +1353,6 @@ export default function GalleryClient() {
                     <span>{isSyncing ? 'Đang quét...' : 'Quét Drive'}</span>
                   </button>
 
-                  {/* NÚT THƯ MỤC TỔNG */}
                   <button
                     type="button"
                     onClick={() => setIsMasterModalOpen(true)}
@@ -1499,7 +1366,6 @@ export default function GalleryClient() {
                     <span>Thư Mục Tổng</span>
                   </button>
 
-                  {/* NÚT KEY PANEL */}
                   <button
                     type="button"
                     onClick={() => setIsKeyGenOpen(true)}
@@ -1513,7 +1379,6 @@ export default function GalleryClient() {
                     <span>Key Panel</span>
                   </button>
 
-                  {/* NÚT THÊM ALBUM */}
                   <button
                     onClick={() => setIsModalOpen(true)}
                     className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap flex-shrink-0"
@@ -1525,7 +1390,6 @@ export default function GalleryClient() {
               )
             )}
 
-            {/* Nút Đổi Theme & User Avatar */}
             <div className="flex items-center gap-2 pl-2 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
               <button
                 onClick={() => setIsDarkMode(!isDarkMode)}
@@ -1561,15 +1425,12 @@ export default function GalleryClient() {
                 </div>
               )}
             </div>
-
           </div>
-
         </div>
       </header>
 
       {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
-        
         {!selectedAlbum ? (
           <div>
             <section className="relative rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl min-h-[280px] sm:min-h-[385px] flex items-center mb-8 sm:mb-12 group">
@@ -1578,7 +1439,6 @@ export default function GalleryClient() {
                 alt="Hero Banner" 
                 className="absolute inset-0 w-full h-full object-cover transition-transform duration-1000 ease-out group-hover:scale-105"
               />
-              
               <div className="absolute inset-y-0 left-0 w-full sm:w-2/3 lg:w-1/2 bg-gradient-to-r from-white/95 via-white/60 to-transparent pointer-events-none z-[5]" />
               <div className="absolute inset-y-0 left-0 w-full sm:w-2/3 lg:w-1/2 bg-gradient-to-r from-[#0f1115]/95 via-[#0f1115]/60 to-transparent pointer-events-none z-[5] opacity-0 dark:opacity-100 transition-opacity duration-500" />
 
@@ -1595,7 +1455,6 @@ export default function GalleryClient() {
 
             <div className={`w-full h-[1px] mb-8 sm:mb-12 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
-            {/* TIÊU ĐỀ THƯ MỤC ALBUM VÀ NÚT DỌN DẸP BỐ CỤC */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 sm:mb-8">
               <div className="flex items-center gap-3">
                 <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
@@ -1655,7 +1514,6 @@ export default function GalleryClient() {
                       
                       <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
-                      {/* NÚT TICK CHỌN CHECKBOX TRÊN ALBUM */}
                       <button
                         onClick={(e) => handleToggleSelectAlbum(album.id, e)}
                         className="absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
@@ -1753,7 +1611,6 @@ export default function GalleryClient() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {/* NÚT MỞ DANH SÁCH ẨN/HIỆN CHI TIẾT */}
                 {!isSharedGuest && (
                   <button
                     onClick={handleOpenVisibilityManager}
@@ -1817,7 +1674,6 @@ export default function GalleryClient() {
               </div>
             ) : (
               <div className="space-y-10">
-                {/* 1. KHU VỰC THƯ MỤC CON */}
                 {subFolders.length > 0 && (
                   <div>
                     <div className="flex items-center gap-2 mb-4">
@@ -1830,10 +1686,11 @@ export default function GalleryClient() {
                       {subFolders
                         .filter(f => f.name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map((folder) => {
-                          const hasCover = Boolean(folder.coverUrl)
+                          const hasCover = Boolean(albumCovers[folder.id] || folder.coverUrl)
                           const folderDriveUrl = `https://drive.google.com/drive/folders/${folder.id}`
                           const displayName = customNames[folder.id] || folder.name
                           const isChecked = selectedItemIds.has(folder.id)
+                          const currentCover = albumCovers[folder.id] || folder.coverUrl
 
                           return (
                             <div
@@ -1841,9 +1698,7 @@ export default function GalleryClient() {
                               className={`rounded-2xl overflow-hidden border transition-all duration-300 hover:shadow-lg group flex flex-col justify-between ${
                                 isChecked ? 'ring-2 ring-emerald-500' : ''
                               } ${
-                                isDarkMode 
-                                  ? 'bg-[#16181e] border-white/10' 
-                                  : 'bg-white border-gray-100 shadow-sm'
+                                isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
                               }`}
                             >
                               <div 
@@ -1852,7 +1707,7 @@ export default function GalleryClient() {
                               >
                                 {hasCover ? (
                                   <img 
-                                    src={folder.coverUrl} 
+                                    src={currentCover} 
                                     alt={displayName} 
                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                                     onError={(e) => {
@@ -1867,7 +1722,6 @@ export default function GalleryClient() {
 
                                 <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
-                                {/* NÚT TICK CHỌN CHECKBOX THƯ MỤC CON */}
                                 <button
                                   onClick={(e) => handleToggleSelectItem(folder.id, e)}
                                   className="absolute bottom-2.5 left-2.5 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
@@ -1936,7 +1790,6 @@ export default function GalleryClient() {
                   </div>
                 )}
 
-                {/* 2. KHU VỰC HÌNH ẢNH & VIDEO */}
                 {mediaFiles.length > 0 && (
                   <div>
                     {subFolders.length > 0 && (
@@ -1991,7 +1844,6 @@ export default function GalleryClient() {
                                   />
                                 )}
 
-                                {/* NÚT TICK CHỌN CHECKBOX TỪNG FILE ẢNH/VIDEO */}
                                 <button
                                   onClick={(e) => handleToggleSelectItem(item.id, e)}
                                   className="absolute bottom-2 left-2 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
@@ -2069,7 +1921,7 @@ export default function GalleryClient() {
         )}
       </main>
 
-      {/* THANH CÔNG CỤ NỔI KHI TICK CHỌN CHECKBOX (BATCH ACTION BAR) */}
+      {/* THANH CÔNG CỤ NỔI KHI TICK CHỌN CHECKBOX */}
       {currentSelectionCount > 0 && (
         <div className="fixed bottom-6 inset-x-0 z-40 flex justify-center px-4 animate-in slide-in-from-bottom-5 duration-200">
           <div className="flex items-center gap-2.5 sm:gap-4 px-4 sm:px-6 py-3 rounded-2xl bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white shadow-2xl border border-white/15">
@@ -2112,7 +1964,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL QUẢN LÝ ẨN / HIỆN DANH SÁCH CHI TIẾT TRONG ALBUM */}
+      {/* MODAL QUẢN LÝ ẨN / HIỆN */}
       {isManageVisibilityOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
@@ -2221,7 +2073,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* POPUP KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC CON MỚI TRÊN DRIVE */}
+      {/* POPUP KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC CON MỚI */}
       {isSyncModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
@@ -2305,7 +2157,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL SỬA TÊN HIỂN THỊ THƯ MỤC CON */}
+      {/* MODAL SỬA TÊN THƯ MỤC CON */}
       {editingSubFolder && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
@@ -2355,7 +2207,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL QUẢN LÝ NHIỀU THƯ MỤC TỔNG */}
+      {/* MODAL THƯ MỤC TỔNG */}
       {isMasterModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-lg rounded-2xl p-6 shadow-2xl border transition-all ${
@@ -2447,11 +2299,10 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL QUẢN LÝ & TẠO KEY */}
+      {/* MODAL KEY PANEL */}
       {isKeyGenOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4">
           <div className="bg-white text-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            
             <div className="flex items-center justify-between px-5 sm:px-6 py-3.5 sm:py-4 border-b border-gray-100 bg-gray-50/50">
               <div>
                 <h2 className="text-sm sm:text-base font-bold text-gray-900 tracking-tight">DINH THONG RETOUCH</h2>
@@ -2619,7 +2470,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Chỉnh Sửa Album */}
+      {/* MODAL CHỈNH SỬA ALBUM */}
       {editingAlbum && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
@@ -2663,7 +2514,7 @@ export default function GalleryClient() {
               </div>
 
               <div>
-                <label className="block font-medium mb-1 text-gray-600 dark:text-gray-300">Link Ảnh Bìa (Để trống để tự động lấy ảnh đầu tiên trong Drive)</label>
+                <label className="block font-medium mb-1 text-gray-600 dark:text-gray-300">Link Ảnh Bìa</label>
                 <input 
                   type="text" 
                   value={editingAlbum.coverUrl}
@@ -2695,7 +2546,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Xem Trước Tệp */}
+      {/* MODAL XEM TRƯỚC TỆP */}
       {previewMedia && (
         <div 
           onClick={handleClosePreview}
@@ -2718,7 +2569,6 @@ export default function GalleryClient() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-              {/* NÚT ĐẶT LÀM ẢNH BÌA */}
               {!isSharedGuest && previewMedia && previewMedia.type === 'image' && (
                 <button
                   onClick={(e) => {
@@ -2865,7 +2715,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Quản Lý Danh Sách Tệp Đã Chọn */}
+      {/* MODAL ẢNH CHỌN (TXT) */}
       {isAdminPanelOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-lg rounded-2xl p-5 sm:p-6 shadow-2xl border transition-all ${
@@ -2963,7 +2813,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Modal Thêm Album */}
+      {/* MODAL THÊM ALBUM */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-5 sm:p-6 shadow-2xl border transition-all ${
