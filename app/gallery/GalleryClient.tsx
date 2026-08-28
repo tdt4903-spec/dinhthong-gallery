@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet, MoreVertical, LayoutGrid, ChevronDown
 } from 'lucide-react'
 
 interface MediaItem {
@@ -120,6 +120,7 @@ export default function GalleryClient() {
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false)
 
   const [selectedAlbumIds, setSelectedAlbumIds] = useState<Set<string>>(new Set())
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
@@ -169,6 +170,7 @@ export default function GalleryClient() {
   const [useNewline, setUseNewline] = useState(true)
 
   const thumbnailRef = useRef<HTMLDivElement>(null)
+  const toolsMenuRef = useRef<HTMLDivElement>(null)
   const touchStartX = useRef<number | null>(null)
   const touchEndX = useRef<number | null>(null)
 
@@ -176,6 +178,16 @@ export default function GalleryClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (toolsMenuRef.current && !toolsMenuRef.current.contains(e.target as Node)) {
+        setIsToolsMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const formatDriveCoverUrl = (url: string) => {
     if (!url) return ''
@@ -1259,15 +1271,16 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-      {/* Header */}
-      <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/90 border-white/10' : 'bg-white/90 border-gray-100'}`}>
+      {/* HEADER ĐƯỢC TỐI ƯU GỌN GÀNG, CHUẨN RESPONSIVE */}
+      <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/95 border-white/10' : 'bg-white/95 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
           
+          {/* Logo & Nút Quay Lại */}
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {selectedAlbum && !isSharedGuest && (
               <button 
                 onClick={handleBackToParentFolder}
-                className={`p-1.5 sm:p-2 rounded-full border transition cursor-pointer ${
+                className={`p-2 rounded-full border transition cursor-pointer ${
                   isDarkMode ? 'border-white/10 hover:bg-white/10 text-white' : 'border-gray-200 hover:bg-gray-100 text-gray-700'
                 }`}
                 title="Quay lại"
@@ -1278,24 +1291,25 @@ export default function GalleryClient() {
 
             <div onClick={() => !isSharedGuest && setSelectedAlbum(null)} className={`flex items-baseline gap-1 ${!isSharedGuest ? 'cursor-pointer' : ''}`}>
               <span className="text-lg sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
-              <span className="font-serif italic text-emerald-600 text-sm sm:text-lg">gallery</span>
+              <span className="font-serif italic text-emerald-600 text-xs sm:text-lg">gallery</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[65vw] sm:max-w-none">
+          {/* Khu Vực Nút Điều Khiển Chính */}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0">
             {selectedAlbum ? (
               <>
-                <div className="relative w-32 sm:w-56 flex-shrink-0">
+                <div className="relative w-28 sm:w-52">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                   <input 
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Tìm tệp..."
+                    placeholder="Tìm..."
                     className={`w-full pl-8 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
                       isDarkMode 
                         ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
-                        : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-sm'
+                        : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-2xs'
                     }`}
                   />
                 </div>
@@ -1303,18 +1317,18 @@ export default function GalleryClient() {
                 <button
                   onClick={(e) => handleDownloadAlbumZip(undefined, e)}
                   disabled={isZipping}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap disabled:opacity-60 flex-shrink-0"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer disabled:opacity-60"
                 >
                   {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                  <span>{isZipping ? zipProgress : 'Tải album'}</span>
+                  <span className="hidden sm:inline">{isZipping ? zipProgress : 'Tải album'}</span>
                 </button>
 
                 <button
                   onClick={() => setIsAdminPanelOpen(true)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer whitespace-nowrap flex-shrink-0"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer"
                 >
                   <ClipboardList className="w-3.5 h-3.5" />
-                  <span>Ảnh chọn</span>
+                  <span className="hidden sm:inline">Ảnh chọn</span>
                   <span className="bg-emerald-800 px-1.5 py-0.5 rounded-full text-[10px]">
                     {selectedImagesList.length}
                   </span>
@@ -1322,8 +1336,9 @@ export default function GalleryClient() {
               </>
             ) : (
               !isSharedGuest && (
-                <div className="flex items-center gap-2 flex-nowrap flex-shrink-0">
-                  <div className="relative w-32 sm:w-52 flex-shrink-0">
+                <>
+                  {/* Ô tìm kiếm */}
+                  <div className="relative w-28 sm:w-48">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <input 
                       type="text"
@@ -1333,107 +1348,133 @@ export default function GalleryClient() {
                       className={`w-full pl-8 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
                         isDarkMode 
                           ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
-                          : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-sm'
+                          : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-2xs'
                       }`}
                     />
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => router.push('/money')}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer flex-shrink-0 ${
-                      isDarkMode 
-                        ? 'bg-orange-500/10 hover:bg-orange-500/20 border-orange-500/30 text-orange-400' 
-                        : 'bg-orange-50 hover:bg-orange-100 border-orange-200 text-orange-700'
-                    }`}
-                    title="Mở Sổ Quản Lý Thu Chi Cá Nhân"
-                  >
-                    <Wallet className="w-3.5 h-3.5 text-orange-600" />
-                    <span>Sổ Thu Chi</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => checkAllMasterFolders(masterFoldersList, true)}
-                    disabled={isSyncing}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer flex-shrink-0 ${
-                      isDarkMode 
-                        ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400' 
-                        : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700'
-                    }`}
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isSyncing ? 'animate-spin' : ''}`} />
-                    <span>{isSyncing ? 'Đang quét...' : 'Quét Drive'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsMasterModalOpen(true)}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer flex-shrink-0 ${
-                      isDarkMode 
-                        ? 'bg-white/10 hover:bg-white/20 border-white/15 text-emerald-400' 
-                        : 'bg-white hover:bg-gray-50 border-gray-200 text-emerald-700'
-                    }`}
-                  >
-                    <Settings className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Thư Mục Tổng</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsKeyGenOpen(true)}
-                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer flex-shrink-0 ${
-                      isDarkMode 
-                        ? 'bg-white/10 hover:bg-white/20 border-white/15 text-emerald-400' 
-                        : 'bg-white hover:bg-gray-50 border-gray-200 text-emerald-700'
-                    }`}
-                  >
-                    <KeyRound className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Key Panel</span>
-                  </button>
-
+                  {/* Nút chính: Thêm album */}
                   <button
                     onClick={() => setIsModalOpen(true)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap flex-shrink-0"
+                    className="flex items-center gap-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer flex-shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Thêm album</span>
+                    <span className="hidden xs:inline">Thêm album</span>
                   </button>
-                </div>
+
+                  {/* MENU GOM CÔNG CỤ QUẢN TRỊ */}
+                  <div className="relative" ref={toolsMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsToolsMenuOpen(!isToolsMenuOpen)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-full text-xs font-semibold border transition shadow-2xs cursor-pointer ${
+                        isDarkMode 
+                          ? 'bg-white/10 hover:bg-white/20 border-white/10 text-white' 
+                          : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700'
+                      }`}
+                      title="Menu công cụ quản trị"
+                    >
+                      <Settings className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-emerald-500' : ''}`} />
+                      <span className="hidden sm:inline">Công cụ</span>
+                      <ChevronDown className="w-3 h-3 text-gray-400" />
+                    </button>
+
+                    {isToolsMenuOpen && (
+                      <div className={`absolute right-0 mt-2 w-56 rounded-2xl p-2 shadow-2xl border z-50 animate-in fade-in zoom-in-95 duration-150 space-y-1 ${
+                        isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-800'
+                      }`}>
+                        {/* 1. Sổ Thu Chi */}
+                        <button
+                          type="button"
+                          onClick={() => { setIsToolsMenuOpen(false); router.push('/money'); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold hover:bg-orange-50 dark:hover:bg-orange-500/10 text-orange-600 transition cursor-pointer"
+                        >
+                          <Wallet className="w-4 h-4 text-orange-500" />
+                          <span>Sổ Quản Lý Thu Chi</span>
+                        </button>
+
+                        {/* 2. Quét Drive */}
+                        <button
+                          type="button"
+                          onClick={() => { setIsToolsMenuOpen(false); checkAllMasterFolders(masterFoldersList, true); }}
+                          disabled={isSyncing}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-500/10 text-emerald-600 transition cursor-pointer"
+                        >
+                          <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                          <span>{isSyncing ? 'Đang quét Drive...' : 'Quét Thư Mục Mới'}</span>
+                        </button>
+
+                        {/* 3. Thư Mục Tổng */}
+                        <button
+                          type="button"
+                          onClick={() => { setIsToolsMenuOpen(false); setIsMasterModalOpen(true); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-gray-100 dark:hover:bg-white/5 transition cursor-pointer"
+                        >
+                          <FolderSync className="w-4 h-4 text-emerald-500" />
+                          <span>Cài Đặt Thư Mục Tổng</span>
+                        </button>
+
+                        {/* 4. Key Panel */}
+                        <button
+                          type="button"
+                          onClick={() => { setIsToolsMenuOpen(false); setIsKeyGenOpen(true); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-gray-100 dark:hover:bg-white/5 transition cursor-pointer"
+                        >
+                          <KeyRound className="w-4 h-4 text-amber-500" />
+                          <span>Quản Lý Key Panel</span>
+                        </button>
+
+                        <div className="h-[1px] bg-gray-100 dark:bg-white/10 my-1" />
+
+                        {/* 5. Dọn dẹp trang chủ */}
+                        <button
+                          type="button"
+                          onClick={() => { setIsToolsMenuOpen(false); handleCleanHomePage(); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4 text-gray-400" />
+                          <span>Dọn Dẹp Trang Chủ</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
               )
             )}
 
-            <div className="flex items-center gap-2 pl-2 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
+            {/* Dark Mode & Tài Khoản */}
+            <div className="flex items-center gap-1.5 pl-1.5 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
               <button
                 onClick={() => setIsDarkMode(!isDarkMode)}
-                className={`p-2 rounded-full border transition cursor-pointer flex-shrink-0 ${
+                className={`p-2 rounded-full border transition cursor-pointer ${
                   isDarkMode ? 'border-white/10 hover:bg-white/10 text-emerald-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
                 }`}
+                title="Đổi giao diện sáng/tối"
               >
-                {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
               </button>
 
               {!isSharedGuest && (
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-1.5 flex-shrink-0">
                   {user?.user_metadata?.avatar_url ? (
                     <img 
                       src={user.user_metadata.avatar_url} 
                       alt="Avatar" 
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-emerald-500/50 flex-shrink-0"
+                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-emerald-500/50"
                       title={user.email}
                     />
                   ) : (
-                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center text-xs font-bold flex-shrink-0">
-                      <UserIcon className="w-4 h-4" />
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-500/20 text-emerald-600 flex items-center justify-center text-xs font-bold">
+                      <UserIcon className="w-3.5 h-3.5" />
                     </div>
                   )}
 
                   <button
                     onClick={handleSignOut}
-                    className="p-1.5 rounded-full text-gray-400 hover:text-red-500 transition cursor-pointer flex-shrink-0"
+                    className="p-1 text-gray-400 hover:text-red-500 transition cursor-pointer"
                     title="Đăng xuất"
                   >
-                    <LogOut className="w-4 h-4" />
+                    <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </button>
                 </div>
               )}
@@ -1446,7 +1487,7 @@ export default function GalleryClient() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
         {!selectedAlbum ? (
           <div>
-            <section className="relative rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl min-h-[280px] sm:min-h-[385px] flex items-center mb-8 sm:mb-12 group">
+            <section className="relative rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl min-h-[260px] sm:min-h-[385px] flex items-center mb-8 sm:mb-12 group">
               <img 
                 src="/banner.jpg" 
                 alt="Hero Banner" 
@@ -1466,29 +1507,13 @@ export default function GalleryClient() {
               </div>
             </section>
 
-            <div className={`w-full h-[1px] mb-8 sm:mb-12 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
+            <div className={`w-full h-[1px] mb-6 sm:mb-10 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 sm:mb-8">
-              <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between gap-3 mb-6">
+              <div className="flex items-center gap-2">
                 <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
-                <span className="text-xs text-gray-400">({filteredAlbums.length} album)</span>
+                <span className="text-xs text-gray-400">({filteredAlbums.length})</span>
               </div>
-
-              {!isSharedGuest && (
-                <button
-                  type="button"
-                  onClick={handleCleanHomePage}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-sm self-start sm:self-auto cursor-pointer ${
-                    isDarkMode 
-                      ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-400' 
-                      : 'bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700'
-                  }`}
-                  title="Dọn dẹp các thư mục con đang bị tràn ra màn hình chính"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Dọn dẹp trang chủ</span>
-                </button>
-              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5 sm:gap-6">
@@ -1508,7 +1533,7 @@ export default function GalleryClient() {
                   >
                     <div 
                       onClick={() => handleOpenAlbum(album)}
-                      className="h-56 sm:h-64 bg-gray-50 dark:bg-[#12141a] relative cursor-pointer overflow-hidden flex items-center justify-center"
+                      className="h-52 sm:h-64 bg-gray-50 dark:bg-[#12141a] relative cursor-pointer overflow-hidden flex items-center justify-center"
                     >
                       {hasImageCover ? (
                         <img 
@@ -1561,15 +1586,15 @@ export default function GalleryClient() {
                             title="Tạo link chia sẻ web"
                           >
                             <Share2 className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>{shareCopiedId === album.id ? 'Đã copy link!' : 'Chia sẻ'}</span>
+                            <span>{shareCopiedId === album.id ? 'Đã copy!' : 'Chia sẻ'}</span>
                           </button>
                         </>
                       )}
                     </div>
 
                     <div className="p-4 flex items-center justify-between">
-                      <div onClick={() => handleOpenAlbum(album)} className="cursor-pointer">
-                        <h3 className="font-semibold text-sm hover:text-emerald-600 transition-colors">
+                      <div onClick={() => handleOpenAlbum(album)} className="cursor-pointer truncate pr-2">
+                        <h3 className="font-semibold text-sm hover:text-emerald-600 transition-colors truncate">
                           {album.title}
                         </h3>
                         <p className="text-[11px] text-gray-400 mt-0.5">Nhấp để xem</p>
@@ -1578,10 +1603,10 @@ export default function GalleryClient() {
                       <button 
                         onClick={(e) => handleDownloadAlbumZip({ title: album.title, driveUrl: album.driveUrl }, e)}
                         disabled={isZipping}
-                        className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
                       >
                         {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                        <span>Tải xuống</span>
+                        <span>Tải</span>
                       </button>
                     </div>
                   </div>
@@ -1633,7 +1658,7 @@ export default function GalleryClient() {
                     title="Xem danh sách tick chọn các mục ẩn / hiện trong album này"
                   >
                     <Eye className="w-3.5 h-3.5" />
-                    <span>Quản lý Ẩn / Hiện</span>
+                    <span>Ẩn / Hiện mục</span>
                   </button>
                 )}
 
@@ -1799,7 +1824,7 @@ export default function GalleryClient() {
                                   title="Tải nén toàn bộ thư mục này"
                                 >
                                   {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                                  <span>Tải xuống</span>
+                                  <span>Tải</span>
                                 </button>
                               </div>
                             </div>
@@ -1957,7 +1982,7 @@ export default function GalleryClient() {
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow transition cursor-pointer disabled:opacity-50"
             >
               {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-              <span>{isZipping ? zipProgress : 'Lưu ZIP các mục đã chọn'}</span>
+              <span>{isZipping ? zipProgress : 'Lưu ZIP'}</span>
             </button>
 
             {!isSharedGuest && (
@@ -1966,7 +1991,7 @@ export default function GalleryClient() {
                 className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 text-xs font-semibold transition cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Xóa các mục đã chọn</span>
+                <span>Xóa</span>
               </button>
             )}
 
