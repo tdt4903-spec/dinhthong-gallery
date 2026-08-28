@@ -10,10 +10,11 @@ import {
   Briefcase, Gift, Plane, Star, Fish, Car, Clapperboard, 
   GlassWater, Plus, ChevronLeft, ChevronRight, Download, 
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
-  ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check
+  ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
+  ChevronDown, ChevronUp, PieChart, Layers
 } from 'lucide-react'
 
-// Bảng ánh xạ ID từ app sang tên Danh mục tiếng Việt
+// Ánh xạ categoryId từ file backup
 const CATEGORY_ID_MAP: Record<number, string> = {
   1: 'Ăn uống',
   2: 'Chi tiêu hàng ngày',
@@ -82,23 +83,31 @@ interface Transaction {
 export default function MoneyManagerPage() {
   const router = useRouter()
   const [type, setType] = useState<'expense' | 'income'>('expense')
-  const [currentDate, setCurrentDate] = useState<Date>(new Date(2026, 7, 28))
+  const [currentDateStr, setCurrentDateStr] = useState<string>('2026-08-28')
   const [note, setNote] = useState('')
   const [amountStr, setAmountStr] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('Ăn uống')
   const [transactions, setTransactions] = useState<Transaction[]>([])
   
+  // Quản lý danh mục
   const [expenseCats, setExpenseCats] = useState(INITIAL_EXPENSE_CATS)
   const [incomeCats, setIncomeCats] = useState(INITIAL_INCOME_CATS)
   const [newCatName, setNewCatName] = useState('')
   const [isAddingCat, setIsAddingCat] = useState(false)
 
-  const [chartView, setChartView] = useState<'month' | 'year' | 'all'>('all')
-  const [selectedMonth, setSelectedMonth] = useState<number>(8)
-  const [selectedYear, setSelectedYear] = useState<number>(2026)
+  // 1. Nút tổng hợp thu nhập gom lại trong 1 dropdown
+  const [showSummaryDropdown, setShowSummaryDropdown] = useState(false)
+
+  // 2. Chỗ biểu đồ có 2 mục: Thống kê & Phân loại
+  const [chartSubTab, setChartSubTab] = useState<'stats' | 'category'>('stats')
+  const [chartPeriod, setChartPeriod] = useState<'month' | 'year' | 'all'>('month')
+
+  // 3. Phân loại Lịch sử theo Tháng / Năm
+  const [historyGroupType, setHistoryGroupType] = useState<'month' | 'year'>('month')
 
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const dateInputRef = useRef<HTMLInputElement>(null)
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -120,19 +129,16 @@ export default function MoneyManagerPage() {
     fetchTransactions()
   }, [])
 
-  const formatDateDisplay = (d: Date) => {
-    const day = String(d.getDate()).padStart(2, '0')
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    const year = d.getFullYear()
-    const daysOfWeek = ['CN', 'Th 2', 'Th 3', 'Th 4', 'Th 5', 'Th 6', 'Th 7']
-    return `${day}/${month}/${year} (${daysOfWeek[d.getDay()]})`
-  }
-
-  const formatDateDb = (d: Date) => {
-    const year = d.getFullYear()
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
+  const formatDateDisplay = (dateStr: string) => {
+    try {
+      const [y, m, d] = dateStr.split('-').map(Number)
+      const dateObj = new Date(y, m - 1, d)
+      const daysOfWeek = ['CN', 'Th 2', 'Th 3', 'Th 4', 'Th 5', 'Th 6', 'Th 7']
+      const dayName = daysOfWeek[dateObj.getDay()]
+      return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y} (${dayName})`
+    } catch {
+      return dateStr
+    }
   }
 
   const formatCurrency = (val: number) => {
@@ -140,15 +146,23 @@ export default function MoneyManagerPage() {
   }
 
   const handlePrevDay = () => {
-    const prev = new Date(currentDate)
-    prev.setDate(prev.getDate() - 1)
-    setCurrentDate(prev)
+    const [y, m, d] = currentDateStr.split('-').map(Number)
+    const dt = new Date(y, m - 1, d)
+    dt.setDate(dt.getDate() - 1)
+    const yStr = dt.getFullYear()
+    const mStr = String(dt.getMonth() + 1).padStart(2, '0')
+    const dStr = String(dt.getDate()).padStart(2, '0')
+    setCurrentDateStr(`${yStr}-${mStr}-${dStr}`)
   }
 
   const handleNextDay = () => {
-    const next = new Date(currentDate)
-    next.setDate(next.getDate() + 1)
-    setCurrentDate(next)
+    const [y, m, d] = currentDateStr.split('-').map(Number)
+    const dt = new Date(y, m - 1, d)
+    dt.setDate(dt.getDate() + 1)
+    const yStr = dt.getFullYear()
+    const mStr = String(dt.getMonth() + 1).padStart(2, '0')
+    const dStr = String(dt.getDate()).padStart(2, '0')
+    setCurrentDateStr(`${yStr}-${mStr}-${dStr}`)
   }
 
   const handleAddCategory = () => {
@@ -182,7 +196,7 @@ export default function MoneyManagerPage() {
       amount: num,
       category: selectedCategory,
       note: note.trim(),
-      date: formatDateDb(currentDate)
+      date: currentDateStr
     }
 
     const { error } = await supabase.from('transactions').insert([payload])
@@ -210,10 +224,9 @@ export default function MoneyManagerPage() {
       return
     }
 
-    const confirm1 = confirm(`CẢNH BÁO: Bạn có chắc chắn muốn XÓA TOÀN BỘ ${transactions.length} giao dịch đã nhập vào không?`)
+    const confirm1 = confirm(`CẢNH BÁO: Bạn có chắc muốn XÓA TOÀN BỘ ${transactions.length} giao dịch đã nhập?`)
     if (!confirm1) return
-
-    const confirm2 = confirm('Hành động này KHÔNG THỂ HOÀN TÁC. Bạn có thực sự muốn xóa sạch sổ thu chi?')
+    const confirm2 = confirm('Hành động này KHÔNG THỂ HOÀN TÁC. Bạn có thực sự muốn xóa sạch?')
     if (!confirm2) return
 
     setIsDeletingAll(true)
@@ -221,7 +234,7 @@ export default function MoneyManagerPage() {
       const { error } = await supabase.from('transactions').delete().neq('id', '00000000-0000-0000-0000-000000000000')
       if (!error) {
         setTransactions([])
-        alert('Đã xóa toàn bộ dữ liệu trong Sổ Thu Chi thành công!')
+        alert('Đã xóa toàn bộ dữ liệu thành công!')
       } else {
         alert('Lỗi khi xóa dữ liệu: ' + error.message)
       }
@@ -232,7 +245,6 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // THUẬT TOÁN ĐỌC FILE BACKUP SỔ THU CHI CHUẨN XÁC
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -241,49 +253,34 @@ export default function MoneyManagerPage() {
     reader.onload = async (evt) => {
       try {
         const text = evt.target?.result as string
-        if (!text) {
-          alert('File rỗng!')
-          return
-        }
+        if (!text) return
 
-        // Bước 1: Cắt chuỗi để lấy đúng bảng tính chính (bỏ qua #DAILY_DATAS, #ACCOUNTS...)
         let cleanCSV = text
         const headerMarker = 'inputDateString,amount,memo'
         const headerIndex = text.indexOf(headerMarker)
-        
         if (headerIndex !== -1) {
-          // Bắt đầu từ dòng header chuẩn đến hết
           cleanCSV = text.substring(headerIndex)
-        } else {
-          alert('Đây không phải là file backup đúng định dạng Sổ Thu Chi (thiếu header).')
-          return
         }
 
-        // Bước 2: Dùng thư viện XLSX để phân tích CSV (giải quyết lỗi xuống dòng \n trong memo)
         const workbook = XLSX.read(cleanCSV, { type: 'string', raw: true })
         const sheetName = workbook.SheetNames[0]
         const dataRows: any[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' })
 
         const formattedToInsert: any[] = []
 
-        // Bước 3: Lặp và xử lý các trường dữ liệu
         for (const row of dataRows) {
-          // Chỉ lấy các dòng có đủ cột ngày và tiền
-          if (row['inputDateString'] === undefined || row['amount'] === undefined) {
-            continue 
-          }
+          if (row['inputDateString'] === undefined || row['amount'] === undefined) continue
 
           const rawDate = String(row['inputDateString']).trim()
           const rawAmount = String(row['amount']).trim()
-          const rawMemo = String(row['memo'] || '').replace(/[\n\r]/g, ' ').trim() // Dọn dẹp khoảng trắng
+          const rawMemo = String(row['memo'] || '').replace(/[\n\r]/g, ' ').trim()
           const rawCatId = Number(row['categoryId'] || 1)
           const rawType = String(row['type']).trim()
 
           const numAmount = Number(rawAmount)
           if (!numAmount || isNaN(numAmount)) continue
 
-          // Định dạng ngày (Ví dụ: 2023/11/1 -> 2023-11-01)
-          let formattedDate = formatDateDb(new Date())
+          let formattedDate = currentDateStr
           const dParts = rawDate.split('/')
           if (dParts.length === 3) {
             const y = dParts[0]
@@ -294,7 +291,6 @@ export default function MoneyManagerPage() {
             formattedDate = rawDate.split('T')[0]
           }
 
-          // Kiểm tra loại (1 = Thu, 0 = Chi)
           const isIncome = rawType === '1'
           const categoryName = CATEGORY_ID_MAP[rawCatId] || (isIncome ? 'Tiền lương' : 'Ăn uống')
 
@@ -312,27 +308,23 @@ export default function MoneyManagerPage() {
           return
         }
 
-        // Lưu từng lô 200 bản ghi lên Supabase
         const CHUNK_SIZE = 200
         for (let i = 0; i < formattedToInsert.length; i += CHUNK_SIZE) {
           const chunk = formattedToInsert.slice(i, i + CHUNK_SIZE)
-          const { error } = await supabase.from('transactions').insert(chunk)
-          if (error) throw error
+          await supabase.from('transactions').insert(chunk)
         }
 
-        alert(`Thành công! Đã nhập ${formattedToInsert.length} giao dịch vào Sổ Thu Chi.`)
+        alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch!`)
         fetchTransactions()
       } catch (err: any) {
-        alert('Lỗi xử lý file Backup: ' + err.message)
+        alert('Lỗi xử lý file: ' + err.message)
       } finally {
         if (fileInputRef.current) fileInputRef.current.value = ''
       }
     }
-    // Đọc chuẩn UTF-8 để không lỗi font tiếng Việt
     reader.readAsText(file, 'UTF-8')
   }
 
-  // Xuất file Excel
   const handleExportExcel = () => {
     if (transactions.length === 0) {
       alert('Chưa có dữ liệu để xuất!')
@@ -351,42 +343,52 @@ export default function MoneyManagerPage() {
     const worksheet = XLSX.utils.json_to_sheet(exportData)
     const workbook = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Thu_Chi')
-    XLSX.writeFile(workbook, `Bao_Cao_Thu_Chi_${formatDateDb(new Date())}.xlsx`)
+    XLSX.writeFile(workbook, `Bao_Cao_Thu_Chi_${currentDateStr}.xlsx`)
   }
 
-  const filteredTransactions = transactions.filter(t => {
+  // Tính tổng
+  const totalAllExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0)
+  const totalAllIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0)
+  const totalBalance = totalAllIncome - totalAllExpense
+
+  // Lọc cho Biểu đồ
+  const chartFiltered = transactions.filter(t => {
     if (!t.date) return false
     const [y, m] = t.date.split('-').map(Number)
-    if (chartView === 'month') return y === selectedYear && m === selectedMonth
-    if (chartView === 'year') return y === selectedYear
+    const [curY, curM] = currentDateStr.split('-').map(Number)
+    if (chartPeriod === 'month') return y === curY && m === curM
+    if (chartPeriod === 'year') return y === curY
     return true
   })
 
-  const totalExpense = filteredTransactions
-    .filter(t => t.type === 'expense')
-    .reduce((sum, t) => sum + Number(t.amount), 0)
+  const chartExpense = chartFiltered.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0)
+  const chartIncome = chartFiltered.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0)
 
-  const totalIncome = filteredTransactions
-    .filter(t => t.type === 'income')
-    .reduce((sum, t) => sum + Number(t.amount), 0)
-
-  const balance = totalIncome - totalExpense
-
-  const categoryStats = filteredTransactions
+  // Gom phân loại danh mục
+  const catStats = chartFiltered
     .filter(t => t.type === type)
     .reduce((acc: Record<string, number>, curr) => {
       acc[curr.category] = (acc[curr.category] || 0) + Number(curr.amount)
       return acc
     }, {})
+  const catEntries = Object.entries(catStats).sort((a, b) => b[1] - a[1])
+  const currentTotalCatType = type === 'expense' ? chartExpense : chartIncome
 
-  const categoryEntries = Object.entries(categoryStats).sort((a, b) => b[1] - a[1])
-  const currentTotalType = type === 'expense' ? totalExpense : totalIncome
+  // Gom lịch sử theo Tháng hoặc Năm
+  const groupedHistory = transactions.reduce((acc: Record<string, Transaction[]>, curr) => {
+    const [y, m] = (curr.date || '2026-08-28').split('-')
+    const key = historyGroupType === 'month' ? `Tháng ${m}/${y}` : `Năm ${y}`
+    if (!acc[key]) acc[key] = []
+    acc[key].push(curr)
+    return acc
+  }, {})
+
   const currentCategories = type === 'expense' ? expenseCats : incomeCats
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 pb-12">
       
-      {/* Header */}
+      {/* Navbar Header */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -404,9 +406,52 @@ export default function MoneyManagerPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* NÚT GOM TỔNG THU NHẬP / CHI TIÊU DROPDOWN */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowSummaryDropdown(!showSummaryDropdown)}
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 transition cursor-pointer border border-slate-200 shadow-sm"
+              >
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
+                <span>Tổng quan số dư: <strong className="text-emerald-600">{formatCurrency(totalBalance)}</strong></span>
+                {showSummaryDropdown ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+
+              {showSummaryDropdown && (
+                <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-4 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <span className="text-xs font-bold text-slate-700">Chi tiết tài chính</span>
+                    <span className="text-[10px] text-slate-400">Toàn thời gian</span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
+                      <ArrowUpRight className="w-3.5 h-3.5" /> Tổng Thu Nhập:
+                    </span>
+                    <strong className="text-emerald-600 font-bold">{formatCurrency(totalAllIncome)}</strong>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 text-red-500 font-semibold">
+                      <ArrowDownLeft className="w-3.5 h-3.5" /> Tổng Chi Tiêu:
+                    </span>
+                    <strong className="text-red-600 font-bold">{formatCurrency(totalAllExpense)}</strong>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
+                    <span className="text-slate-800">Số Dư Tích Lũy:</span>
+                    <span className={totalBalance >= 0 ? 'text-slate-900 font-extrabold' : 'text-rose-600'}>
+                      {formatCurrency(totalBalance)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               onClick={handleExportExcel}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer"
             >
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Xuất Excel</span>
@@ -414,75 +459,37 @@ export default function MoneyManagerPage() {
 
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
             >
               <Upload className="w-4 h-4" />
-              <span>Nhập File Backup</span>
+              <span className="hidden sm:inline">Nhập File</span>
             </button>
 
             <button
               onClick={handleDeleteAll}
               disabled={isDeletingAll || transactions.length === 0}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition cursor-pointer disabled:opacity-50"
+              className="p-2 rounded-xl text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition cursor-pointer disabled:opacity-50"
               title="Xóa tất cả các khoản đã nhập"
             >
               <Trash2 className="w-4 h-4" />
-              <span className="hidden sm:inline">Xóa tất cả</span>
             </button>
 
             <input 
               type="file" 
               ref={fileInputRef} 
               onChange={handleImportCSV} 
-              accept=".csv, .txt" 
+              accept=".csv, .txt, .xlsx" 
               className="hidden" 
             />
           </div>
         </div>
       </header>
 
-      {/* Main Dashboard */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tổng Thu Nhập</p>
-              <h3 className="text-xl sm:text-2xl font-bold text-emerald-600 mt-1">{formatCurrency(totalIncome)}</h3>
-            </div>
-            <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-              <ArrowUpRight className="w-6 h-6" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tổng Chi Tiêu</p>
-              <h3 className="text-xl sm:text-2xl font-bold text-red-600 mt-1">{formatCurrency(totalExpense)}</h3>
-            </div>
-            <div className="w-12 h-12 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center text-red-600">
-              <ArrowDownLeft className="w-6 h-6" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Số Dư Tích Lũy</p>
-              <h3 className={`text-xl sm:text-2xl font-bold mt-1 ${balance >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
-                {formatCurrency(balance)}
-              </h3>
-            </div>
-            <div className="w-12 h-12 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700">
-              <TrendingUp className="w-6 h-6" />
-            </div>
-          </div>
-        </div>
-
-        {/* 2 Cột */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {/* Main Content Dashboard */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* CỘT TRÁI: FORM NHẬP */}
+          {/* CỘT TRÁI: FORM NHẬP KHOẢN MỚI */}
           <div className="lg:col-span-5 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
@@ -518,14 +525,31 @@ export default function MoneyManagerPage() {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-                {/* Ngày */}
+                {/* Chọn ngày + Lịch trực tiếp */}
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-slate-700 w-16">Ngày</span>
-                  <div className="flex-1 flex items-center justify-between bg-[#fff9db] border border-[#ffe066] px-3 py-2 rounded-xl font-semibold text-slate-800">
+                  <div className="flex-1 flex items-center justify-between bg-[#fff9db] border border-[#ffe066] px-3 py-2 rounded-xl font-semibold text-slate-800 relative">
                     <button type="button" onClick={handlePrevDay} className="p-0.5 hover:text-orange-600 cursor-pointer">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
-                    <span>{formatDateDisplay(currentDate)}</span>
+                    
+                    {/* Bấm vào để mở bộ chọn lịch Native */}
+                    <div 
+                      onClick={() => dateInputRef.current?.showPicker ? dateInputRef.current.showPicker() : dateInputRef.current?.focus()}
+                      className="flex items-center gap-1.5 cursor-pointer hover:text-orange-600 transition"
+                      title="Bấm để chọn lịch"
+                    >
+                      <Calendar className="w-4 h-4 text-orange-500" />
+                      <span>{formatDateDisplay(currentDateStr)}</span>
+                      <input 
+                        type="date" 
+                        ref={dateInputRef}
+                        value={currentDateStr}
+                        onChange={(e) => e.target.value && setCurrentDateStr(e.target.value)}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                      />
+                    </div>
+
                     <button type="button" onClick={handleNextDay} className="p-0.5 hover:text-orange-600 cursor-pointer">
                       <ChevronRight className="w-4 h-4" />
                     </button>
@@ -643,37 +667,57 @@ export default function MoneyManagerPage() {
             </div>
           </div>
 
-          {/* CỘT PHẢI: BIỂU ĐỒ & LỊCH SỬ */}
+          {/* CỘT PHẢI: BIỂU ĐỒ (2 MỤC: THỐNG KÊ & PHÂN LOẠI) + LỊCH SỬ (PHÂN LOẠI THEO THÁNG/NĂM) */}
           <div className="lg:col-span-7 space-y-6">
             
+            {/* BOX BIỂU ĐỒ: 2 TAB THỐNG KÊ & PHÂN LOẠI */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 mb-5">
-                <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 text-indigo-500" />
-                  Biểu Đồ Thống Kê Phân Loại
-                </h3>
+                
+                {/* 2 Tab: Thống kê / Phân loại */}
+                <div className="flex items-center bg-slate-100 p-1 rounded-xl">
+                  <button
+                    onClick={() => setChartSubTab('stats')}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      chartSubTab === 'stats' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'
+                    }`}
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    <span>Thống kê</span>
+                  </button>
+                  <button
+                    onClick={() => setChartSubTab('category')}
+                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      chartSubTab === 'category' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'
+                    }`}
+                  >
+                    <PieChart className="w-4 h-4" />
+                    <span>Phân loại</span>
+                  </button>
+                </div>
 
-                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                {/* Bộ lọc Tháng / Năm / Toàn bộ */}
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
                   <button
-                    onClick={() => setChartView('month')}
-                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                      chartView === 'month' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
+                    onClick={() => setChartPeriod('month')}
+                    className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                      chartPeriod === 'month' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Tháng
+                    Tháng này
                   </button>
                   <button
-                    onClick={() => setChartView('year')}
-                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                      chartView === 'year' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
+                    onClick={() => setChartPeriod('year')}
+                    className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                      chartPeriod === 'year' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Năm
+                    Năm này
                   </button>
                   <button
-                    onClick={() => setChartView('all')}
-                    className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
-                      chartView === 'all' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
+                    onClick={() => setChartPeriod('all')}
+                    className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                      chartPeriod === 'all' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
                     Tất cả
@@ -681,76 +725,163 @@ export default function MoneyManagerPage() {
                 </div>
               </div>
 
-              {categoryEntries.length === 0 ? (
-                <p className="text-center py-10 text-xs text-slate-400">Chưa có dữ liệu thống kê trong khoảng thời gian này.</p>
-              ) : (
+              {/* NỘI DUNG 1: THỐNG KÊ THU / CHI TỔNG QUAN */}
+              {chartSubTab === 'stats' ? (
                 <div className="space-y-4">
-                  {categoryEntries.map(([catName, amount]) => {
-                    const percentage = currentTotalType > 0 ? Math.round((amount / currentTotalType) * 100) : 0
-                    return (
-                      <div key={catName} className="space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-bold text-slate-700">{catName}</span>
-                          <span className="font-semibold text-slate-900">
-                            {formatCurrency(amount)} ({percentage}%)
-                          </span>
-                        </div>
-                        <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                          <div 
-                            className={`h-full rounded-full transition-all duration-500 ${
-                              type === 'expense' ? 'bg-orange-500' : 'bg-emerald-500'
-                            }`}
-                            style={{ width: `${percentage}%` }}
-                          />
-                        </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl">
+                      <div className="flex items-center gap-1.5 text-emerald-600 text-xs font-bold mb-1">
+                        <ArrowUpRight className="w-4 h-4" />
+                        <span>Tổng Thu Kỳ Này</span>
                       </div>
-                    )
-                  })}
+                      <p className="text-lg sm:text-xl font-extrabold text-emerald-700">{formatCurrency(chartIncome)}</p>
+                    </div>
+
+                    <div className="p-4 bg-red-50 border border-red-100 rounded-2xl">
+                      <div className="flex items-center gap-1.5 text-red-600 text-xs font-bold mb-1">
+                        <ArrowDownLeft className="w-4 h-4" />
+                        <span>Tổng Chi Kỳ Này</span>
+                      </div>
+                      <p className="text-lg sm:text-xl font-extrabold text-red-700">{formatCurrency(chartExpense)}</p>
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <div className="flex items-center justify-between text-xs font-semibold mb-2">
+                      <span className="text-slate-600">Tỷ lệ Thu / Chi:</span>
+                      <span className="text-slate-800">
+                        {chartIncome + chartExpense > 0 
+                          ? `${Math.round((chartIncome / (chartIncome + chartExpense)) * 100)}% Thu - ${Math.round((chartExpense / (chartIncome + chartExpense)) * 100)}% Chi` 
+                          : '0%'}
+                      </span>
+                    </div>
+                    <div className="w-full h-4 bg-red-400 rounded-full overflow-hidden flex">
+                      <div 
+                        className="h-full bg-emerald-500 transition-all duration-500" 
+                        style={{ width: `${chartIncome + chartExpense > 0 ? (chartIncome / (chartIncome + chartExpense)) * 100 : 50}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* NỘI DUNG 2: PHÂN LOẠI TỶ TRỌNG DANH MỤC */
+                <div className="space-y-3.5 max-h-72 overflow-y-auto pr-1">
+                  {catEntries.length === 0 ? (
+                    <p className="text-center py-8 text-xs text-slate-400">Chưa có giao dịch danh mục trong kỳ này.</p>
+                  ) : (
+                    catEntries.map(([catName, amount]) => {
+                      const percentage = currentTotalCatType > 0 ? Math.round((amount / currentTotalCatType) * 100) : 0
+                      return (
+                        <div key={catName} className="space-y-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-slate-700">{catName}</span>
+                            <span className="font-semibold text-slate-900">
+                              {formatCurrency(amount)} ({percentage}%)
+                            </span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                type === 'expense' ? 'bg-orange-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
                 </div>
               )}
             </div>
 
+            {/* BOX LỊCH SỬ GIAO DỊCH (GOM NHÓM THEO THÁNG / NĂM) */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
-                <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                <div className="flex items-center gap-2">
                   <Calendar className="w-5 h-5 text-emerald-500" />
-                  Lịch Sử Giao Dịch ({filteredTransactions.length})
-                </h3>
+                  <h3 className="font-bold text-base text-slate-900">
+                    Lịch Sử Giao Dịch ({transactions.length})
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                  <button
+                    onClick={() => setHistoryGroupType('month')}
+                    className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                      historyGroupType === 'month' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
+                    }`}
+                  >
+                    Theo Tháng
+                  </button>
+                  <button
+                    onClick={() => setHistoryGroupType('year')}
+                    className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                      historyGroupType === 'year' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
+                    }`}
+                  >
+                    Theo Năm
+                  </button>
+                </div>
               </div>
 
-              <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
-                {filteredTransactions.length === 0 ? (
+              <div className="space-y-6 max-h-96 overflow-y-auto pr-1">
+                {Object.keys(groupedHistory).length === 0 ? (
                   <p className="text-center py-10 text-xs text-slate-400">Chưa có giao dịch nào.</p>
                 ) : (
-                  filteredTransactions.map((t) => (
-                    <div 
-                      key={t.id} 
-                      className="flex items-center justify-between p-3.5 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition text-xs"
-                    >
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-900">{t.category}</span>
-                          <span className="text-[10px] text-slate-400 bg-white border border-slate-200 px-2 py-0.5 rounded-md">
-                            {t.date}
-                          </span>
-                        </div>
-                        {t.note && <p className="text-[11px] text-slate-500 mt-1">{t.note}</p>}
-                      </div>
+                  Object.entries(groupedHistory).map(([groupTitle, items]) => {
+                    const groupExpense = items.filter(i => i.type === 'expense').reduce((s, i) => s + Number(i.amount), 0)
+                    const groupIncome = items.filter(i => i.type === 'income').reduce((s, i) => s + Number(i.amount), 0)
 
-                      <div className="flex items-center gap-3">
-                        <span className={`font-bold text-sm ${t.type === 'expense' ? 'text-red-500' : 'text-emerald-600'}`}>
-                          {t.type === 'expense' ? '-' : '+'}{Number(t.amount).toLocaleString('vi-VN')} đ
-                        </span>
-                        <button
-                          onClick={() => handleDelete(t.id)}
-                          className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-white rounded-lg transition cursor-pointer"
-                          title="Xóa dòng này"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                    return (
+                      <div key={groupTitle} className="space-y-2">
+                        {/* Tiêu đề nhóm Tháng/Năm */}
+                        <div className="flex items-center justify-between bg-slate-100/80 px-3.5 py-2 rounded-xl text-xs">
+                          <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                            <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                            {groupTitle} ({items.length})
+                          </span>
+                          <div className="flex items-center gap-3 text-[11px] font-semibold">
+                            <span className="text-emerald-600">+{formatCurrency(groupIncome)}</span>
+                            <span className="text-red-500">-{formatCurrency(groupExpense)}</span>
+                          </div>
+                        </div>
+
+                        {/* Danh sách các dòng trong nhóm */}
+                        <div className="space-y-1.5 pl-1">
+                          {items.map((t) => (
+                            <div 
+                              key={t.id} 
+                              className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 bg-white hover:bg-slate-50/80 transition text-xs shadow-2xs"
+                            >
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-slate-900">{t.category}</span>
+                                  <span className="text-[10px] text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-md">
+                                    {t.date}
+                                  </span>
+                                </div>
+                                {t.note && <p className="text-[11px] text-slate-500 mt-1">{t.note}</p>}
+                              </div>
+
+                              <div className="flex items-center gap-3">
+                                <span className={`font-bold text-sm ${t.type === 'expense' ? 'text-red-500' : 'text-emerald-600'}`}>
+                                  {t.type === 'expense' ? '-' : '+'}{Number(t.amount).toLocaleString('vi-VN')} đ
+                                </span>
+                                <button
+                                  onClick={() => handleDelete(t.id)}
+                                  className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                                  title="Xóa giao dịch này"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             </div>
@@ -758,7 +889,6 @@ export default function MoneyManagerPage() {
           </div>
 
         </div>
-
       </main>
 
     </div>
