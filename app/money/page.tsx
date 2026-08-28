@@ -12,10 +12,9 @@ import {
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
   ChevronDown, ChevronUp, PieChart, Layers, Filter, Loader2, LogOut, User as UserIcon,
-  Sparkles, RotateCcw
+  Sparkles, RotateCcw, PenSquare, History
 } from 'lucide-react'
 
-// Ánh xạ categoryId từ file backup
 const CATEGORY_ID_MAP: Record<number, string> = {
   1: 'Ăn uống',
   2: 'Chi tiêu hàng ngày',
@@ -72,7 +71,6 @@ const INITIAL_INCOME_CATS = [
   { id: 'thu_no', name: 'Thu nợ', color: 'text-yellow-500 bg-yellow-50 border-yellow-200' },
 ]
 
-// Mảng các nút gợi ý tiền nhanh
 const QUICK_AMOUNT_PRESETS = [
   { label: '+10k', val: 10000 },
   { label: '+20k', val: 20000 },
@@ -86,7 +84,6 @@ const QUICK_AMOUNT_PRESETS = [
   { label: '+10 Tr', val: 10000000 },
 ]
 
-// Hàm chuyển số thành chữ tiếng Việt
 function readVietnameseNumber(number: number): string {
   if (!number || isNaN(number) || number <= 0) return ''
   const units = ['', 'nghìn', 'triệu', 'tỷ', 'nghìn tỷ', 'triệu tỷ']
@@ -97,23 +94,13 @@ function readVietnameseNumber(number: number): string {
     const b = Math.floor((group % 100) / 10)
     const c = group % 10
     let res = ''
-    if (a > 0 || full) {
-      res += digits[a] + ' trăm '
-    }
-    if (b > 1) {
-      res += digits[b] + ' mươi '
-    } else if (b === 1) {
-      res += 'mười '
-    } else if (a > 0 && c > 0) {
-      res += 'lẻ '
-    }
-    if (b > 1 && c === 1) {
-      res += 'mốt'
-    } else if (b > 0 && c === 5) {
-      res += 'lăm'
-    } else if (c > 0 || (a === 0 && b === 0 && group === 0)) {
-      res += digits[c]
-    }
+    if (a > 0 || full) res += digits[a] + ' trăm '
+    if (b > 1) res += digits[b] + ' mươi '
+    else if (b === 1) res += 'mười '
+    else if (a > 0 && c > 0) res += 'lẻ '
+    if (b > 1 && c === 1) res += 'mốt'
+    else if (b > 0 && c === 5) res += 'lăm'
+    else if (c > 0 || (a === 0 && b === 0 && group === 0)) res += digits[c]
     return res.trim()
   }
 
@@ -150,6 +137,9 @@ export default function MoneyManagerPage() {
   const [user, setUser] = useState<any>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
+  // Mobile active tab: 'input' | 'charts' | 'history'
+  const [mobileTab, setMobileTab] = useState<'input' | 'charts' | 'history'>('input')
+
   const [type, setType] = useState<'expense' | 'income'>('expense')
   const [currentDateStr, setCurrentDateStr] = useState<string>('2026-08-28')
   const [note, setNote] = useState('')
@@ -157,22 +147,18 @@ export default function MoneyManagerPage() {
   const [selectedCategory, setSelectedCategory] = useState('Ăn uống')
   const [transactions, setTransactions] = useState<Transaction[]>([])
   
-  // Quản lý danh mục
   const [expenseCats, setExpenseCats] = useState(INITIAL_EXPENSE_CATS)
   const [incomeCats, setIncomeCats] = useState(INITIAL_INCOME_CATS)
   const [newCatName, setNewCatName] = useState('')
   const [isAddingCat, setIsAddingCat] = useState(false)
 
-  // Nút gom tổng thu nhập / chi tiêu
   const [showSummaryDropdown, setShowSummaryDropdown] = useState(false)
 
-  // Biểu đồ: 2 Tab Thống kê & Phân loại + Bộ lọc theo Tháng/Năm được chọn
   const [chartSubTab, setChartSubTab] = useState<'stats' | 'category'>('stats')
   const [chartPeriodMode, setChartPeriodMode] = useState<'year' | 'month' | 'all'>('year')
   const [chartSelectedYear, setChartSelectedYear] = useState<number>(2026)
   const [chartSelectedMonth, setChartSelectedMonth] = useState<number>(8)
 
-  // Lịch sử: Lọc theo Từng Tháng / Từng Năm
   const [historyFilterYear, setHistoryFilterYear] = useState<string>('all')
   const [historyFilterMonth, setHistoryFilterMonth] = useState<string>('all')
   const [historyGroupType, setHistoryGroupType] = useState<'month' | 'year'>('month')
@@ -186,7 +172,6 @@ export default function MoneyManagerPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  // Kiểm tra xác thực đăng nhập
   useEffect(() => {
     const checkAuth = async () => {
       try {
@@ -232,17 +217,15 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // Danh sách các ghi chú đã dùng trước đó để gợi ý nhanh
   const noteSuggestions = useMemo(() => {
     const setNotes = new Set<string>()
     transactions
       .filter(t => t.category === selectedCategory && t.note)
       .slice(0, 20)
       .forEach(t => setNotes.add(t.note))
-    return Array.from(setNotes).slice(0, 6)
+    return Array.from(setNotes).slice(0, 5)
   }, [transactions, selectedCategory])
 
-  // Trích xuất danh sách tất cả các năm có trong CSDL
   const availableYears = useMemo(() => {
     const yearSet = new Set<number>()
     yearSet.add(2026)
@@ -271,7 +254,6 @@ export default function MoneyManagerPage() {
     return val.toLocaleString('vi-VN') + ' đ'
   }
 
-  // Chuyển số tiền hiện tại thành chữ
   const numericAmount = useMemo(() => {
     return Number(amountStr.replace(/\D/g, '')) || 0
   }, [amountStr])
@@ -280,15 +262,10 @@ export default function MoneyManagerPage() {
     return readVietnameseNumber(numericAmount)
   }, [numericAmount])
 
-  // Thêm tiền nhanh qua gợi ý (+10k, +50k, ...)
   const handleAddQuickAmount = (val: number) => {
     const current = Number(amountStr.replace(/\D/g, '')) || 0
     const nextVal = current + val
     setAmountStr(nextVal.toLocaleString('vi-VN'))
-  }
-
-  const handleSetExactAmount = (val: number) => {
-    setAmountStr(val.toLocaleString('vi-VN'))
   }
 
   const handleClearAmount = () => {
@@ -353,6 +330,7 @@ export default function MoneyManagerPage() {
     if (!error) {
       setAmountStr('')
       setNote('')
+      alert('Đã lưu thành công!')
       fetchTransactions()
     } else {
       alert('Lỗi lưu: ' + error.message)
@@ -510,12 +488,10 @@ export default function MoneyManagerPage() {
     )
   }
 
-  // Tổng lũy kế toàn bộ
   const totalAllExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0)
   const totalAllIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0)
   const totalBalance = totalAllIncome - totalAllExpense
 
-  // Lọc dữ liệu Biểu đồ theo Tháng / Năm được chọn
   const chartFiltered = transactions.filter(t => {
     if (!t.date) return false
     const [y, m] = t.date.split('-').map(Number)
@@ -532,7 +508,6 @@ export default function MoneyManagerPage() {
   const chartIncome = chartFiltered.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0)
   const chartRemaining = chartIncome - chartExpense
 
-  // Gom phân loại danh mục trong kỳ biểu đồ
   const catStats = chartFiltered
     .filter(t => t.type === type)
     .reduce((acc: Record<string, number>, curr) => {
@@ -542,7 +517,6 @@ export default function MoneyManagerPage() {
   const catEntries = Object.entries(catStats).sort((a, b) => b[1] - a[1])
   const currentTotalCatType = type === 'expense' ? chartExpense : chartIncome
 
-  // Lọc danh sách Lịch sử theo Năm và Tháng được chọn
   const historyFiltered = transactions.filter(t => {
     if (!t.date) return false
     const [y, m] = t.date.split('-').map(Number)
@@ -551,7 +525,6 @@ export default function MoneyManagerPage() {
     return true
   })
 
-  // Gom lịch sử theo Tháng hoặc Năm
   const groupedHistory = historyFiltered.reduce((acc: Record<string, Transaction[]>, curr) => {
     const [y, m] = (curr.date || '2026-08-28').split('-')
     const key = historyGroupType === 'month' ? `Tháng ${m}/${y}` : `Năm ${y}`
@@ -563,60 +536,61 @@ export default function MoneyManagerPage() {
   const currentCategories = type === 'expense' ? expenseCats : incomeCats
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-800 pb-12">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-800 pb-28 sm:pb-12">
       
-      {/* Navbar Header */}
-      <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+      {/* Header Sticky */}
+      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200 shadow-2xs">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
+          
+          <div className="flex items-center gap-2 flex-shrink-0">
             <button
               onClick={() => router.push('/gallery')}
               className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
               title="Quay lại Thư viện ảnh"
             >
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
-            <h1 className="font-bold text-lg text-slate-900 tracking-tight flex items-center gap-2">
-              <Wallet className="w-5 h-5 text-orange-500" />
-              Sổ Quản Lý Thu Chi Cá Nhân
+            <h1 className="font-bold text-sm sm:text-lg text-slate-900 tracking-tight flex items-center gap-1.5 truncate">
+              <Wallet className="w-4 h-4 text-orange-500 flex-shrink-0" />
+              <span className="truncate">Sổ Thu Chi</span>
             </h1>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* NÚT GOM TỔNG THU NHẬP / CHI TIÊU DROPDOWN */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Nút tóm tắt số dư */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setShowSummaryDropdown(!showSummaryDropdown)}
-                className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 transition cursor-pointer border border-slate-200 shadow-sm"
+                className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 transition cursor-pointer border border-slate-200"
               >
-                <TrendingUp className="w-4 h-4 text-emerald-600" />
-                <span>Số dư: <strong className="text-emerald-600">{formatCurrency(totalBalance)}</strong></span>
-                {showSummaryDropdown ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                <TrendingUp className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                <span className="max-w-[100px] sm:max-w-none truncate">{formatCurrency(totalBalance)}</span>
+                {showSummaryDropdown ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               </button>
 
               {showSummaryDropdown && (
-                <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-4 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3">
+                <div className="absolute right-0 mt-2 w-64 sm:w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-4 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-2.5 text-xs">
                   <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                    <span className="text-xs font-bold text-slate-700">Chi tiết tài chính</span>
-                    <span className="text-[10px] text-slate-400">Toàn thời gian</span>
+                    <span className="font-bold text-slate-700">Chi tiết tài chính</span>
+                    <span className="text-[10px] text-slate-400">Lũy kế</span>
                   </div>
 
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
-                      <ArrowUpRight className="w-3.5 h-3.5" /> Tổng Thu Nhập:
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1 text-emerald-600 font-semibold">
+                      <ArrowUpRight className="w-3.5 h-3.5" /> Tổng Thu:
                     </span>
                     <strong className="text-emerald-600 font-bold">{formatCurrency(totalAllIncome)}</strong>
                   </div>
 
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 text-red-500 font-semibold">
-                      <ArrowDownLeft className="w-3.5 h-3.5" /> Tổng Chi Tiêu:
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1 text-red-500 font-semibold">
+                      <ArrowDownLeft className="w-3.5 h-3.5" /> Tổng Chi:
                     </span>
                     <strong className="text-red-600 font-bold">{formatCurrency(totalAllExpense)}</strong>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between font-bold">
                     <span className="text-slate-800">Số Dư Tích Lũy:</span>
                     <span className={totalBalance >= 0 ? 'text-slate-900 font-extrabold' : 'text-rose-600'}>
                       {formatCurrency(totalBalance)}
@@ -628,27 +602,27 @@ export default function MoneyManagerPage() {
 
             <button
               onClick={handleExportExcel}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer"
             >
               <Download className="w-4 h-4" />
-              <span className="hidden sm:inline">Xuất Excel</span>
+              <span>Xuất Excel</span>
             </button>
 
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
             >
               <Upload className="w-4 h-4" />
-              <span className="hidden sm:inline">Nhập File</span>
+              <span>Nhập File</span>
             </button>
 
             <button
               onClick={handleDeleteAll}
               disabled={isDeletingAll || transactions.length === 0}
-              className="p-2 rounded-xl text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition cursor-pointer disabled:opacity-50"
+              className="p-1.5 sm:p-2 rounded-xl text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition cursor-pointer disabled:opacity-50"
               title="Xóa tất cả các khoản đã nhập"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
             <input 
@@ -659,18 +633,17 @@ export default function MoneyManagerPage() {
               className="hidden" 
             />
 
-            {/* Avatar & Đăng xuất */}
-            <div className="flex items-center gap-2 pl-2 border-l border-slate-200 ml-1">
+            <div className="flex items-center gap-1.5 pl-1.5 border-l border-slate-200">
               {user?.user_metadata?.avatar_url ? (
                 <img 
                   src={user.user_metadata.avatar_url} 
                   alt="Avatar" 
-                  className="w-7 h-7 rounded-full object-cover border border-emerald-500/50"
+                  className="w-6 h-6 sm:w-7 sm:h-7 rounded-full object-cover border border-emerald-500/50"
                   title={user.email}
                 />
               ) : (
-                <div className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center text-xs font-bold">
-                  <UserIcon className="w-3.5 h-3.5" />
+                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center text-[10px] font-bold">
+                  <UserIcon className="w-3 h-3" />
                 </div>
               )}
               <button
@@ -678,7 +651,7 @@ export default function MoneyManagerPage() {
                 className="p-1 text-slate-400 hover:text-red-500 transition cursor-pointer"
                 title="Đăng xuất"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
             </div>
           </div>
@@ -686,23 +659,23 @@ export default function MoneyManagerPage() {
       </header>
 
       {/* Main Content Dashboard */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6">
           
           {/* CỘT TRÁI: FORM NHẬP KHOẢN MỚI */}
-          <div className="lg:col-span-5 bg-white p-6 sm:p-7 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
+          <div className={`lg:col-span-5 bg-white p-4 sm:p-7 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between ${mobileTab !== 'input' ? 'hidden lg:flex' : 'flex'}`}>
             <div>
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
-                <h2 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                  <Plus className="w-5 h-5 text-orange-500" />
+              <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 mb-4 sm:mb-5">
+                <h2 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-1.5">
+                  <Plus className="w-4 h-4 text-orange-500" />
                   Nhập Khoản Mới
                 </h2>
 
-                <div className="flex items-center bg-slate-100 p-1.5 rounded-2xl">
+                <div className="flex items-center bg-slate-100 p-1 rounded-2xl">
                   <button
                     type="button"
                     onClick={() => { setType('expense'); setSelectedCategory('Ăn uống'); }}
-                    className={`px-5 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                    className={`px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
                       type === 'expense'
                         ? 'bg-[#ffe8d6] text-[#e8590c] shadow-sm ring-1 ring-[#ffd8a8]'
                         : 'text-slate-500 hover:text-slate-800'
@@ -713,7 +686,7 @@ export default function MoneyManagerPage() {
                   <button
                     type="button"
                     onClick={() => { setType('income'); setSelectedCategory('Tiền lương'); }}
-                    className={`px-5 py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
+                    className={`px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl text-xs font-extrabold transition cursor-pointer ${
                       type === 'income'
                         ? 'bg-[#e6fcf5] text-[#0ca678] shadow-sm ring-1 ring-[#b2f2bb]'
                         : 'text-slate-500 hover:text-slate-800'
@@ -724,23 +697,23 @@ export default function MoneyManagerPage() {
                 </div>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form onSubmit={handleSubmit} className="space-y-3.5 sm:space-y-4">
                 
                 {/* 1. Chọn ngày qua lịch */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Ngày thực hiện:</label>
-                  <div className="flex items-center justify-between bg-[#fff9db]/90 border border-[#ffe066] px-4 py-3 rounded-2xl font-bold text-slate-800 relative shadow-2xs hover:bg-[#fff9db] transition">
+                  <label className="block text-[11px] sm:text-xs font-bold text-slate-700 mb-1">Ngày thực hiện:</label>
+                  <div className="flex items-center justify-between bg-[#fff9db]/90 border border-[#ffe066] px-3.5 py-2.5 sm:py-3 rounded-2xl font-bold text-slate-800 relative shadow-2xs">
                     <button type="button" onClick={handlePrevDay} className="p-1 hover:text-orange-600 cursor-pointer">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
                     
                     <div 
                       onClick={() => dateInputRef.current?.showPicker ? dateInputRef.current.showPicker() : dateInputRef.current?.focus()}
-                      className="flex items-center gap-2 cursor-pointer hover:text-orange-600 transition"
+                      className="flex items-center gap-1.5 cursor-pointer hover:text-orange-600 transition"
                       title="Bấm để chọn lịch"
                     >
-                      <Calendar className="w-4 h-4 text-orange-500" />
-                      <span className="text-sm font-bold">{formatDateDisplay(currentDateStr)}</span>
+                      <Calendar className="w-4 h-4 text-orange-500 flex-shrink-0" />
+                      <span className="text-xs sm:text-sm font-bold">{formatDateDisplay(currentDateStr)}</span>
                       <input 
                         type="date" 
                         ref={dateInputRef}
@@ -756,29 +729,29 @@ export default function MoneyManagerPage() {
                   </div>
                 </div>
 
-                {/* 2. Ô GHI CHÚ TO RÕ RÀNG KÈM GỢI Ý */}
+                {/* 2. Ô GHI CHÚ */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">Nội dung chi tiết (Ghi chú):</label>
+                  <label className="block text-[11px] sm:text-xs font-bold text-slate-700 mb-1">Nội dung chi tiết (Ghi chú):</label>
                   <input 
                     type="text"
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
-                    placeholder="Ví dụ: Ăn sáng phở bò, Mua quà sinh nhật..."
-                    className="w-full py-3.5 px-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-orange-500 focus:bg-white text-sm font-medium text-slate-900 shadow-2xs transition"
+                    placeholder="Ví dụ: Ăn sáng, Mua cafe, Đổ xăng..."
+                    className="w-full py-2.5 sm:py-3.5 px-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-orange-500 focus:bg-white text-xs sm:text-sm font-medium text-slate-900 shadow-2xs transition"
                   />
 
                   {/* Gợi ý các nội dung trước đó */}
                   {noteSuggestions.length > 0 && (
-                    <div className="flex items-center gap-1.5 flex-wrap mt-2">
-                      <span className="text-[11px] text-slate-400 font-semibold flex items-center gap-1">
-                        <Sparkles className="w-3 h-3 text-amber-500" /> Gợi ý:
+                    <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                      <span className="text-[10px] text-slate-400 font-semibold flex items-center gap-0.5">
+                        <Sparkles className="w-2.5 h-2.5 text-amber-500" /> Gợi ý:
                       </span>
                       {noteSuggestions.map((sug, sIdx) => (
                         <button
                           key={sIdx}
                           type="button"
                           onClick={() => setNote(sug)}
-                          className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-orange-50 hover:text-orange-600 text-slate-600 text-[11px] font-medium transition cursor-pointer border border-slate-200"
+                          className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-orange-50 hover:text-orange-600 text-slate-600 text-[10px] font-medium transition cursor-pointer border border-slate-200"
                         >
                           {sug}
                         </button>
@@ -787,60 +760,61 @@ export default function MoneyManagerPage() {
                   )}
                 </div>
 
-                {/* 3. Ô NHẬP SỐ TIỀN TO LỚN KÈM ĐỌC CHỮ TIẾNG VIỆT */}
+                {/* 3. Ô NHẬP SỐ TIỀN TO LỚN KÈM BÀN PHÍM SỐ */}
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-bold text-slate-700">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] sm:text-xs font-bold text-slate-700">
                       {type === 'expense' ? 'Số tiền chi ra:' : 'Số tiền thu vào:'}
                     </label>
                     {numericAmount > 0 && (
                       <button
                         type="button"
                         onClick={handleClearAmount}
-                        className="text-[11px] text-red-500 hover:underline flex items-center gap-0.5 cursor-pointer"
+                        className="text-[10px] text-red-500 hover:underline flex items-center gap-0.5 cursor-pointer"
                       >
-                        <RotateCcw className="w-3 h-3" /> Xóa số tiền
+                        <RotateCcw className="w-2.5 h-2.5" /> Xóa số tiền
                       </button>
                     )}
                   </div>
 
-                  <div className={`flex items-center px-4 py-3.5 rounded-2xl border transition shadow-2xs ${
+                  <div className={`flex items-center px-3.5 py-2.5 sm:py-3.5 rounded-2xl border transition shadow-2xs ${
                     type === 'expense'
                       ? 'bg-[#fff4e6] border-[#ffd8a8] focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-200'
                       : 'bg-[#e6fcf5] border-[#b2f2bb] focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-200'
                   }`}>
                     <input 
                       type="text"
+                      inputMode="numeric"
                       value={amountStr}
                       onChange={(e) => {
                         const clean = e.target.value.replace(/\D/g, '')
                         setAmountStr(clean ? Number(clean).toLocaleString('vi-VN') : '')
                       }}
                       placeholder="0"
-                      className={`w-full bg-transparent outline-none text-2xl sm:text-3xl font-extrabold ${
+                      className={`w-full bg-transparent outline-none text-xl sm:text-3xl font-extrabold ${
                         type === 'expense' ? 'text-orange-600 placeholder-orange-300' : 'text-emerald-700 placeholder-emerald-300'
                       }`}
                     />
-                    <span className="ml-2 font-bold text-lg text-slate-500">đ</span>
+                    <span className="ml-2 font-bold text-base sm:text-lg text-slate-500">đ</span>
                   </div>
 
                   {/* Hiển thị dịch số thành chữ tiếng Việt */}
                   {amountInWords ? (
-                    <div className="mt-1.5 px-3 py-1.5 bg-slate-100 rounded-xl text-xs font-semibold text-slate-700 italic border border-slate-200">
+                    <div className="mt-1.5 px-2.5 py-1 bg-slate-100 rounded-xl text-[11px] font-semibold text-slate-700 italic border border-slate-200">
                       Bằng chữ: <span className="text-slate-900 font-bold not-italic">{amountInWords}</span>
                     </div>
                   ) : null}
 
                   {/* CÁC NÚT BẤM GỢI Ý CỘNG TIỀN NHANH */}
-                  <div className="mt-2.5">
-                    <p className="text-[11px] font-bold text-slate-500 mb-1.5">Gợi ý chọn / cộng dồn nhanh:</p>
-                    <div className="grid grid-cols-5 gap-1.5">
+                  <div className="mt-2">
+                    <p className="text-[10px] font-bold text-slate-500 mb-1">Gợi ý cộng nhanh:</p>
+                    <div className="grid grid-cols-5 gap-1">
                       {QUICK_AMOUNT_PRESETS.map((preset, pIdx) => (
                         <button
                           key={pIdx}
                           type="button"
                           onClick={() => handleAddQuickAmount(preset.val)}
-                          className="py-1.5 px-1 bg-white hover:bg-orange-500 hover:text-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer text-center"
+                          className="py-1.5 px-0.5 bg-white hover:bg-orange-500 hover:text-white active:bg-orange-600 active:text-white border border-slate-200 rounded-xl text-[11px] font-bold text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer text-center"
                         >
                           {preset.label}
                         </button>
@@ -850,47 +824,47 @@ export default function MoneyManagerPage() {
                 </div>
 
                 {/* 4. Danh mục */}
-                <div className="pt-2">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-bold text-xs text-slate-700">Chọn Danh Mục:</span>
+                <div className="pt-1">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-bold text-[11px] sm:text-xs text-slate-700">Chọn Danh Mục:</span>
                     <button
                       type="button"
                       onClick={() => setIsAddingCat(!isAddingCat)}
-                      className="text-orange-600 font-bold text-xs flex items-center gap-1 hover:underline cursor-pointer"
+                      className="text-orange-600 font-bold text-[11px] sm:text-xs flex items-center gap-0.5 hover:underline cursor-pointer"
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Thêm danh mục</span>
+                      <Plus className="w-3 h-3" />
+                      <span>Thêm</span>
                     </button>
                   </div>
 
                   {isAddingCat && (
-                    <div className="mb-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl flex items-center gap-2">
+                    <div className="mb-2.5 p-2 bg-slate-50 border border-slate-200 rounded-2xl flex items-center gap-1.5">
                       <input 
                         type="text" 
                         value={newCatName} 
                         onChange={(e) => setNewCatName(e.target.value)} 
                         placeholder="Tên danh mục mới..."
-                        className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none text-xs"
+                        className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl outline-none text-xs"
                       />
                       <button 
                         type="button" 
                         onClick={handleAddCategory}
-                        className="px-3.5 py-2 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 cursor-pointer flex items-center gap-1 text-xs shadow-sm"
+                        className="px-3 py-1.5 bg-orange-500 text-white rounded-xl font-bold hover:bg-orange-600 cursor-pointer flex items-center gap-1 text-xs shadow-sm"
                       >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Thêm</span>
+                        <Check className="w-3 h-3" />
+                        <span>Lưu</span>
                       </button>
                       <button 
                         type="button" 
                         onClick={() => setIsAddingCat(false)}
-                        className="p-1.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
                       >
-                        <X className="w-4 h-4" />
+                        <X className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   )}
 
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 max-h-52 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-44 sm:max-h-52 overflow-y-auto pr-0.5">
                     {currentCategories.map((cat) => {
                       const isSelected = selectedCategory === cat.name
                       return (
@@ -898,14 +872,14 @@ export default function MoneyManagerPage() {
                           key={cat.id}
                           type="button"
                           onClick={() => setSelectedCategory(cat.name)}
-                          className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-center transition cursor-pointer ${
+                          className={`flex flex-col items-center justify-center p-2 rounded-2xl border text-center transition cursor-pointer ${
                             isSelected 
-                              ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-500/50 shadow-sm' 
+                              ? 'border-orange-500 bg-orange-50 ring-1 ring-orange-500 shadow-2xs' 
                               : 'border-slate-100 bg-white hover:bg-slate-50'
                           }`}
                         >
-                          <Tag className={`w-4 h-4 mb-1 ${cat.color.split(' ')[0]}`} />
-                          <span className="text-[11px] font-bold text-slate-700 truncate w-full">
+                          <Tag className={`w-3.5 h-3.5 mb-1 ${cat.color.split(' ')[0]}`} />
+                          <span className="text-[10px] sm:text-[11px] font-bold text-slate-700 truncate w-full">
                             {cat.name}
                           </span>
                         </button>
@@ -914,10 +888,10 @@ export default function MoneyManagerPage() {
                   </div>
                 </div>
 
-                <div className="pt-3">
+                <div className="pt-2">
                   <button
                     type="submit"
-                    className={`w-full py-4 rounded-2xl font-extrabold text-white text-base shadow-lg transition active:scale-95 cursor-pointer ${
+                    className={`w-full py-3.5 sm:py-4 rounded-2xl font-extrabold text-white text-sm sm:text-base shadow-md transition active:scale-95 cursor-pointer ${
                       type === 'expense' 
                         ? 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 shadow-orange-500/20' 
                         : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-emerald-500/20'
@@ -931,76 +905,73 @@ export default function MoneyManagerPage() {
           </div>
 
           {/* CỘT PHẢI: BIỂU ĐỒ & LỊCH SỬ GIAO DỊCH */}
-          <div className="lg:col-span-7 space-y-6">
+          <div className={`lg:col-span-7 space-y-5 sm:space-y-6 ${mobileTab === 'input' ? 'hidden lg:block' : 'block'}`}>
             
             {/* BOX BIỂU ĐỒ */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 mb-4">
+            <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm ${mobileTab === 'history' ? 'hidden lg:block' : 'block'}`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3.5 border-b border-slate-100 mb-3.5">
                 
-                {/* 2 Tab: Thống kê / Phân loại */}
                 <div className="flex items-center bg-slate-100 p-1 rounded-xl">
                   <button
                     onClick={() => setChartSubTab('stats')}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                       chartSubTab === 'stats' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'
                     }`}
                   >
-                    <BarChart3 className="w-4 h-4" />
+                    <BarChart3 className="w-3.5 h-3.5" />
                     <span>Thống kê</span>
                   </button>
                   <button
                     onClick={() => setChartSubTab('category')}
-                    className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
                       chartSubTab === 'category' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'
                     }`}
                   >
-                    <PieChart className="w-4 h-4" />
+                    <PieChart className="w-3.5 h-3.5" />
                     <span>Phân loại</span>
                   </button>
                 </div>
 
-                {/* Chế độ lọc thời gian */}
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold self-start sm:self-auto">
                   <button
                     onClick={() => setChartPeriodMode('month')}
-                    className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
                       chartPeriodMode === 'month' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Theo Tháng
+                    Tháng
                   </button>
                   <button
                     onClick={() => setChartPeriodMode('year')}
-                    className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
                       chartPeriodMode === 'year' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Theo Năm
+                    Năm
                   </button>
                   <button
                     onClick={() => setChartPeriodMode('all')}
-                    className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
                       chartPeriodMode === 'all' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Toàn bộ
+                    Tất cả
                   </button>
                 </div>
               </div>
 
-              {/* BỘ CHỌN TỪNG THÁNG & TỪNG NĂM */}
               {chartPeriodMode !== 'all' && (
-                <div className="flex items-center gap-2 mb-4 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/80 text-xs">
-                  <span className="font-bold text-slate-600 flex items-center gap-1">
-                    <Filter className="w-3.5 h-3.5 text-indigo-500" />
-                    Kỳ xem:
+                <div className="flex items-center gap-1.5 mb-3.5 bg-slate-50 p-2 rounded-2xl border border-slate-200/80 text-xs">
+                  <span className="font-bold text-slate-600 flex items-center gap-1 text-[11px]">
+                    <Filter className="w-3 h-3 text-indigo-500" />
+                    Kỳ:
                   </span>
 
                   {chartPeriodMode === 'month' && (
                     <select
                       value={chartSelectedMonth}
                       onChange={(e) => setChartSelectedMonth(Number(e.target.value))}
-                      className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl font-bold text-slate-800 outline-none cursor-pointer"
+                      className="bg-white border border-slate-200 px-2 py-1 rounded-xl font-bold text-slate-800 outline-none cursor-pointer text-xs"
                     >
                       {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                         <option key={m} value={m}>Tháng {m}</option>
@@ -1011,7 +982,7 @@ export default function MoneyManagerPage() {
                   <select
                     value={chartSelectedYear}
                     onChange={(e) => setChartSelectedYear(Number(e.target.value))}
-                    className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl font-bold text-slate-800 outline-none cursor-pointer"
+                    className="bg-white border border-slate-200 px-2 py-1 rounded-xl font-bold text-slate-800 outline-none cursor-pointer text-xs"
                   >
                     {availableYears.map((y) => (
                       <option key={y} value={y}>Năm {y}</option>
@@ -1020,42 +991,38 @@ export default function MoneyManagerPage() {
                 </div>
               )}
 
-              {/* THỐNG KÊ THU / CHI / SỐ DƯ CÒN */}
               {chartSubTab === 'stats' ? (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {/* Thẻ 1: Tổng Thu */}
-                    <div className="p-4 bg-emerald-50/90 border border-emerald-200/80 rounded-2xl flex flex-col justify-between">
-                      <div className="flex items-center gap-1.5 text-emerald-600 text-xs font-bold mb-1">
-                        <ArrowUpRight className="w-4 h-4" />
-                        <span>Tổng Thu Kỳ Này</span>
+                <div className="space-y-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="p-3 bg-emerald-50/90 border border-emerald-200/80 rounded-2xl flex flex-col justify-between">
+                      <div className="flex items-center gap-1 text-emerald-600 text-[11px] font-bold mb-0.5">
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                        <span>Tổng Thu</span>
                       </div>
-                      <p className="text-base sm:text-lg font-extrabold text-emerald-700 truncate">{formatCurrency(chartIncome)}</p>
+                      <p className="text-sm sm:text-base font-extrabold text-emerald-700 truncate">{formatCurrency(chartIncome)}</p>
                     </div>
 
-                    {/* Thẻ 2: Tổng Chi */}
-                    <div className="p-4 bg-red-50/90 border border-red-200/80 rounded-2xl flex flex-col justify-between">
-                      <div className="flex items-center gap-1.5 text-red-600 text-xs font-bold mb-1">
-                        <ArrowDownLeft className="w-4 h-4" />
-                        <span>Tổng Chi Kỳ Này</span>
+                    <div className="p-3 bg-red-50/90 border border-red-200/80 rounded-2xl flex flex-col justify-between">
+                      <div className="flex items-center gap-1 text-red-600 text-[11px] font-bold mb-0.5">
+                        <ArrowDownLeft className="w-3.5 h-3.5" />
+                        <span>Tổng Chi</span>
                       </div>
-                      <p className="text-base sm:text-lg font-extrabold text-red-700 truncate">{formatCurrency(chartExpense)}</p>
+                      <p className="text-sm sm:text-base font-extrabold text-red-700 truncate">{formatCurrency(chartExpense)}</p>
                     </div>
 
-                    {/* Thẻ 3: Số Dư Còn Lại */}
-                    <div className="p-4 bg-blue-50/90 border border-blue-200/80 rounded-2xl flex flex-col justify-between">
-                      <div className="flex items-center gap-1.5 text-blue-600 text-xs font-bold mb-1">
-                        <Wallet className="w-4 h-4" />
-                        <span>Số Dư Còn Kỳ Này</span>
+                    <div className="p-3 bg-blue-50/90 border border-blue-200/80 rounded-2xl flex flex-col justify-between">
+                      <div className="flex items-center gap-1 text-blue-600 text-[11px] font-bold mb-0.5">
+                        <Wallet className="w-3.5 h-3.5" />
+                        <span>Số Dư Còn</span>
                       </div>
-                      <p className={`text-base sm:text-lg font-extrabold truncate ${chartRemaining >= 0 ? 'text-blue-700' : 'text-rose-600'}`}>
+                      <p className={`text-sm sm:text-base font-extrabold truncate ${chartRemaining >= 0 ? 'text-blue-700' : 'text-rose-600'}`}>
                         {formatCurrency(chartRemaining)}
                       </p>
                     </div>
                   </div>
 
-                  <div className="pt-2">
-                    <div className="flex items-center justify-between text-xs font-semibold mb-2">
+                  <div className="pt-1">
+                    <div className="flex items-center justify-between text-[11px] font-semibold mb-1.5">
                       <span className="text-slate-600">Tỷ lệ Thu / Chi:</span>
                       <span className="text-slate-800">
                         {chartIncome + chartExpense > 0 
@@ -1063,7 +1030,7 @@ export default function MoneyManagerPage() {
                           : '0%'}
                       </span>
                     </div>
-                    <div className="w-full h-3.5 bg-red-400 rounded-full overflow-hidden flex">
+                    <div className="w-full h-3 bg-red-400 rounded-full overflow-hidden flex">
                       <div 
                         className="h-full bg-emerald-500 transition-all duration-500" 
                         style={{ width: `${chartIncome + chartExpense > 0 ? (chartIncome / (chartIncome + chartExpense)) * 100 : 50}%` }}
@@ -1072,10 +1039,9 @@ export default function MoneyManagerPage() {
                   </div>
                 </div>
               ) : (
-                /* PHÂN LOẠI TỶ TRỌNG DANH MỤC */
-                <div className="space-y-3.5 max-h-72 overflow-y-auto pr-1">
+                <div className="space-y-3 max-h-64 sm:max-h-72 overflow-y-auto pr-0.5">
                   {catEntries.length === 0 ? (
-                    <p className="text-center py-8 text-xs text-slate-400">Chưa có giao dịch danh mục trong khoảng thời gian này.</p>
+                    <p className="text-center py-6 text-xs text-slate-400">Chưa có giao dịch danh mục trong khoảng thời gian này.</p>
                   ) : (
                     catEntries.map(([catName, amount]) => {
                       const percentage = currentTotalCatType > 0 ? Math.round((amount / currentTotalCatType) * 100) : 0
@@ -1104,48 +1070,47 @@ export default function MoneyManagerPage() {
             </div>
 
             {/* BOX LỊCH SỬ GIAO DỊCH */}
-            <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 mb-4">
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-emerald-500" />
-                  <h3 className="font-bold text-base text-slate-900">
-                    Lịch Sử Giao Dịch ({historyFiltered.length})
+            <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm ${mobileTab === 'charts' ? 'hidden lg:block' : 'block'}`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3.5 border-b border-slate-100 mb-3.5">
+                <div className="flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                  <h3 className="font-bold text-sm sm:text-base text-slate-900">
+                    Lịch Sử ({historyFiltered.length})
                   </h3>
                 </div>
 
-                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold self-start sm:self-auto">
                   <button
                     onClick={() => setHistoryGroupType('month')}
-                    className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
                       historyGroupType === 'month' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Theo Tháng
+                    Tháng
                   </button>
                   <button
                     onClick={() => setHistoryGroupType('year')}
-                    className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
                       historyGroupType === 'year' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Theo Năm
+                    Năm
                   </button>
                 </div>
               </div>
 
-              {/* BỘ LỌC TỪNG NĂM & TỪNG THÁNG TRONG LỊCH SỬ */}
-              <div className="flex flex-wrap items-center gap-2 mb-4 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/80 text-xs">
-                <span className="font-bold text-slate-600 flex items-center gap-1">
-                  <Filter className="w-3.5 h-3.5 text-emerald-600" />
-                  Lọc xem:
+              <div className="flex flex-wrap items-center gap-1.5 mb-3.5 bg-slate-50 p-2 rounded-2xl border border-slate-200/80 text-xs">
+                <span className="font-bold text-slate-600 flex items-center gap-0.5 text-[11px]">
+                  <Filter className="w-3 h-3 text-emerald-600" />
+                  Lọc:
                 </span>
 
                 <select
                   value={historyFilterYear}
                   onChange={(e) => setHistoryFilterYear(e.target.value)}
-                  className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl font-bold text-slate-800 outline-none cursor-pointer"
+                  className="bg-white border border-slate-200 px-2 py-1 rounded-xl font-bold text-slate-800 outline-none cursor-pointer text-xs"
                 >
-                  <option value="all">Tất cả các năm</option>
+                  <option value="all">Tất cả năm</option>
                   {availableYears.map((y) => (
                     <option key={y} value={String(y)}>Năm {y}</option>
                   ))}
@@ -1154,63 +1119,62 @@ export default function MoneyManagerPage() {
                 <select
                   value={historyFilterMonth}
                   onChange={(e) => setHistoryFilterMonth(e.target.value)}
-                  className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl font-bold text-slate-800 outline-none cursor-pointer"
+                  className="bg-white border border-slate-200 px-2 py-1 rounded-xl font-bold text-slate-800 outline-none cursor-pointer text-xs"
                 >
-                  <option value="all">Tất cả các tháng</option>
+                  <option value="all">Tất cả tháng</option>
                   {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                     <option key={m} value={String(m)}>Tháng {m}</option>
                   ))}
                 </select>
               </div>
 
-              {/* DANH SÁCH GIAO DỊCH PHÂN THEO NHÓM */}
-              <div className="space-y-6 max-h-96 overflow-y-auto pr-1">
+              <div className="space-y-4 max-h-80 sm:max-h-96 overflow-y-auto pr-0.5">
                 {Object.keys(groupedHistory).length === 0 ? (
-                  <p className="text-center py-10 text-xs text-slate-400">Không tìm thấy giao dịch nào trong khoảng thời gian đã lọc.</p>
+                  <p className="text-center py-8 text-xs text-slate-400">Không tìm thấy giao dịch nào.</p>
                 ) : (
                   Object.entries(groupedHistory).map(([groupTitle, items]) => {
                     const groupExpense = items.filter(i => i.type === 'expense').reduce((s, i) => s + Number(i.amount), 0)
                     const groupIncome = items.filter(i => i.type === 'income').reduce((s, i) => s + Number(i.amount), 0)
 
                     return (
-                      <div key={groupTitle} className="space-y-2">
-                        <div className="flex items-center justify-between bg-slate-100/80 px-3.5 py-2 rounded-xl text-xs">
-                          <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                            <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                      <div key={groupTitle} className="space-y-1.5">
+                        <div className="flex items-center justify-between bg-slate-100/90 px-3 py-1.5 rounded-xl text-xs">
+                          <span className="font-bold text-slate-800 flex items-center gap-1 text-[11px]">
+                            <Layers className="w-3 h-3 text-indigo-500" />
                             {groupTitle} ({items.length})
                           </span>
-                          <div className="flex items-center gap-3 text-[11px] font-semibold">
+                          <div className="flex items-center gap-2 text-[10px] sm:text-[11px] font-semibold">
                             <span className="text-emerald-600">+{formatCurrency(groupIncome)}</span>
                             <span className="text-red-500">-{formatCurrency(groupExpense)}</span>
                           </div>
                         </div>
 
-                        <div className="space-y-1.5 pl-1">
+                        <div className="space-y-1 pl-0.5">
                           {items.map((t) => (
                             <div 
                               key={t.id} 
-                              className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 bg-white hover:bg-slate-50/80 transition text-xs shadow-2xs"
+                              className="flex items-center justify-between p-2.5 rounded-2xl border border-slate-100 bg-white hover:bg-slate-50 transition text-xs shadow-2xs"
                             >
-                              <div>
-                                <div className="flex items-center gap-2">
+                              <div className="truncate pr-2">
+                                <div className="flex items-center gap-1.5">
                                   <span className="font-bold text-slate-900">{t.category}</span>
-                                  <span className="text-[10px] text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-md">
+                                  <span className="text-[10px] text-slate-400 bg-slate-50 border border-slate-200 px-1.5 py-0.2 rounded-md">
                                     {t.date}
                                   </span>
                                 </div>
-                                {t.note && <p className="text-[11px] text-slate-500 mt-1">{t.note}</p>}
+                                {t.note && <p className="text-[11px] text-slate-500 truncate mt-0.5">{t.note}</p>}
                               </div>
 
-                              <div className="flex items-center gap-3">
-                                <span className={`font-bold text-sm ${t.type === 'expense' ? 'text-red-500' : 'text-emerald-600'}`}>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <span className={`font-bold text-xs sm:text-sm ${t.type === 'expense' ? 'text-red-500' : 'text-emerald-600'}`}>
                                   {t.type === 'expense' ? '-' : '+'}{Number(t.amount).toLocaleString('vi-VN')} đ
                                 </span>
                                 <button
                                   onClick={() => handleDelete(t.id)}
-                                  className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+                                  className="p-1 text-slate-300 hover:text-red-500 transition cursor-pointer"
                                   title="Xóa giao dịch này"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             </div>
@@ -1227,6 +1191,70 @@ export default function MoneyManagerPage() {
 
         </div>
       </main>
+
+      {/* THANH ĐIỀU HƯỚNG DƯỚI CÙNG CHO MOBILE (BOTTOM NAV BAR) */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 z-40 flex items-center justify-around shadow-lg">
+        <button
+          type="button"
+          onClick={() => setMobileTab('input')}
+          className={`flex flex-col items-center gap-0.5 text-[10px] font-bold cursor-pointer transition ${
+            mobileTab === 'input' ? 'text-orange-500' : 'text-slate-400'
+          }`}
+        >
+          <div className={`p-1.5 rounded-xl ${mobileTab === 'input' ? 'bg-orange-50' : ''}`}>
+            <PenSquare className="w-4 h-4" />
+          </div>
+          <span>Nhập mới</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMobileTab('charts')}
+          className={`flex flex-col items-center gap-0.5 text-[10px] font-bold cursor-pointer transition ${
+            mobileTab === 'charts' ? 'text-indigo-600' : 'text-slate-400'
+          }`}
+        >
+          <div className={`p-1.5 rounded-xl ${mobileTab === 'charts' ? 'bg-indigo-50' : ''}`}>
+            <BarChart3 className="w-4 h-4" />
+          </div>
+          <span>Biểu đồ</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setMobileTab('history')}
+          className={`flex flex-col items-center gap-0.5 text-[10px] font-bold cursor-pointer transition ${
+            mobileTab === 'history' ? 'text-emerald-600' : 'text-slate-400'
+          }`}
+        >
+          <div className={`p-1.5 rounded-xl ${mobileTab === 'history' ? 'bg-emerald-50' : ''}`}>
+            <History className="w-4 h-4" />
+          </div>
+          <span>Lịch sử</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={handleExportExcel}
+          className="flex flex-col items-center gap-0.5 text-[10px] font-bold text-slate-400 hover:text-emerald-600 cursor-pointer transition"
+        >
+          <div className="p-1.5 rounded-xl">
+            <Download className="w-4 h-4" />
+          </div>
+          <span>Xuất File</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="flex flex-col items-center gap-0.5 text-[10px] font-bold text-slate-400 hover:text-blue-600 cursor-pointer transition"
+        >
+          <div className="p-1.5 rounded-xl">
+            <Upload className="w-4 h-4" />
+          </div>
+          <span>Nhập File</span>
+        </button>
+      </div>
 
     </div>
   )
