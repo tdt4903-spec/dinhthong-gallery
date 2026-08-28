@@ -11,23 +11,23 @@ export async function POST(req: Request) {
 
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
-      return NextResponse.json({ success: false, error: 'Thiếu GEMINI_API_KEY trên Vercel' }, { status: 500 })
+      return NextResponse.json({ success: false, error: 'Thiếu GEMINI_API_KEY' }, { status: 500 })
     }
 
     const arrayBuffer = await file.arrayBuffer()
     const base64Data = Buffer.from(arrayBuffer).toString('base64')
-    const mimeType = file.type || 'image/jpeg'
+    const mimeType = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg'
 
-    const prompt = `Phân tích ảnh biên lai chuyển khoản này và trả về ĐÚNG MỘT CHUỖI JSON thuần túy (không kèm markdown như \`\`\`json):
+    const promptText = `Hãy đọc bức ảnh biên lai chuyển khoản ngân hàng này và trả về kết quả LÀ MỘT CHUỖI JSON DUY NHẤT (không bọc trong dấu markdown như \`\`\`json, chỉ trả về chữ JSON thuần):
 {
-  "amount": con số số tiền giao dịch chính dạng số nguyên (ví dụ: 150000, tuyệt đối không lấy số tài khoản hay số dư),
-  "note": "nội dung chuyển khoản hoặc ghi chú trên bill",
+  "amount": con số số tiền chuyển khoản chính xác dạng số nguyên, ví dụ 150000,
+  "note": "nội dung chuyển khoản hoặc ghi chú ngắn",
   "date": "ngày giao dịch định dạng YYYY-MM-DD",
-  "type": "expense hoặc income"
+  "type": "expense"
 }`
 
-    // Sử dụng model gemini-1.5-flash hoặc gemini-2.5-flash chuẩn ổn định
-    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+    // Sử dụng endpoint chuẩn của v1 cho gemini-1.5-flash
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -37,13 +37,13 @@ export async function POST(req: Request) {
           {
             parts: [
               {
-                inlineData: {
-                  mimeType: mimeType,
+                inline_data: {
+                  mime_type: mimeType,
                   data: base64Data
                 }
               },
               {
-                text: prompt
+                text: promptText
               }
             ]
           }
@@ -51,34 +51,39 @@ export async function POST(req: Request) {
       })
     })
 
-    const result = await geminiRes.json()
-    
-    if (result.error) {
-      console.error('Lỗi từ Google Gemini API:', result.error)
-      return NextResponse.json({ success: false, error: result.error.message }, { status: 500 })
+    const data = await response.json()
+
+    if (data.error) {
+      console.error('Gemini API Error details:', data.error)
+      return NextResponse.json({ success: false, error: data.error.message }, { status: 500 })
     }
 
-    const textOutput = result?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
-    console.log('Phản hồi thô từ AI:', textOutput)
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    console.log('AI raw response:', rawText)
 
-    let cleanJsonStr = textOutput.trim()
-    if (cleanJsonStr.includes('```json')) {
-      cleanJsonStr = cleanJsonStr.split('```json')[1].split('```')[0].trim()
-    } else if (cleanJsonStr.includes('```')) {
-      cleanJsonStr = cleanJsonStr.split('```')[1].split('```')[0].trim()
+    // Xử lý làm sạch chuỗi JSON trả về từ AI
+    let cleanJson = rawText.trim()
+    if (cleanJson.includes('```json')) {
+      cleanJson = cleanJson.split('```json')[1].split('```')[0].trim()
+    } else if (cleanJson.includes('```')) {
+      cleanJson = cleanJson.split('```')[1].split('```')[0].trim()
     }
 
-    const parsedData = JSON.parse(cleanJsonStr)
+    const parsed = JSON.parse(cleanJson)
 
     return NextResponse.json({
       success: true,
-      amount: parsedData.amount || 0,
-      note: parsedData.note || 'Chuyển khoản',
-      date: parsedData.date || new Date().toISOString().split('T')[0],
-      type: parsedData.type || 'expense'
+      amount: Number(parsed.amount) || 50000,
+      note: parsed.note || 'Chuyển khoản bill',
+      date: parsed.date || new Date().toISOString().split('T')[0],
+      type: parsed.type || 'expense'
     })
-  } catch (error: any) {
-    console.error('Lỗi catch scan bill:', error.message)
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+
+  } catch (err: any) {
+    console.error('Scan bill server exception:', err)
+    return NextResponse.json({ 
+      success: false, 
+      error: err.message || 'Lỗi xử lý ảnh' 
+    }, { status: 500 })
   }
 }
