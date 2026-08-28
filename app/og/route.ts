@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { ImageResponse } from 'next/og'
+import React from 'react'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 const extractDriveId = (url: string) => {
   if (!url) return ''
@@ -18,49 +21,116 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const urlParam = searchParams.get('url') || ''
   const idParam = searchParams.get('id') || ''
+  const titleParam = searchParams.get('title') || 'Dinh Thong Gallery'
 
   const driveId = extractDriveId(urlParam) || extractDriveId(idParam)
-  const defaultBanner = 'https://dinhthong-gallery.vercel.app/banner.jpg'
+  const apiKey = process.env.GOOGLE_DRIVE_API_KEY
 
-  if (!driveId) {
-    return NextResponse.redirect(defaultBanner)
-  }
-
-  // Danh sách URL tải ảnh trực tiếp từ Google Drive không bị chặn bot
-  const fetchUrls = [
-    `https://drive.google.com/uc?export=view&id=${driveId}`,
-    `https://lh3.googleusercontent.com/d/${driveId}=w1200`,
-    `https://drive.google.com/thumbnail?id=${driveId}&sz=w1200`
-  ]
-
-  for (const targetUrl of fetchUrls) {
+  // 1. Nếu có ID tệp ảnh và có API Key, tải trực tiếp bằng Google Drive API Stream
+  if (driveId && apiKey) {
     try {
-      const res = await fetch(targetUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
-        },
-        cache: 'no-store'
-      })
+      const driveApiUrl = `https://www.googleapis.com/drive/v3/files/${driveId}?alt=media&key=${apiKey}`
+      const driveRes = await fetch(driveApiUrl, { cache: 'no-store' })
 
-      if (res.ok) {
-        const contentType = res.headers.get('content-type') || ''
-        if (contentType.startsWith('image/')) {
-          const arrayBuffer = await res.arrayBuffer()
-          const buffer = Buffer.from(arrayBuffer)
+      if (driveRes.ok) {
+        const contentType = driveRes.headers.get('content-type') || 'image/jpeg'
+        const arrayBuffer = await driveRes.arrayBuffer()
+        const buffer = Buffer.from(arrayBuffer)
 
-          return new NextResponse(buffer, {
-            status: 200,
-            headers: {
-              'Content-Type': contentType,
-              'Content-Length': buffer.length.toString(),
-              'Cache-Control': 'public, max-age=86400, stale-while-revalidate=3600',
-            },
-          })
-        }
+        return new NextResponse(buffer, {
+          status: 200,
+          headers: {
+            'Content-Type': contentType,
+            'Content-Length': buffer.length.toString(),
+            'Cache-Control': 'public, max-age=86400, stale-while-revalidate=3600',
+          },
+        })
       }
     } catch {}
   }
 
-  return NextResponse.redirect(defaultBanner)
+  // 2. Dự phòng: Sinh trực tiếp ảnh Open Graph Card 1200x630 động đảm bảo bot Zalo/Facebook nhận 100%
+  return new ImageResponse(
+    React.createElement(
+      'div',
+      {
+        style: {
+          height: '100%',
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#0f1115',
+          backgroundImage: 'linear-gradient(to bottom right, #07130c, #16181e)',
+          color: '#ffffff',
+          padding: '40px 60px',
+        },
+      },
+      React.createElement(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            marginBottom: '24px',
+          },
+        },
+        React.createElement(
+          'span',
+          {
+            style: {
+              fontSize: 32,
+              fontWeight: 800,
+              letterSpacing: '-0.02em',
+            },
+          },
+          'DINHTHONG'
+        ),
+        React.createElement(
+          'span',
+          {
+            style: {
+              fontSize: 32,
+              fontStyle: 'italic',
+              color: '#10b981',
+            },
+          },
+          'gallery'
+        )
+      ),
+      React.createElement(
+        'div',
+        {
+          style: {
+            fontSize: 48,
+            fontWeight: 700,
+            textAlign: 'center',
+            lineHeight: 1.2,
+            maxWidth: '900px',
+            color: '#f3f4f6',
+            marginBottom: '16px',
+          },
+        },
+        titleParam
+      ),
+      React.createElement(
+        'div',
+        {
+          style: {
+            fontSize: 20,
+            color: '#10b981',
+            letterSpacing: '0.1em',
+            textTransform: 'uppercase',
+          },
+        },
+        'Khoảnh khắc lưu giữ cảm xúc'
+      )
+    ),
+    {
+      width: 1200,
+      height: 630,
+    }
+  )
 }
