@@ -4,30 +4,23 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
-  const id = searchParams.get('id')
-  const directUrl = searchParams.get('url')
+  const imageUrl = searchParams.get('url')
+  const defaultBanner = 'https://dinhthong-gallery.vercel.app/banner.jpg'
 
-  let targetUrl = ''
-  if (directUrl) {
-    targetUrl = directUrl
-  } else if (id) {
-    targetUrl = `https://lh3.googleusercontent.com/d/${id}=w1200`
-  }
-
-  if (!targetUrl) {
-    return new NextResponse('Missing image ID or URL', { status: 400 })
+  if (!imageUrl) {
+    return NextResponse.redirect(defaultBanner)
   }
 
   try {
-    const res = await fetch(targetUrl, {
+    const res = await fetch(imageUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
       },
       cache: 'no-store'
     })
 
     if (!res.ok) {
-      throw new Error(`Failed to fetch image: ${res.statusText}`)
+      return NextResponse.redirect(defaultBanner)
     }
 
     const contentType = res.headers.get('content-type') || 'image/jpeg'
@@ -40,7 +33,7 @@ export async function GET(request: NextRequest) {
         'Cache-Control': 'public, max-age=86400, stale-while-revalidate=3600',
       },
     })
-  } catch (error: any) {
-    return new NextResponse(`Image Proxy Error: ${error.message}`, { status: 500 })
+  } catch {
+    return NextResponse.redirect(defaultBanner)
   }
 }
