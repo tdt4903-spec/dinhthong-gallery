@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet
 } from 'lucide-react'
 
 interface MediaItem {
@@ -1337,6 +1337,20 @@ export default function GalleryClient() {
                       }`}
                     />
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => router.push('/money')}
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm whitespace-nowrap cursor-pointer flex-shrink-0 ${
+                      isDarkMode 
+                        ? 'bg-orange-500/10 hover:bg-orange-500/20 border-orange-500/30 text-orange-400' 
+                        : 'bg-orange-50 hover:bg-orange-100 border-orange-200 text-orange-700'
+                    }`}
+                    title="Mở Sổ Quản Lý Thu Chi Cá Nhân"
+                  >
+                    <Wallet className="w-3.5 h-3.5 text-orange-600" />
+                    <span>Sổ Thu Chi</span>
+                  </button>
 
                   <button
                     type="button"
