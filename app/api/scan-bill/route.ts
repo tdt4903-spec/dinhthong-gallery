@@ -10,90 +10,89 @@ export async function POST(req: Request) {
     }
 
     const apiKey = (process.env.GEMINI_API_KEY || '').trim()
-    const arrayBuffer = await file.arrayBuffer()
-    const base64Data = Buffer.from(arrayBuffer).toString('base64')
-    const mimeType = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg'
-
-    let detectedAmount = 0
-    let detectedNote = 'Thanh toán bill'
-    let detectedDate = new Date().toISOString().split('T')[0]
-
-    if (apiKey) {
-      try {
-        const prompt = `Phân tích biên lai chuyển khoản ngân hàng này và trả về ĐÚNG định dạng JSON thuần túy (không markdown):
-{
-  "amount": con số số tiền giao dịch chính dạng số nguyên (ví dụ 60000 hoặc 209000),
-  "note": "nội dung giao dịch",
-  "date": "YYYY-MM-DD",
-  "type": "expense"
-}`
-
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`
-
-        const aiResponse = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { inline_data: { mime_type: mimeType, data: base64Data } },
-                { text: prompt }
-              ]
-            }],
-            generationConfig: { temperature: 0.1 }
-          })
-        })
-
-        const resData = await aiResponse.json()
-        const rawText = resData?.candidates?.[0]?.content?.parts?.[0]?.text || ''
-        const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim()
-        const start = cleanJson.indexOf('{')
-        const end = cleanJson.lastIndexOf('}')
-
-        if (start !== -1 && end !== -1) {
-          const parsed = JSON.parse(cleanJson.substring(start, end + 1))
-          const amt = parseInt(String(parsed.amount || '').replace(/\D/g, ''), 10)
-          if (!isNaN(amt) && amt > 0) {
-            detectedAmount = amt
-          }
-          if (parsed.note) detectedNote = parsed.note
-          if (parsed.date) detectedDate = parsed.date
-        }
-      } catch (e) {
-        console.log('Gemini scan fallback triggered')
-      }
+    if (!apiKey) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Chưa cấu hình GEMINI_API_KEY trên Vercel. Vui lòng kiểm tra Settings -> Environment Variables.' 
+      }, { status: 500 })
     }
 
-    // Dự phòng an toàn tuyệt đối: nếu AI không bắt được số tiền, nhận diện dựa trên dung lượng file hoặc gán mức mặc định chuẩn
-    if (detectedAmount === 0) {
-      const fileSize = file.size
-      if (fileSize > 150000) {
-        detectedAmount = 209000
-        detectedNote = 'TRAN DINH THONG chuyen'
-      } else {
-        detectedAmount = 60000
-        detectedNote = 'TRAN DINH THONG chuyen tien'
-      }
+    const arrayBuffer = await file.arrayBuffer()
+    const base64Data = Buffer.from(arrayBuffer).toString('base64')
+    const mimeType = file.type?.startsWith('image/') ? file.type : 'image/jpeg'
+
+    const prompt = `Bạn là hệ thống OCR đọc hóa đơn, biên lai ngân hàng Việt Nam (VCB, Techcombank, MB, BIDV, Agribank, MoMo, ZaloPay...).
+Hãy nhìn thật kỹ ảnh và trích xuất đúng 4 thông tin:
+1. amount: Số tiền giao dịch thực tế (DẠNG SỐ NGUYÊN DUY NHẤT, ví dụ 60000, 209000, 1500000... Không lấy số tài khoản, số dư hay mã giao dịch).
+2. note: Lời nhắn/nội dung chuyển tiền hoặc người nhận.
+3. date: Ngày giao dịch IN TRÊN BILL theo định dạng YYYY-MM-DD (Ví dụ: bill ghi 28/08/2026 thì trả về 2026-08-28).
+4. type: "expense" (hoặc "income" nếu là bill nhận tiền).
+
+Trả về DUY NHẤT 1 đoạn JSON chuẩn, không bọc markdown:`
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                inline_data: {
+                  mime_type: mimeType,
+                  data: base64Data
+                }
+              },
+              {
+                text: prompt
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          response_mime_type: 'application/json'
+        }
+      })
+    })
+
+    const data = await response.json()
+
+    if (data.error) {
+      return NextResponse.json({ 
+        success: false, 
+        error: `Lỗi Google API (${data.error.code}): ${data.error.message}` 
+      }, { status: 500 })
+    }
+
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim()
+    const parsed = JSON.parse(cleanJson)
+
+    // Bóc tách số tiền thật từ kết quả AI
+    const realAmount = parseInt(String(parsed.amount || '').replace(/\D/g, ''), 10)
+
+    if (isNaN(realAmount) || realAmount <= 0) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'AI không tìm thấy số tiền hợp lệ trên ảnh này. Vui lòng thử ảnh rõ nét hơn.' 
+      }, { status: 400 })
     }
 
     return NextResponse.json({
       success: true,
-      amount: detectedAmount,
-      note: detectedNote,
-      date: detectedDate,
-      type: 'expense'
+      amount: realAmount,
+      note: parsed.note || 'Chuyển khoản',
+      date: parsed.date || new Date().toISOString().split('T')[0],
+      type: parsed.type || 'expense'
     })
 
   } catch (err: any) {
-    return NextResponse.json({
-      success: true,
-      amount: 60000,
-      note: 'Chuyển khoản bill',
-      date: new Date().toISOString().split('T')[0],
-      type: 'expense'
-    })
+    return NextResponse.json({ 
+      success: false, 
+      error: `Lỗi xử lý ảnh: ${err.message}` 
+    }, { status: 500 })
   }
 }
