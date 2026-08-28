@@ -9,7 +9,7 @@ import {
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
   ChevronDown, ChevronUp, PieChart, Filter, Loader2, LogOut, User as UserIcon,
-  Sparkles, RotateCcw, PenSquare, History, Eye, EyeOff, Calculator, Equal, Search
+  Sparkles, RotateCcw, PenSquare, History, Eye, EyeOff, Calculator, Equal, Search, FileSpreadsheet, FileText
 } from 'lucide-react'
 
 const CATEGORY_ID_MAP: Record<number, string> = {
@@ -35,6 +35,12 @@ const CATEGORY_ID_MAP: Record<number, string> = {
   20: 'Film',
   21: 'Tết',
 }
+
+// Bảng ánh xạ ngược từ Tên danh mục -> ID để xuất CSV chuẩn
+const CATEGORY_NAME_TO_ID: Record<string, number> = Object.entries(CATEGORY_ID_MAP).reduce((acc, [id, name]) => {
+  acc[name] = Number(id)
+  return acc
+}, {} as Record<string, number>)
 
 const INITIAL_EXPENSE_CATS = [
   { id: 'an_uong', name: 'Ăn uống', color: 'text-orange-500 bg-orange-50 border-orange-200' },
@@ -197,6 +203,7 @@ export default function MoneyManagerPage() {
   const [isAddingCat, setIsAddingCat] = useState(false)
 
   const [showSummaryDropdown, setShowSummaryDropdown] = useState(false)
+  const [showExportMenu, setShowExportMenu] = useState(false)
   const [hideBalance, setHideBalance] = useState(false)
   const [showStatsBox, setShowStatsBox] = useState(true)
 
@@ -212,6 +219,7 @@ export default function MoneyManagerPage() {
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dateInputRef = useRef<HTMLInputElement>(null)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
 
   const supabaseRef = useRef<any>(null)
   if (!supabaseRef.current) {
@@ -258,6 +266,16 @@ export default function MoneyManagerPage() {
         if (saved === 'true') setHideBalance(true)
       }
     } catch {}
+  }, [])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
   useEffect(() => {
@@ -607,7 +625,9 @@ export default function MoneyManagerPage() {
     reader.readAsText(file, 'UTF-8')
   }
 
+  // Xuất file Excel (.xlsx)
   const handleExportExcel = () => {
+    setShowExportMenu(false)
     if (transactions.length === 0) {
       alert('Chưa có dữ liệu để xuất!')
       return
@@ -626,6 +646,37 @@ export default function MoneyManagerPage() {
     const workbook = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Thu_Chi')
     XLSX.writeFile(workbook, `Bao_Cao_Thu_Chi_${currentDateStr}.xlsx`)
+  }
+
+  // Xuất file CSV (.csv) đúng chuẩn #DAILY_DATAS để nhập ngược lại
+  const handleExportCSV = () => {
+    setShowExportMenu(false)
+    if (transactions.length === 0) {
+      alert('Chưa có dữ liệu để xuất!')
+      return
+    }
+
+    const headerBlock = '#DAILY_DATAS\ninputDateString,amount,memo,categoryId,type\n'
+    const rows = transactions.map((t) => {
+      const dateStr = t.date || '2026-08-28'
+      const amountVal = t.amount || 0
+      const memoVal = (t.note || '').replace(/"/g, '""')
+      const catId = CATEGORY_NAME_TO_ID[t.category] || (t.type === 'income' ? 12 : 1)
+      const typeVal = t.type === 'income' ? '1' : '0'
+
+      return `"${dateStr}",${amountVal},"${memoVal}",${catId},${typeVal}`
+    }).join('\n')
+
+    const csvContent = '\uFEFF' + headerBlock + rows
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `Du_Lieu_Thu_Chi_${currentDateStr}.csv`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
   }
 
   const handleSignOut = async () => {
@@ -816,14 +867,37 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
-            {/* Các nút trên màn hình Desktop */}
-            <button
-              onClick={handleExportExcel}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer flex-shrink-0"
-            >
-              <Download className="w-4 h-4" />
-              <span>Xuất File</span>
-            </button>
+            {/* Menu Xuất File Tùy Chọn (Excel / CSV) */}
+            <div className="relative hidden sm:block flex-shrink-0" ref={exportMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                <span>Xuất File</span>
+                <ChevronDown className="w-3 h-3 text-emerald-600" />
+              </button>
+
+              {showExportMenu && (
+                <div className="absolute right-0 mt-1.5 w-48 bg-white rounded-2xl shadow-xl border border-slate-200 p-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-1">
+                  <button
+                    onClick={handleExportExcel}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 transition cursor-pointer text-left"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                    <span>Xuất File Excel (.xlsx)</span>
+                  </button>
+                  <button
+                    onClick={handleExportCSV}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition cursor-pointer text-left"
+                  >
+                    <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                    <span>Xuất File CSV (.csv)</span>
+                  </button>
+                </div>
+              )}
+            </div>
 
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -1527,26 +1601,28 @@ export default function MoneyManagerPage() {
           <span>Lịch sử</span>
         </button>
 
+        {/* Nút Xuất Excel trên Mobile */}
         <button
           type="button"
           onClick={handleExportExcel}
           className="flex flex-col items-center gap-0.5 text-[10px] font-bold text-slate-400 hover:text-emerald-600 cursor-pointer transition"
         >
           <div className="p-1.5 rounded-xl">
-            <Download className="w-4 h-4" />
+            <FileSpreadsheet className="w-4 h-4" />
           </div>
-          <span>Xuất File</span>
+          <span>Xuất Excel</span>
         </button>
 
+        {/* Nút Xuất CSV trên Mobile */}
         <button
           type="button"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={handleExportCSV}
           className="flex flex-col items-center gap-0.5 text-[10px] font-bold text-slate-400 hover:text-blue-600 cursor-pointer transition"
         >
           <div className="p-1.5 rounded-xl">
-            <Upload className="w-4 h-4" />
+            <FileText className="w-4 h-4" />
           </div>
-          <span>Nhập File</span>
+          <span>Xuất CSV</span>
         </button>
       </div>
 
