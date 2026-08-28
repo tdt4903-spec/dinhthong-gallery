@@ -10,7 +10,7 @@ import {
   Briefcase, Gift, Plane, Star, Fish, Car, Clapperboard, 
   GlassWater, Plus, ChevronLeft, ChevronRight, Download, 
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
-  ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check, AlertTriangle
+  ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check
 } from 'lucide-react'
 
 // Bảng ánh xạ ID từ app sang tên Danh mục tiếng Việt
@@ -204,7 +204,6 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // TÍNH NĂNG: XÓA TOÀN BỘ DỮ LIỆU ĐÃ NHẬP
   const handleDeleteAll = async () => {
     if (transactions.length === 0) {
       alert('Hiện chưa có dữ liệu nào trong sổ để xóa!')
@@ -233,7 +232,7 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // XỬ LÝ NHẬP ĐÚNG FILE CSV TỪ APP CỦA BẠN
+  // THUẬT TOÁN ĐỌC FILE BACKUP SỔ THU CHI CHUẨN XÁC
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -247,69 +246,73 @@ export default function MoneyManagerPage() {
           return
         }
 
-        const lines = text.split(/\r\n|\n/)
-        const formattedToInsert: any[] = []
-
-        let headerFound = false
-        let colIndex = { date: 0, amount: 1, memo: 2, catId: 3, type: 4 }
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].trim()
-          if (!line) continue
-
-          if (line.startsWith('#')) continue
-
-          if (line.includes('inputDateString') || line.includes('amount')) {
-            const headers = line.split(',').map(h => h.trim())
-            colIndex.date = headers.indexOf('inputDateString')
-            colIndex.amount = headers.indexOf('amount')
-            colIndex.memo = headers.indexOf('memo')
-            colIndex.catId = headers.indexOf('categoryId')
-            colIndex.type = headers.indexOf('type')
-            headerFound = true
-            continue
-          }
-
-          if (headerFound) {
-            const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',')
-            if (!parts || parts.length < 3) continue
-
-            const rawDate = (parts[colIndex.date] || '').replace(/["']/g, '').trim()
-            const rawAmount = (parts[colIndex.amount] || '').replace(/["']/g, '').trim()
-            const rawMemo = (parts[colIndex.memo] || '').replace(/["\\n\r]/g, '').trim()
-            const rawCatId = Number((parts[colIndex.catId] || '1').replace(/["']/g, '').trim())
-            const rawType = (parts[colIndex.type] || '0').replace(/["']/g, '').trim()
-
-            const numAmount = Number(rawAmount)
-            if (!numAmount || isNaN(numAmount)) continue
-
-            let formattedDate = formatDateDb(new Date())
-            const dParts = rawDate.split('/')
-            if (dParts.length === 3) {
-              const y = dParts[0]
-              const m = dParts[1].padStart(2, '0')
-              const d = dParts[2].padStart(2, '0')
-              formattedDate = `${y}-${m}-${d}`
-            }
-
-            const isIncome = rawType === '1'
-            const categoryName = CATEGORY_ID_MAP[rawCatId] || (isIncome ? 'Tiền lương' : 'Ăn uống')
-
-            formattedToInsert.push({
-              type: isIncome ? 'income' : 'expense',
-              amount: numAmount,
-              category: categoryName,
-              note: rawMemo,
-              date: formattedDate
-            })
-          }
-        }
-
-        if (formattedToInsert.length === 0) {
-          alert('Không tìm thấy dòng dữ liệu hợp lệ trong file CSV!')
+        // Bước 1: Cắt chuỗi để lấy đúng bảng tính chính (bỏ qua #DAILY_DATAS, #ACCOUNTS...)
+        let cleanCSV = text
+        const headerMarker = 'inputDateString,amount,memo'
+        const headerIndex = text.indexOf(headerMarker)
+        
+        if (headerIndex !== -1) {
+          // Bắt đầu từ dòng header chuẩn đến hết
+          cleanCSV = text.substring(headerIndex)
+        } else {
+          alert('Đây không phải là file backup đúng định dạng Sổ Thu Chi (thiếu header).')
           return
         }
 
+        // Bước 2: Dùng thư viện XLSX để phân tích CSV (giải quyết lỗi xuống dòng \n trong memo)
+        const workbook = XLSX.read(cleanCSV, { type: 'string', raw: true })
+        const sheetName = workbook.SheetNames[0]
+        const dataRows: any[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' })
+
+        const formattedToInsert: any[] = []
+
+        // Bước 3: Lặp và xử lý các trường dữ liệu
+        for (const row of dataRows) {
+          // Chỉ lấy các dòng có đủ cột ngày và tiền
+          if (row['inputDateString'] === undefined || row['amount'] === undefined) {
+            continue 
+          }
+
+          const rawDate = String(row['inputDateString']).trim()
+          const rawAmount = String(row['amount']).trim()
+          const rawMemo = String(row['memo'] || '').replace(/[\n\r]/g, ' ').trim() // Dọn dẹp khoảng trắng
+          const rawCatId = Number(row['categoryId'] || 1)
+          const rawType = String(row['type']).trim()
+
+          const numAmount = Number(rawAmount)
+          if (!numAmount || isNaN(numAmount)) continue
+
+          // Định dạng ngày (Ví dụ: 2023/11/1 -> 2023-11-01)
+          let formattedDate = formatDateDb(new Date())
+          const dParts = rawDate.split('/')
+          if (dParts.length === 3) {
+            const y = dParts[0]
+            const m = dParts[1].padStart(2, '0')
+            const d = dParts[2].padStart(2, '0')
+            formattedDate = `${y}-${m}-${d}`
+          } else if (rawDate.includes('-')) {
+            formattedDate = rawDate.split('T')[0]
+          }
+
+          // Kiểm tra loại (1 = Thu, 0 = Chi)
+          const isIncome = rawType === '1'
+          const categoryName = CATEGORY_ID_MAP[rawCatId] || (isIncome ? 'Tiền lương' : 'Ăn uống')
+
+          formattedToInsert.push({
+            type: isIncome ? 'income' : 'expense',
+            amount: numAmount,
+            category: categoryName,
+            note: rawMemo,
+            date: formattedDate
+          })
+        }
+
+        if (formattedToInsert.length === 0) {
+          alert('Không tìm thấy dòng dữ liệu hợp lệ trong file Backup!')
+          return
+        }
+
+        // Lưu từng lô 200 bản ghi lên Supabase
         const CHUNK_SIZE = 200
         for (let i = 0; i < formattedToInsert.length; i += CHUNK_SIZE) {
           const chunk = formattedToInsert.slice(i, i + CHUNK_SIZE)
@@ -317,14 +320,15 @@ export default function MoneyManagerPage() {
           if (error) throw error
         }
 
-        alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch vào Sổ Thu Chi!`)
+        alert(`Thành công! Đã nhập ${formattedToInsert.length} giao dịch vào Sổ Thu Chi.`)
         fetchTransactions()
       } catch (err: any) {
-        alert('Lỗi xử lý file: ' + err.message)
+        alert('Lỗi xử lý file Backup: ' + err.message)
       } finally {
         if (fileInputRef.current) fileInputRef.current.value = ''
       }
     }
+    // Đọc chuẩn UTF-8 để không lỗi font tiếng Việt
     reader.readAsText(file, 'UTF-8')
   }
 
@@ -413,7 +417,7 @@ export default function MoneyManagerPage() {
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer"
             >
               <Upload className="w-4 h-4" />
-              <span>Nhập File CSV App</span>
+              <span>Nhập File Backup</span>
             </button>
 
             <button
@@ -712,16 +716,6 @@ export default function MoneyManagerPage() {
                   <Calendar className="w-5 h-5 text-emerald-500" />
                   Lịch Sử Giao Dịch ({filteredTransactions.length})
                 </h3>
-
-                {filteredTransactions.length > 0 && (
-                  <button
-                    onClick={handleDeleteAll}
-                    className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-semibold cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Xóa tất cả</span>
-                  </button>
-                )}
               </div>
 
               <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
