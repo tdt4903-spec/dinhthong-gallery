@@ -11,7 +11,7 @@ import {
   GlassWater, Plus, ChevronLeft, ChevronRight, Download, 
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
-  ChevronDown, ChevronUp, PieChart, Layers, Filter
+  ChevronDown, ChevronUp, PieChart, Layers, Filter, Loader2, LogOut, User as UserIcon
 } from 'lucide-react'
 
 // Ánh xạ categoryId từ file backup
@@ -82,6 +82,9 @@ interface Transaction {
 
 export default function MoneyManagerPage() {
   const router = useRouter()
+  const [user, setUser] = useState<any>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+
   const [type, setType] = useState<'expense' | 'income'>('expense')
   const [currentDateStr, setCurrentDateStr] = useState<string>('2026-08-28')
   const [note, setNote] = useState('')
@@ -118,6 +121,41 @@ export default function MoneyManagerPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
+  // Kiểm tra xác thực đăng nhập
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const { data } = await supabase.auth.getSession()
+        if (!data.session) {
+          router.replace('/')
+          return
+        }
+
+        const loggedInEmail = data.session.user.email
+        const { data: whitelist, error } = await supabase
+          .from('allowed_emails')
+          .select('email')
+          .eq('email', loggedInEmail)
+          .single()
+
+        if (error || !whitelist) {
+          alert('Tài khoản của bạn không có quyền truy cập vào mục Thu Chi!')
+          await supabase.auth.signOut()
+          router.replace('/')
+          return
+        }
+
+        setUser(data.session.user)
+        setAuthLoading(false)
+        fetchTransactions()
+      } catch {
+        router.replace('/')
+      }
+    }
+
+    checkAuth()
+  }, [router, supabase])
+
   const fetchTransactions = async () => {
     const { data, error } = await supabase
       .from('transactions')
@@ -129,11 +167,7 @@ export default function MoneyManagerPage() {
     }
   }
 
-  useEffect(() => {
-    fetchTransactions()
-  }, [])
-
-  // Trích xuất danh sách tất cả các năm có trong CSDL (sắp xếp giảm dần)
+  // Trích xuất danh sách tất cả các năm có trong CSDL
   const availableYears = useMemo(() => {
     const yearSet = new Set<number>()
     yearSet.add(2026)
@@ -363,6 +397,20 @@ export default function MoneyManagerPage() {
     XLSX.writeFile(workbook, `Bao_Cao_Thu_Chi_${currentDateStr}.xlsx`)
   }
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    router.replace('/')
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#0f1115] flex flex-col items-center justify-center text-white">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
+        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang kiểm tra quyền truy cập</p>
+      </div>
+    )
+  }
+
   // Tổng lũy kế toàn bộ
   const totalAllExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0)
   const totalAllIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0)
@@ -422,7 +470,7 @@ export default function MoneyManagerPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/gallery')}
               className="p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
               title="Quay lại Thư viện ảnh"
             >
@@ -510,6 +558,29 @@ export default function MoneyManagerPage() {
               accept=".csv, .txt, .xlsx" 
               className="hidden" 
             />
+
+            {/* Avatar & Đăng xuất */}
+            <div className="flex items-center gap-2 pl-2 border-l border-slate-200 ml-1">
+              {user?.user_metadata?.avatar_url ? (
+                <img 
+                  src={user.user_metadata.avatar_url} 
+                  alt="Avatar" 
+                  className="w-7 h-7 rounded-full object-cover border border-emerald-500/50"
+                  title={user.email}
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center text-xs font-bold">
+                  <UserIcon className="w-3.5 h-3.5" />
+                </div>
+              )}
+              <button
+                onClick={handleSignOut}
+                className="p-1 text-slate-400 hover:text-red-500 transition cursor-pointer"
+                title="Đăng xuất"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -698,7 +769,7 @@ export default function MoneyManagerPage() {
           {/* CỘT PHẢI: BIỂU ĐỒ & LỊCH SỬ GIAO DỊCH */}
           <div className="lg:col-span-7 space-y-6">
             
-            {/* BOX BIỂU ĐỒ: 2 TAB THỐNG KÊ & PHÂN LOẠI + CHỌN TỪNG NĂM, TỪNG THÁNG */}
+            {/* BOX BIỂU ĐỒ */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 mb-4">
                 
@@ -724,7 +795,7 @@ export default function MoneyManagerPage() {
                   </button>
                 </div>
 
-                {/* Chế độ lọc thời gian: Tháng / Năm / Toàn bộ */}
+                {/* Chế độ lọc thời gian */}
                 <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
                   <button
                     onClick={() => setChartPeriodMode('month')}
@@ -753,7 +824,7 @@ export default function MoneyManagerPage() {
                 </div>
               </div>
 
-              {/* BỘ CHỌN TỪNG THÁNG & TỪNG NĂM CHO BIỂU ĐỒ */}
+              {/* BỘ CHỌN TỪNG THÁNG & TỪNG NĂM */}
               {chartPeriodMode !== 'all' && (
                 <div className="flex items-center gap-2 mb-4 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/80 text-xs">
                   <span className="font-bold text-slate-600 flex items-center gap-1">
@@ -761,7 +832,6 @@ export default function MoneyManagerPage() {
                     Kỳ xem:
                   </span>
 
-                  {/* Dropdown chọn Tháng */}
                   {chartPeriodMode === 'month' && (
                     <select
                       value={chartSelectedMonth}
@@ -774,7 +844,6 @@ export default function MoneyManagerPage() {
                     </select>
                   )}
 
-                  {/* Dropdown chọn Năm */}
                   <select
                     value={chartSelectedYear}
                     onChange={(e) => setChartSelectedYear(Number(e.target.value))}
@@ -787,7 +856,7 @@ export default function MoneyManagerPage() {
                 </div>
               )}
 
-              {/* NỘI DUNG 1: THỐNG KÊ THU / CHI */}
+              {/* THỐNG KÊ THU / CHI */}
               {chartSubTab === 'stats' ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -826,7 +895,7 @@ export default function MoneyManagerPage() {
                   </div>
                 </div>
               ) : (
-                /* NỘI DUNG 2: PHÂN LOẠI TỶ TRỌNG DANH MỤC */
+                /* PHÂN LOẠI TỶ TRỌNG DANH MỤC */
                 <div className="space-y-3.5 max-h-72 overflow-y-auto pr-1">
                   {catEntries.length === 0 ? (
                     <p className="text-center py-8 text-xs text-slate-400">Chưa có giao dịch danh mục trong khoảng thời gian này.</p>
@@ -857,7 +926,7 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
-            {/* BOX LỊCH SỬ GIAO DỊCH (BỘ LỌC TỪNG NĂM & TỪNG THÁNG) */}
+            {/* BOX LỊCH SỬ GIAO DỊCH */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 mb-4">
                 <div className="flex items-center gap-2">
@@ -894,7 +963,6 @@ export default function MoneyManagerPage() {
                   Lọc xem:
                 </span>
 
-                {/* Dropdown Lọc Năm */}
                 <select
                   value={historyFilterYear}
                   onChange={(e) => setHistoryFilterYear(e.target.value)}
@@ -906,7 +974,6 @@ export default function MoneyManagerPage() {
                   ))}
                 </select>
 
-                {/* Dropdown Lọc Tháng */}
                 <select
                   value={historyFilterMonth}
                   onChange={(e) => setHistoryFilterMonth(e.target.value)}
@@ -930,7 +997,6 @@ export default function MoneyManagerPage() {
 
                     return (
                       <div key={groupTitle} className="space-y-2">
-                        {/* Tiêu đề nhóm Tháng / Năm */}
                         <div className="flex items-center justify-between bg-slate-100/80 px-3.5 py-2 rounded-xl text-xs">
                           <span className="font-bold text-slate-800 flex items-center gap-1.5">
                             <Layers className="w-3.5 h-3.5 text-indigo-500" />
@@ -942,7 +1008,6 @@ export default function MoneyManagerPage() {
                           </div>
                         </div>
 
-                        {/* Danh sách các giao dịch */}
                         <div className="space-y-1.5 pl-1">
                           {items.map((t) => (
                             <div 
