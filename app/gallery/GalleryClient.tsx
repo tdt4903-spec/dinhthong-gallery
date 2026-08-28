@@ -455,10 +455,18 @@ export default function GalleryClient() {
     }
   }
 
+  const handleOpenAlbum = (album: Album) => {
+    setSelectedAlbum(album)
+    setFolderHistory([])
+    document.title = `${album.title} - Dinh Thong Gallery`
+    fetchAlbumImages(album.driveUrl)
+  }
+
   const handleOpenSubFolder = (folderItem: MediaItem) => {
     const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
     const displayName = customNames[folderItem.id] || folderItem.name
     setFolderHistory(prev => [...prev, { id: folderItem.id, title: displayName, driveUrl: folderDriveUrl }])
+    document.title = `${displayName} - Dinh Thong Gallery`
     fetchAlbumImages(folderDriveUrl)
   }
 
@@ -467,12 +475,31 @@ export default function GalleryClient() {
     if (index === -1) {
       if (selectedAlbum) {
         setFolderHistory([])
+        document.title = `${selectedAlbum.title} - Dinh Thong Gallery`
         fetchAlbumImages(selectedAlbum.driveUrl)
       }
     } else {
       const target = folderHistory[index]
       setFolderHistory(prev => prev.slice(0, index + 1))
+      document.title = `${target.title} - Dinh Thong Gallery`
       fetchAlbumImages(target.driveUrl)
+    }
+  }
+
+  const handleBackToParentFolder = () => {
+    if (isSharedGuest) return
+    if (folderHistory.length > 1) {
+      const prev = folderHistory[folderHistory.length - 2]
+      setFolderHistory(p => p.slice(0, -1))
+      document.title = `${prev.title} - Dinh Thong Gallery`
+      fetchAlbumImages(prev.driveUrl)
+    } else if (folderHistory.length === 1 && selectedAlbum) {
+      setFolderHistory([])
+      document.title = `${selectedAlbum.title} - Dinh Thong Gallery`
+      fetchAlbumImages(selectedAlbum.driveUrl)
+    } else {
+      setSelectedAlbum(null)
+      document.title = `Dinh Thong Gallery`
     }
   }
 
@@ -1004,8 +1031,8 @@ export default function GalleryClient() {
             }
             setSelectedAlbum(sharedAlbumObj)
             setFolderHistory([])
-            await fetchAlbumImages(sharedAlbumObj.driveUrl)
             document.title = `${matchedAlbum.title} - Dinh Thong Gallery`
+            await fetchAlbumImages(sharedAlbumObj.driveUrl)
             setLoading(false)
             return
           }
@@ -1103,32 +1130,6 @@ export default function GalleryClient() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [previewMedia, handlePrevImage, handleNextImage])
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.replace('/')
-  }
-
-  const handleOpenAlbum = (album: Album) => {
-    setSelectedAlbum(album)
-    setFolderHistory([])
-    document.title = `${album.title} - Dinh Thong Gallery`
-    fetchAlbumImages(album.driveUrl)
-  }
-
-  const handleBackToParentFolder = () => {
-    if (isSharedGuest) return
-    if (folderHistory.length > 1) {
-      const prev = folderHistory[folderHistory.length - 2]
-      setFolderHistory(p => p.slice(0, -1))
-      fetchAlbumImages(prev.driveUrl)
-    } else if (folderHistory.length === 1 && selectedAlbum) {
-      setFolderHistory([])
-      fetchAlbumImages(selectedAlbum.driveUrl)
-    } else {
-      setSelectedAlbum(null)
-    }
-  }
 
   const handleAddAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -1259,11 +1260,10 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-      {/* HEADER TỐI ƯU MOBILE: HỖ TRỢ CUỘN NGANG ĐỂ KHÔNG BỊ CHE KHUẤT NÚT ĐĂNG XUẤT */}
+      {/* HEADER TỐI ƯU MOBILE: CUỘN NGANG THOẢI MÁI, KHÔNG BỊ CHE NÚT ĐĂNG XUẤT */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/95 border-white/10' : 'bg-white/95 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
           
-          {/* Logo & Nút Quay Lại */}
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {selectedAlbum && !isSharedGuest && (
               <button 
@@ -1283,8 +1283,7 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          {/* KHU VỰC CÁC NÚT ĐIỀU HƯỚNG CÓ THỂ CUỘN NGANG TRÊN ĐIỆN THOẠI */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap">
             {selectedAlbum ? (
               <>
                 <div className="relative w-28 sm:w-52 flex-shrink-0">
@@ -1340,7 +1339,6 @@ export default function GalleryClient() {
                     />
                   </div>
 
-                  {/* Nút Sổ Thu Chi */}
                   <button
                     type="button"
                     onClick={() => router.push('/money')}
@@ -1355,7 +1353,7 @@ export default function GalleryClient() {
                     <span>Thu Chi</span>
                   </button>
 
-                  {/* CHỈ GIỮ LẠI KEY PANEL Ở HEADER (3 MỤC KHÁC ĐÃ Ở HÀNG ALBUM BÊN DƯỚI) */}
+                  {/* CHỈ GIỮ LẠI KEY PANEL Ở HEADER */}
                   <button
                     type="button"
                     onClick={() => setIsKeyGenOpen(true)}
@@ -1370,19 +1368,17 @@ export default function GalleryClient() {
                     <span>Key Panel</span>
                   </button>
 
-                  {/* Nút Thêm Album */}
                   <button
                     onClick={() => setIsModalOpen(true)}
                     className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer flex-shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Thêm album</span>
+                    <span>Thêm</span>
                   </button>
                 </>
               )
             )}
 
-            {/* Dark Mode & Tài Khoản / Đăng xuất */}
             <div className="flex items-center gap-1.5 pl-1.5 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
               <button
                 onClick={() => setIsDarkMode(!isDarkMode)}
@@ -1449,7 +1445,7 @@ export default function GalleryClient() {
 
             <div className={`w-full h-[1px] mb-6 sm:mb-8 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
-            {/* HÀNG TIÊU ĐỀ ALBUM KÈM CÁC NÚT QUẢN TRỊ DRIVE BÊN DƯỚI */}
+            {/* HÀNG TIÊU ĐỀ ALBUM KÈM 3 NÚT QUẢN TRỊ DRIVE */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
