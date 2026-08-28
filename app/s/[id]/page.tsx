@@ -22,17 +22,19 @@ const toNumericCode = (str: string) => {
 const extractDriveId = (url: string) => {
   if (!url) return ''
   const clean = url.trim()
-  const matchFolder = clean.match(/folders\/([a-zA-Z0-9_-]+)/)
-  if (matchFolder && matchFolder[1]) return matchFolder[1]
-  const matchFile = clean.match(/\/d\/([a-zA-Z0-9_-]+)/)
-  if (matchFile && matchFile[1]) return matchFile[1]
+  const matchD = clean.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  if (matchD && matchD[1]) return matchD[1]
+  const matchIdParam = clean.match(/[?&]id=([a-zA-Z0-9_-]+)/)
+  if (matchIdParam && matchIdParam[1]) return matchIdParam[1]
+  const matchFolders = clean.match(/folders\/([a-zA-Z0-9_-]+)/)
+  if (matchFolders && matchFolders[1]) return matchFolders[1]
   return clean.replace(/[^a-zA-Z0-9_-]/g, '')
 }
 
 export async function generateMetadata({ params }: ShortPageProps) {
   const { id: inputCode } = await params
   let targetTitle = ''
-  let directCoverUrl = ''
+  let coverImageDriveId = ''
   const baseUrl = 'https://dinhthong-gallery.vercel.app'
 
   const supabase = createClient(
@@ -40,28 +42,30 @@ export async function generateMetadata({ params }: ShortPageProps) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  // 1. Quét bảng custom_covers (Dành riêng cho Thư mục con đã chọn ảnh bìa)
+  // 1. Quét bảng custom_covers (ảnh bìa riêng của thư mục con)
   const { data: allCovers } = await supabase.from('custom_covers').select('id, cover_url')
   if (allCovers) {
     const matched = allCovers.find(c => c.id === inputCode || toNumericCode(c.id) === inputCode)
     if (matched?.cover_url) {
-      directCoverUrl = matched.cover_url
+      coverImageDriveId = extractDriveId(matched.cover_url)
     }
   }
 
-  // 2. Quét bảng albums (Dành cho Album trang chủ đã chọn ảnh bìa)
-  const { data: allAlbums } = await supabase.from('albums').select('id, title, cover_url')
-  if (allAlbums) {
-    const matched = allAlbums.find(a => a.id === inputCode || toNumericCode(a.id) === inputCode)
-    if (matched) {
-      targetTitle = matched.title
-      if (!directCoverUrl && matched.cover_url) {
-        directCoverUrl = matched.cover_url
+  // 2. Quét bảng albums (album trang chủ)
+  if (!coverImageDriveId || !targetTitle) {
+    const { data: allAlbums } = await supabase.from('albums').select('id, title, cover_url')
+    if (allAlbums) {
+      const matched = allAlbums.find(a => a.id === inputCode || toNumericCode(a.id) === inputCode)
+      if (matched) {
+        if (!targetTitle) targetTitle = matched.title
+        if (!coverImageDriveId && matched.cover_url) {
+          coverImageDriveId = extractDriveId(matched.cover_url)
+        }
       }
     }
   }
 
-  // 3. Quét bảng custom_item_names (Lấy tên tiếng Việt Admin đổi)
+  // 3. Quét bảng custom_item_names (tên Admin đặt)
   if (!targetTitle) {
     const { data: allNames } = await supabase.from('custom_item_names').select('id, custom_name')
     if (allNames) {
@@ -72,7 +76,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
     }
   }
 
-  // 4. Quét bảng known_drive_folders (Nếu chưa có tên tùy chỉnh)
+  // 4. Quét bảng known_drive_folders
   if (!targetTitle) {
     const { data: allKnown } = await supabase.from('known_drive_folders').select('id, name')
     if (allKnown) {
@@ -87,11 +91,9 @@ export async function generateMetadata({ params }: ShortPageProps) {
     ? `${targetTitle} - Dinh Thong Gallery` 
     : 'Dinh Thong Gallery'
 
-  // Tạo URL ảnh tĩnh thông qua API Proxy (Chống chặn bot)
-  let ogImageUrl = `${baseUrl}/banner.jpg`
-  if (directCoverUrl) {
-    ogImageUrl = `${baseUrl}/api/og?url=${encodeURIComponent(directCoverUrl)}`
-  }
+  const ogImageUrl = coverImageDriveId 
+    ? `${baseUrl}/api/og?id=${coverImageDriveId}` 
+    : `${baseUrl}/banner.jpg`
 
   return {
     title: finalTitle,
@@ -106,6 +108,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
       images: [
         {
           url: ogImageUrl,
+          secureUrl: ogImageUrl,
           width: 1200,
           height: 630,
           alt: finalTitle,
