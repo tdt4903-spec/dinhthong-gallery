@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import * as XLSX from 'xlsx'
@@ -11,7 +11,7 @@ import {
   GlassWater, Plus, ChevronLeft, ChevronRight, Download, 
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
-  ChevronDown, ChevronUp, PieChart, Layers
+  ChevronDown, ChevronUp, PieChart, Layers, Filter
 } from 'lucide-react'
 
 // Ánh xạ categoryId từ file backup
@@ -95,14 +95,18 @@ export default function MoneyManagerPage() {
   const [newCatName, setNewCatName] = useState('')
   const [isAddingCat, setIsAddingCat] = useState(false)
 
-  // 1. Nút tổng hợp thu nhập gom lại trong 1 dropdown
+  // Nút gom tổng thu nhập / chi tiêu
   const [showSummaryDropdown, setShowSummaryDropdown] = useState(false)
 
-  // 2. Chỗ biểu đồ có 2 mục: Thống kê & Phân loại
+  // Biểu đồ: 2 Tab Thống kê & Phân loại + Bộ lọc theo Tháng/Năm được chọn
   const [chartSubTab, setChartSubTab] = useState<'stats' | 'category'>('stats')
-  const [chartPeriod, setChartPeriod] = useState<'month' | 'year' | 'all'>('month')
+  const [chartPeriodMode, setChartPeriodMode] = useState<'month' | 'year' | 'all'>('month')
+  const [chartSelectedYear, setChartSelectedYear] = useState<number>(2026)
+  const [chartSelectedMonth, setChartSelectedMonth] = useState<number>(8)
 
-  // 3. Phân loại Lịch sử theo Tháng / Năm
+  // Lịch sử: Lọc theo Từng Tháng / Từng Năm
+  const [historyFilterYear, setHistoryFilterYear] = useState<string>('all')
+  const [historyFilterMonth, setHistoryFilterMonth] = useState<string>('all')
   const [historyGroupType, setHistoryGroupType] = useState<'month' | 'year'>('month')
 
   const [isDeletingAll, setIsDeletingAll] = useState(false)
@@ -128,6 +132,19 @@ export default function MoneyManagerPage() {
   useEffect(() => {
     fetchTransactions()
   }, [])
+
+  // Trích xuất danh sách tất cả các năm có trong CSDL (sắp xếp giảm dần)
+  const availableYears = useMemo(() => {
+    const yearSet = new Set<number>()
+    yearSet.add(2026)
+    transactions.forEach(t => {
+      if (t.date) {
+        const y = Number(t.date.split('-')[0])
+        if (y) yearSet.add(y)
+      }
+    })
+    return Array.from(yearSet).sort((a, b) => b - a)
+  }, [transactions])
 
   const formatDateDisplay = (dateStr: string) => {
     try {
@@ -346,25 +363,28 @@ export default function MoneyManagerPage() {
     XLSX.writeFile(workbook, `Bao_Cao_Thu_Chi_${currentDateStr}.xlsx`)
   }
 
-  // Tính tổng
+  // Tổng lũy kế toàn bộ
   const totalAllExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0)
   const totalAllIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0)
   const totalBalance = totalAllIncome - totalAllExpense
 
-  // Lọc cho Biểu đồ
+  // Lọc dữ liệu Biểu đồ theo Tháng / Năm được chọn
   const chartFiltered = transactions.filter(t => {
     if (!t.date) return false
     const [y, m] = t.date.split('-').map(Number)
-    const [curY, curM] = currentDateStr.split('-').map(Number)
-    if (chartPeriod === 'month') return y === curY && m === curM
-    if (chartPeriod === 'year') return y === curY
+    if (chartPeriodMode === 'month') {
+      return y === chartSelectedYear && m === chartSelectedMonth
+    }
+    if (chartPeriodMode === 'year') {
+      return y === chartSelectedYear
+    }
     return true
   })
 
   const chartExpense = chartFiltered.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0)
   const chartIncome = chartFiltered.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0)
 
-  // Gom phân loại danh mục
+  // Gom phân loại danh mục trong kỳ biểu đồ
   const catStats = chartFiltered
     .filter(t => t.type === type)
     .reduce((acc: Record<string, number>, curr) => {
@@ -374,8 +394,17 @@ export default function MoneyManagerPage() {
   const catEntries = Object.entries(catStats).sort((a, b) => b[1] - a[1])
   const currentTotalCatType = type === 'expense' ? chartExpense : chartIncome
 
+  // Lọc danh sách Lịch sử theo Năm và Tháng được chọn
+  const historyFiltered = transactions.filter(t => {
+    if (!t.date) return false
+    const [y, m] = t.date.split('-').map(Number)
+    if (historyFilterYear !== 'all' && y !== Number(historyFilterYear)) return false
+    if (historyFilterMonth !== 'all' && m !== Number(historyFilterMonth)) return false
+    return true
+  })
+
   // Gom lịch sử theo Tháng hoặc Năm
-  const groupedHistory = transactions.reduce((acc: Record<string, Transaction[]>, curr) => {
+  const groupedHistory = historyFiltered.reduce((acc: Record<string, Transaction[]>, curr) => {
     const [y, m] = (curr.date || '2026-08-28').split('-')
     const key = historyGroupType === 'month' ? `Tháng ${m}/${y}` : `Năm ${y}`
     if (!acc[key]) acc[key] = []
@@ -414,7 +443,7 @@ export default function MoneyManagerPage() {
                 className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 transition cursor-pointer border border-slate-200 shadow-sm"
               >
                 <TrendingUp className="w-4 h-4 text-emerald-600" />
-                <span>Tổng quan số dư: <strong className="text-emerald-600">{formatCurrency(totalBalance)}</strong></span>
+                <span>Số dư: <strong className="text-emerald-600">{formatCurrency(totalBalance)}</strong></span>
                 {showSummaryDropdown ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
               </button>
 
@@ -533,7 +562,6 @@ export default function MoneyManagerPage() {
                       <ChevronLeft className="w-4 h-4" />
                     </button>
                     
-                    {/* Bấm vào để mở bộ chọn lịch Native */}
                     <div 
                       onClick={() => dateInputRef.current?.showPicker ? dateInputRef.current.showPicker() : dateInputRef.current?.focus()}
                       className="flex items-center gap-1.5 cursor-pointer hover:text-orange-600 transition"
@@ -667,12 +695,12 @@ export default function MoneyManagerPage() {
             </div>
           </div>
 
-          {/* CỘT PHẢI: BIỂU ĐỒ (2 MỤC: THỐNG KÊ & PHÂN LOẠI) + LỊCH SỬ (PHÂN LOẠI THEO THÁNG/NĂM) */}
+          {/* CỘT PHẢI: BIỂU ĐỒ & LỊCH SỬ GIAO DỊCH */}
           <div className="lg:col-span-7 space-y-6">
             
-            {/* BOX BIỂU ĐỒ: 2 TAB THỐNG KÊ & PHÂN LOẠI */}
+            {/* BOX BIỂU ĐỒ: 2 TAB THỐNG KÊ & PHÂN LOẠI + CHỌN TỪNG NĂM, TỪNG THÁNG */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 mb-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 mb-4">
                 
                 {/* 2 Tab: Thống kê / Phân loại */}
                 <div className="flex items-center bg-slate-100 p-1 rounded-xl">
@@ -696,36 +724,70 @@ export default function MoneyManagerPage() {
                   </button>
                 </div>
 
-                {/* Bộ lọc Tháng / Năm / Toàn bộ */}
+                {/* Chế độ lọc thời gian: Tháng / Năm / Toàn bộ */}
                 <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold">
                   <button
-                    onClick={() => setChartPeriod('month')}
+                    onClick={() => setChartPeriodMode('month')}
                     className={`px-3 py-1 rounded-lg transition cursor-pointer ${
-                      chartPeriod === 'month' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
+                      chartPeriodMode === 'month' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Tháng này
+                    Theo Tháng
                   </button>
                   <button
-                    onClick={() => setChartPeriod('year')}
+                    onClick={() => setChartPeriodMode('year')}
                     className={`px-3 py-1 rounded-lg transition cursor-pointer ${
-                      chartPeriod === 'year' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
+                      chartPeriodMode === 'year' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Năm này
+                    Theo Năm
                   </button>
                   <button
-                    onClick={() => setChartPeriod('all')}
+                    onClick={() => setChartPeriodMode('all')}
                     className={`px-3 py-1 rounded-lg transition cursor-pointer ${
-                      chartPeriod === 'all' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
+                      chartPeriodMode === 'all' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Tất cả
+                    Toàn bộ
                   </button>
                 </div>
               </div>
 
-              {/* NỘI DUNG 1: THỐNG KÊ THU / CHI TỔNG QUAN */}
+              {/* BỘ CHỌN TỪNG THÁNG & TỪNG NĂM CHO BIỂU ĐỒ */}
+              {chartPeriodMode !== 'all' && (
+                <div className="flex items-center gap-2 mb-4 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/80 text-xs">
+                  <span className="font-bold text-slate-600 flex items-center gap-1">
+                    <Filter className="w-3.5 h-3.5 text-indigo-500" />
+                    Kỳ xem:
+                  </span>
+
+                  {/* Dropdown chọn Tháng */}
+                  {chartPeriodMode === 'month' && (
+                    <select
+                      value={chartSelectedMonth}
+                      onChange={(e) => setChartSelectedMonth(Number(e.target.value))}
+                      className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl font-bold text-slate-800 outline-none cursor-pointer"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                        <option key={m} value={m}>Tháng {m}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {/* Dropdown chọn Năm */}
+                  <select
+                    value={chartSelectedYear}
+                    onChange={(e) => setChartSelectedYear(Number(e.target.value))}
+                    className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl font-bold text-slate-800 outline-none cursor-pointer"
+                  >
+                    {availableYears.map((y) => (
+                      <option key={y} value={y}>Năm {y}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* NỘI DUNG 1: THỐNG KÊ THU / CHI */}
               {chartSubTab === 'stats' ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -767,7 +829,7 @@ export default function MoneyManagerPage() {
                 /* NỘI DUNG 2: PHÂN LOẠI TỶ TRỌNG DANH MỤC */
                 <div className="space-y-3.5 max-h-72 overflow-y-auto pr-1">
                   {catEntries.length === 0 ? (
-                    <p className="text-center py-8 text-xs text-slate-400">Chưa có giao dịch danh mục trong kỳ này.</p>
+                    <p className="text-center py-8 text-xs text-slate-400">Chưa có giao dịch danh mục trong khoảng thời gian này.</p>
                   ) : (
                     catEntries.map(([catName, amount]) => {
                       const percentage = currentTotalCatType > 0 ? Math.round((amount / currentTotalCatType) * 100) : 0
@@ -795,13 +857,13 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
-            {/* BOX LỊCH SỬ GIAO DỊCH (GOM NHÓM THEO THÁNG / NĂM) */}
+            {/* BOX LỊCH SỬ GIAO DỊCH (BỘ LỌC TỪNG NĂM & TỪNG THÁNG) */}
             <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 mb-4">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-5 h-5 text-emerald-500" />
                   <h3 className="font-bold text-base text-slate-900">
-                    Lịch Sử Giao Dịch ({transactions.length})
+                    Lịch Sử Giao Dịch ({historyFiltered.length})
                   </h3>
                 </div>
 
@@ -825,9 +887,42 @@ export default function MoneyManagerPage() {
                 </div>
               </div>
 
+              {/* BỘ LỌC TỪNG NĂM & TỪNG THÁNG TRONG LỊCH SỬ */}
+              <div className="flex flex-wrap items-center gap-2 mb-4 bg-slate-50 p-2.5 rounded-2xl border border-slate-200/80 text-xs">
+                <span className="font-bold text-slate-600 flex items-center gap-1">
+                  <Filter className="w-3.5 h-3.5 text-emerald-600" />
+                  Lọc xem:
+                </span>
+
+                {/* Dropdown Lọc Năm */}
+                <select
+                  value={historyFilterYear}
+                  onChange={(e) => setHistoryFilterYear(e.target.value)}
+                  className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl font-bold text-slate-800 outline-none cursor-pointer"
+                >
+                  <option value="all">Tất cả các năm</option>
+                  {availableYears.map((y) => (
+                    <option key={y} value={String(y)}>Năm {y}</option>
+                  ))}
+                </select>
+
+                {/* Dropdown Lọc Tháng */}
+                <select
+                  value={historyFilterMonth}
+                  onChange={(e) => setHistoryFilterMonth(e.target.value)}
+                  className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl font-bold text-slate-800 outline-none cursor-pointer"
+                >
+                  <option value="all">Tất cả các tháng</option>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                    <option key={m} value={String(m)}>Tháng {m}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* DANH SÁCH GIAO DỊCH PHÂN THEO NHÓM */}
               <div className="space-y-6 max-h-96 overflow-y-auto pr-1">
                 {Object.keys(groupedHistory).length === 0 ? (
-                  <p className="text-center py-10 text-xs text-slate-400">Chưa có giao dịch nào.</p>
+                  <p className="text-center py-10 text-xs text-slate-400">Không tìm thấy giao dịch nào trong khoảng thời gian đã lọc.</p>
                 ) : (
                   Object.entries(groupedHistory).map(([groupTitle, items]) => {
                     const groupExpense = items.filter(i => i.type === 'expense').reduce((s, i) => s + Number(i.amount), 0)
@@ -835,7 +930,7 @@ export default function MoneyManagerPage() {
 
                     return (
                       <div key={groupTitle} className="space-y-2">
-                        {/* Tiêu đề nhóm Tháng/Năm */}
+                        {/* Tiêu đề nhóm Tháng / Năm */}
                         <div className="flex items-center justify-between bg-slate-100/80 px-3.5 py-2 rounded-xl text-xs">
                           <span className="font-bold text-slate-800 flex items-center gap-1.5">
                             <Layers className="w-3.5 h-3.5 text-indigo-500" />
@@ -847,7 +942,7 @@ export default function MoneyManagerPage() {
                           </div>
                         </div>
 
-                        {/* Danh sách các dòng trong nhóm */}
+                        {/* Danh sách các giao dịch */}
                         <div className="space-y-1.5 pl-1">
                           {items.map((t) => (
                             <div 
