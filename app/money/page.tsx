@@ -1,17 +1,14 @@
 'use client'
 
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import * as XLSX from 'xlsx'
 import { 
-  Utensils, Droplet, Shirt, Heart, Wine, Pill, 
-  GraduationCap, Bus, Smartphone, Home, CreditCard, 
-  Briefcase, Gift, Plane, Star, Fish, Car, Clapperboard, 
-  GlassWater, Plus, ChevronLeft, ChevronRight, Download, 
+  Plus, ChevronLeft, ChevronRight, Download, 
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
-  ChevronDown, ChevronUp, PieChart, Layers, Filter, Loader2, LogOut, User as UserIcon,
+  ChevronDown, ChevronUp, PieChart, Filter, Loader2, LogOut, User as UserIcon,
   Sparkles, RotateCcw, PenSquare, History, Camera, Eye, EyeOff, Calculator, Equal, Search
 } from 'lucide-react'
 
@@ -218,70 +215,17 @@ export default function MoneyManagerPage() {
   const billInputRef = useRef<HTMLInputElement>(null)
   const dateInputRef = useRef<HTMLInputElement>(null)
 
-  // Khởi tạo Supabase client an toàn
-  const supabase = useMemo(() => {
+  const supabaseRef = useRef<any>(null)
+  if (!supabaseRef.current) {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-    if (!url || !key) return null
-    return createBrowserClient(url, key)
-  }, [])
-
-  useEffect(() => {
-    setMounted(true)
-    try {
-      if (typeof window !== 'undefined') {
-        const saved = localStorage.getItem('dinhthong_hide_balance')
-        if (saved === 'true') setHideBalance(true)
-      }
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    if (!mounted || !supabase) return
-
-    const checkAuth = async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession()
-        if (error || !data?.session) {
-          router.replace('/')
-          return
-        }
-
-        const loggedInEmail = data.session.user.email
-        const { data: whitelist } = await supabase
-          .from('allowed_emails')
-          .select('email')
-          .eq('email', loggedInEmail)
-          .single()
-
-        if (!whitelist) {
-          alert('Tài khoản của bạn không có quyền truy cập vào mục Thu Chi!')
-          await supabase.auth.signOut()
-          router.replace('/')
-          return
-        }
-
-        setUser(data.session.user)
-        setAuthLoading(false)
-        fetchTransactions()
-      } catch {
-        router.replace('/')
-      }
+    if (url && key) {
+      supabaseRef.current = createBrowserClient(url, key)
     }
-
-    checkAuth()
-  }, [mounted, supabase, router])
-
-  const toggleHideBalance = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    const nextState = !hideBalance
-    setHideBalance(nextState)
-    try {
-      localStorage.setItem('dinhthong_hide_balance', String(nextState))
-    } catch {}
   }
+  const supabase = supabaseRef.current
 
-  const fetchTransactions = async () => {
+  const fetchTransactions = useCallback(async () => {
     if (!supabase) return
     try {
       let allData: Transaction[] = []
@@ -306,6 +250,65 @@ export default function MoneyManagerPage() {
     } catch (e) {
       console.error('Lỗi nạp dữ liệu:', e)
     }
+  }, [supabase])
+
+  useEffect(() => {
+    setMounted(true)
+    try {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('dinhthong_hide_balance')
+        if (saved === 'true') setHideBalance(true)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    if (!mounted || !supabase) return
+
+    let isSubscribed = true
+    const checkAuth = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        if (error || !data?.session) {
+          router.replace('/')
+          return
+        }
+
+        const loggedInEmail = data.session.user.email
+        const { data: whitelist } = await supabase
+          .from('allowed_emails')
+          .select('email')
+          .eq('email', loggedInEmail)
+          .single()
+
+        if (!whitelist) {
+          alert('Tài khoản của bạn không có quyền truy cập vào mục Thu Chi!')
+          await supabase.auth.signOut()
+          router.replace('/')
+          return
+        }
+
+        if (isSubscribed) {
+          setUser(data.session.user)
+          setAuthLoading(false)
+          fetchTransactions()
+        }
+      } catch {
+        router.replace('/')
+      }
+    }
+
+    checkAuth()
+    return () => { isSubscribed = false }
+  }, [mounted, supabase, router, fetchTransactions])
+
+  const toggleHideBalance = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const nextState = !hideBalance
+    setHideBalance(nextState)
+    try {
+      localStorage.setItem('dinhthong_hide_balance', String(nextState))
+    } catch {}
   }
 
   const handleScanBill = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -378,7 +381,7 @@ export default function MoneyManagerPage() {
         const dayName = daysOfWeek[dateObj.getDay()] || 'CN'
         return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y} (${dayName})`
       }
-      return dateStr
+      return String(dateStr)
     } catch {
       return String(dateStr)
     }
