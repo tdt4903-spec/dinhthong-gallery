@@ -87,7 +87,7 @@ const QUICK_AMOUNT_SUGGESTIONS = [
 function safeCalculateMath(expr: string): number {
   if (!expr) return 0
   try {
-    let clean = expr
+    let clean = String(expr)
       .toLowerCase()
       .replace(/\s+/g, '')
       .replace(/k/g, '000')
@@ -186,7 +186,6 @@ export default function MoneyManagerPage() {
   const [authLoading, setAuthLoading] = useState(true)
 
   const [mobileTab, setMobileTab] = useState<'input' | 'charts' | 'history'>('input')
-
   const [type, setType] = useState<'expense' | 'income'>('expense')
   const [currentDateStr, setCurrentDateStr] = useState<string>('2026-08-28')
   const [note, setNote] = useState('')
@@ -202,15 +201,8 @@ export default function MoneyManagerPage() {
   const [isScanningBill, setIsScanningBill] = useState(false)
   const [showSummaryDropdown, setShowSummaryDropdown] = useState(false)
   
-  // 1. Ẩn / hiện số dư trên cùng (lưu trạng thái vào localStorage)
-  const [hideBalance, setHideBalance] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('dinhthong_hide_balance') === 'true'
-    }
-    return false
-  })
-
-  // 2. Ẩn / hiện bảng thống kê
+  // Tránh lỗi Hydration Mismatch bằng cách khởi tạo mặc định false
+  const [hideBalance, setHideBalance] = useState(false)
   const [showStatsBox, setShowStatsBox] = useState(true)
 
   const [chartSubTab, setChartSubTab] = useState<'stats' | 'category'>('stats')
@@ -218,7 +210,6 @@ export default function MoneyManagerPage() {
   const [chartSelectedYear, setChartSelectedYear] = useState<number>(2026)
   const [chartSelectedMonth, setChartSelectedMonth] = useState<number>(8)
 
-  // 3. Bộ lọc & Ô Tìm kiếm trong Lịch sử giao dịch
   const [historyFilterYear, setHistoryFilterYear] = useState<string>('all')
   const [historyFilterMonth, setHistoryFilterMonth] = useState<string>('all')
   const [historySearchTerm, setHistorySearchTerm] = useState<string>('')
@@ -228,28 +219,36 @@ export default function MoneyManagerPage() {
   const billInputRef = useRef<HTMLInputElement>(null)
   const dateInputRef = useRef<HTMLInputElement>(null)
 
-  const supabase = createBrowserClient(
+  const supabase = useMemo(() => createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  ), [])
+
+  // Đọc localStorage sau khi mount ở Client để chống crash SSR
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('dinhthong_hide_balance')
+      if (saved === 'true') setHideBalance(true)
+    } catch {}
+  }, [])
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const { data } = await supabase.auth.getSession()
-        if (!data.session) {
+        const { data, error } = await supabase.auth.getSession()
+        if (error || !data.session) {
           router.replace('/')
           return
         }
 
         const loggedInEmail = data.session.user.email
-        const { data: whitelist, error } = await supabase
+        const { data: whitelist } = await supabase
           .from('allowed_emails')
           .select('email')
           .eq('email', loggedInEmail)
           .single()
 
-        if (error || !whitelist) {
+        if (!whitelist) {
           alert('Tài khoản của bạn không có quyền truy cập vào mục Thu Chi!')
           await supabase.auth.signOut()
           router.replace('/')
@@ -271,9 +270,9 @@ export default function MoneyManagerPage() {
     e.stopPropagation()
     const nextState = !hideBalance
     setHideBalance(nextState)
-    if (typeof window !== 'undefined') {
+    try {
       localStorage.setItem('dinhthong_hide_balance', String(nextState))
-    }
+    } catch {}
   }
 
   const fetchTransactions = async () => {
@@ -281,9 +280,8 @@ export default function MoneyManagerPage() {
       let allData: Transaction[] = []
       let page = 0
       const pageSize = 1000
-      const maxPages = 50
 
-      while (page < maxPages) {
+      while (page < 30) {
         const { data, error } = await supabase
           .from('transactions')
           .select('*')
@@ -299,7 +297,7 @@ export default function MoneyManagerPage() {
 
       setTransactions(allData)
     } catch (e) {
-      console.error('Lỗi fetch:', e)
+      console.error('Lỗi nạp dữ liệu:', e)
     }
   }
 
@@ -361,18 +359,18 @@ export default function MoneyManagerPage() {
 
   const formatDateDisplay = (dateStr: string) => {
     try {
-      const [y, m, d] = dateStr.split('-').map(Number)
-      const dateObj = new Date(y, m - 1, d)
+      const [y, m, d] = String(dateStr).split('-').map(Number)
+      const dateObj = new Date(y, (m || 1) - 1, d || 1)
       const daysOfWeek = ['CN', 'Th 2', 'Th 3', 'Th 4', 'Th 5', 'Th 6', 'Th 7']
-      const dayName = daysOfWeek[dateObj.getDay()]
-      return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y} (${dayName})`
+      const dayName = daysOfWeek[dateObj.getDay()] || 'CN'
+      return `${String(d || 1).padStart(2, '0')}/${String(m || 1).padStart(2, '0')}/${y} (${dayName})`
     } catch {
       return dateStr
     }
   }
 
   const formatCurrency = (val: number) => {
-    return (val || 0).toLocaleString('vi-VN') + ' đ'
+    return Number(val || 0).toLocaleString('vi-VN') + ' đ'
   }
 
   const formatDisplayCurrencyOrHidden = (val: number) => {
@@ -652,11 +650,10 @@ export default function MoneyManagerPage() {
     )
   }
 
-  const totalAllExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0)
-  const totalAllIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0)
+  const totalAllExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount || 0), 0)
+  const totalAllIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount || 0), 0)
   const totalBalance = totalAllIncome - totalAllExpense
 
-  // Lọc biểu đồ theo năm/tháng
   const chartFiltered = transactions.filter(t => {
     if (!t.date) return false
     const [y, m] = t.date.split('-').map(Number)
@@ -669,27 +666,25 @@ export default function MoneyManagerPage() {
     return true
   })
 
-  const chartExpense = chartFiltered.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0)
-  const chartIncome = chartFiltered.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0)
+  const chartExpense = chartFiltered.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0)
+  const chartIncome = chartFiltered.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0)
   const chartRemaining = chartIncome - chartExpense
 
   const catStats = chartFiltered
     .filter(t => t.type === type)
     .reduce((acc: Record<string, number>, curr) => {
-      acc[curr.category] = (acc[curr.category] || 0) + Number(curr.amount)
+      acc[curr.category] = (acc[curr.category] || 0) + Number(curr.amount || 0)
       return acc
     }, {})
   const catEntries = Object.entries(catStats).sort((a, b) => b[1] - a[1])
   const currentTotalCatType = type === 'expense' ? chartExpense : chartIncome
 
-  // Lọc danh sách lịch sử theo Năm, Tháng và Ô TÌM KIẾM
   const historyFiltered = transactions.filter(t => {
     if (!t.date) return false
     const [y, m] = t.date.split('-').map(Number)
     if (historyFilterYear !== 'all' && y !== Number(historyFilterYear)) return false
     if (historyFilterMonth !== 'all' && m !== Number(historyFilterMonth)) return false
     
-    // Tìm kiếm theo từ khóa (ghi chú, danh mục, số tiền)
     if (historySearchTerm.trim()) {
       const term = historySearchTerm.toLowerCase().trim()
       const matchNote = (t.note || '').toLowerCase().includes(term)
@@ -701,7 +696,6 @@ export default function MoneyManagerPage() {
     return true
   })
 
-  // Gom lịch sử theo từng ngày
   const groupedByDayHistory = useMemo(() => {
     const map: Record<string, { date: string; items: Transaction[]; totalExpense: number; totalIncome: number }> = {}
     
@@ -716,8 +710,8 @@ export default function MoneyManagerPage() {
         }
       }
       map[d].items.push(t)
-      if (t.type === 'expense') map[d].totalExpense += Number(t.amount)
-      else map[d].totalIncome += Number(t.amount)
+      if (t.type === 'expense') map[d].totalExpense += Number(t.amount || 0)
+      else map[d].totalIncome += Number(t.amount || 0)
     })
 
     return Object.values(map).sort((a, b) => b.date.localeCompare(a.date))
@@ -766,7 +760,7 @@ export default function MoneyManagerPage() {
               className="hidden" 
             />
 
-            {/* Nút tóm tắt số dư (CÓ NÚT CON MẮT ẨN / HIỆN SỐ DƯ) */}
+            {/* Nút tóm tắt số dư (CÓ ICON ẨN / HIỆN) */}
             <div className="relative">
               <div className="flex items-center bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition shadow-2xs">
                 <button
@@ -779,7 +773,6 @@ export default function MoneyManagerPage() {
                   {showSummaryDropdown ? <ChevronUp className="w-3 h-3 text-slate-400" /> : <ChevronDown className="w-3 h-3 text-slate-400" />}
                 </button>
 
-                {/* NÚT BẤM CON MẮT ẨN / HIỆN SỐ TIỀN TRÊN HEADER */}
                 <button
                   type="button"
                   onClick={toggleHideBalance}
@@ -1015,7 +1008,6 @@ export default function MoneyManagerPage() {
                     <span className="ml-2 font-bold text-base sm:text-lg text-slate-500">đ</span>
                   </div>
 
-                  {/* Hiển thị tính toán trực tiếp & bằng chữ */}
                   <div className="mt-1.5 flex flex-col gap-1">
                     {numericAmount > 0 && amountInWords && (
                       <div className="px-2.5 py-1 bg-slate-100 rounded-xl text-[11px] font-semibold text-slate-700 italic border border-slate-200">
@@ -1172,7 +1164,7 @@ export default function MoneyManagerPage() {
           {/* CỘT PHẢI: BIỂU ĐỒ & LỊCH SỬ GIAO DỊCH */}
           <div className={`lg:col-span-7 space-y-5 sm:space-y-6 ${mobileTab === 'input' ? 'hidden lg:block' : 'block'}`}>
             
-            {/* BOX BIỂU ĐỒ & THỐNG KÊ (CÓ NÚT ẨN/HIỆN BẢNG) */}
+            {/* BOX BIỂU ĐỒ & THỐNG KÊ */}
             <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm transition-all ${mobileTab === 'history' ? 'hidden lg:block' : 'block'}`}>
               
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3.5 border-b border-slate-100 mb-3.5">
@@ -1199,7 +1191,6 @@ export default function MoneyManagerPage() {
                     </button>
                   </div>
 
-                  {/* NÚT ẨN/HIỆN BẢNG THỐNG KÊ */}
                   <button
                     type="button"
                     onClick={() => setShowStatsBox(!showStatsBox)}
@@ -1357,7 +1348,7 @@ export default function MoneyManagerPage() {
 
             </div>
 
-            {/* BOX LỊCH SỬ GIAO DỊCH: TÍCH HỢP Ô TÌM KIẾM + HEADER NGÀY RIÊNG */}
+            {/* BOX LỊCH SỬ GIAO DỊCH */}
             <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm ${mobileTab === 'charts' ? 'hidden lg:block' : 'block'}`}>
               
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3.5 border-b border-slate-100 mb-3.5">
@@ -1398,7 +1389,7 @@ export default function MoneyManagerPage() {
                 </div>
               </div>
 
-              {/* Ô TÌM KIẾM TRONG LỊCH SỬ GIAO DỊCH */}
+              {/* Ô TÌM KIẾM TRONG LỊCH SỬ */}
               <div className="relative mb-3.5">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input 
@@ -1418,7 +1409,7 @@ export default function MoneyManagerPage() {
                 )}
               </div>
 
-              {/* DANH SÁCH LỊCH SỬ: HEADER NGÀY RIÊNG BIỆT */}
+              {/* DANH SÁCH LỊCH SỬ: TÁCH HEADER NGÀY */}
               <div className="space-y-4 max-h-[520px] overflow-y-auto pr-0.5">
                 {groupedByDayHistory.length === 0 ? (
                   <p className="text-center py-10 text-xs text-slate-400">Không tìm thấy giao dịch nào trong khoảng thời gian đã lọc.</p>
@@ -1444,7 +1435,7 @@ export default function MoneyManagerPage() {
                         </div>
                       </div>
 
-                      {/* DANH SÁCH THU CHI TRONG NGÀY */}
+                      {/* DANH SÁCH THU CHI */}
                       <div className="divide-y divide-slate-100">
                         {dayGroup.items.map((t) => (
                           <div 
@@ -1464,7 +1455,7 @@ export default function MoneyManagerPage() {
 
                             <div className="flex items-center gap-2.5 flex-shrink-0">
                               <span className={`font-extrabold text-xs sm:text-sm ${t.type === 'expense' ? 'text-red-500' : 'text-emerald-600'}`}>
-                                {t.type === 'expense' ? '-' : '+'}{formatDisplayCurrencyOrHidden(Number(t.amount))}
+                                {t.type === 'expense' ? '-' : '+'}{formatDisplayCurrencyOrHidden(Number(t.amount || 0))}
                               </span>
                               <button
                                 onClick={() => handleDelete(t.id)}
