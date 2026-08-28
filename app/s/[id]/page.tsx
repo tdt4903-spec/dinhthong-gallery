@@ -99,8 +99,8 @@ export async function generateMetadata({ params }: ShortPageProps) {
     title: finalTitle,
     description: 'Khoảnh khắc lưu giữ cảm xúc',
     metadataBase: new URL(baseUrl),
-    facebook: {
-      appId: '966242223397117',
+    other: {
+      'fb:app_id': '966242223397117',
     },
     openGraph: {
       type: 'website',
