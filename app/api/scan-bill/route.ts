@@ -86,4 +86,4 @@ export async function POST(req: Request) {
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
-}
+}// update ocr
