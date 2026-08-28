@@ -740,7 +740,7 @@ export default function MoneyManagerPage() {
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 pb-28 sm:pb-12">
       
-      {/* HEADER TỐI ƯU TOÀN DIỆN CHO MOBILE & DESKTOP */}
+      {/* HEADER TỐI ƯU GỌN GÀNG */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-2xs">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
           
@@ -755,11 +755,11 @@ export default function MoneyManagerPage() {
             </button>
             <h1 className="font-bold text-xs sm:text-base text-slate-900 tracking-tight flex items-center gap-1.5 truncate">
               <Wallet className="w-4 h-4 text-orange-500 flex-shrink-0" />
-              <span className="truncate">Sổ Thu Chi ({transactions.length})</span>
+              <span className="truncate">Sổ Thu Chi</span>
             </h1>
           </div>
 
-          {/* Thanh công cụ tối ưu cuộn ngang trên điện thoại */}
+          {/* Thanh công cụ tối ưu cuộn ngang */}
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[62vw] sm:max-w-none justify-end">
             
             {/* Box Số Dư & Dropdown Thống Kê */}
@@ -997,7 +997,7 @@ export default function MoneyManagerPage() {
                     )}
                   </div>
 
-                  <div className={`flex items-center px-3.5 py-2.5 sm:py-3.5 rounded-2xl border transition shadow-2xs ${
+                  <div className={`flex items-center px-3.5 py-2.5 sm:py-3 rounded-2xl border transition shadow-2xs ${
                     type === 'expense'
                       ? 'bg-[#fff4e6] border-[#ffd8a8] focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-200'
                       : 'bg-[#e6fcf5] border-[#b2f2bb] focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-200'
@@ -1006,12 +1006,12 @@ export default function MoneyManagerPage() {
                       type="text"
                       value={amountStr}
                       onChange={(e) => setAmountStr(e.target.value)}
-                      placeholder="0 (hoặc gõ 50k+30k, 20*3...)"
-                      className={`w-full bg-transparent outline-none text-xl sm:text-3xl font-extrabold ${
-                        type === 'expense' ? 'text-orange-600 placeholder-orange-300' : 'text-emerald-700 placeholder-emerald-300'
+                      placeholder="0 (ví dụ: 50k+30k, 20*3...)"
+                      className={`w-full bg-transparent outline-none text-lg sm:text-2xl font-extrabold placeholder:text-xs placeholder:font-normal ${
+                        type === 'expense' ? 'text-orange-600 placeholder:text-orange-300' : 'text-emerald-700 placeholder:text-emerald-400'
                       }`}
                     />
-                    <span className="ml-2 font-bold text-base sm:text-lg text-slate-500">đ</span>
+                    <span className="ml-2 font-bold text-sm sm:text-base text-slate-500">đ</span>
                   </div>
 
                   <div className="mt-1.5 flex flex-col gap-1">
