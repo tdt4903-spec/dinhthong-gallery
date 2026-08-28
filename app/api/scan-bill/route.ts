@@ -18,27 +18,33 @@ export async function POST(req: Request) {
     const base64Data = Buffer.from(arrayBuffer).toString('base64')
     const mimeType = file.type && file.type.startsWith('image/') ? file.type : 'image/jpeg'
 
-    const promptText = `Bạn là chuyên gia trích xuất dữ liệu hóa đơn ngân hàng Việt Nam (Vietcombank, Techcombank, MB, BIDV, VPBank, MoMo...).
-Hãy phân tích bức ảnh biên lai này và trích xuất đúng 4 trường thông tin:
-1. amount: Số tiền giao dịch chính (CHỈ LẤY CON SỐ NGUYÊN, ví dụ: 60000 hoặc 209000. Tuyệt đối không lấy số dư hay số tài khoản).
-2. note: Lời nhắn/nội dung chuyển khoản hiển thị trên bill.
-3. date: Ngày giao dịch theo định dạng YYYY-MM-DD.
-4. type: "expense" (hoặc "income" nếu là bill nhận tiền).
+    const promptText = `Bạn là trợ lý đọc biên lai giao dịch ngân hàng Việt Nam (VCB, Techcombank, MB, BIDV, MoMo...).
+Hãy phân tích hình ảnh này và trích xuất đúng 4 trường sau:
+1. amount: Số tiền giao dịch thực tế (chỉ lấy số nguyên, ví dụ: 60000 hoặc 209000. Không lấy số dư hay STK).
+2. note: Nội dung chuyển khoản hoặc ghi chú giao dịch.
+3. date: Ngày chuyển theo định dạng YYYY-MM-DD.
+4. type: "expense" (hoặc "income" nếu là nhận tiền).
 
-Trả về DUY NHẤT một chuỗi JSON hợp lệ, không bọc trong thẻ markdown hay thêm bất kỳ lời giải thích nào:`
+Trả về DUY NHẤT một đối tượng JSON hợp lệ, không bọc trong markdown hay thêm chữ:`
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
+    // Gọi endpoint v1beta của Gemini
+    const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
 
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+        'Authorization': `Bearer ${apiKey}`
+      },
       body: JSON.stringify({
         contents: [
           {
+            role: 'user',
             parts: [
               {
-                inline_data: {
-                  mime_type: mimeType,
+                inlineData: {
+                  mimeType: mimeType,
                   data: base64Data
                 }
               },
@@ -49,7 +55,8 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ, không bọc trong thẻ ma
           }
         ],
         generationConfig: {
-          response_mime_type: 'application/json'
+          temperature: 0.1,
+          responseMimeType: 'application/json'
         }
       })
     })
@@ -57,11 +64,19 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ, không bọc trong thẻ ma
     const data = await response.json()
 
     if (data.error) {
-      return NextResponse.json({ success: false, error: `Google API: ${data.error.message}` }, { status: 500 })
+      console.error('Gemini API Error:', data.error)
+      return NextResponse.json({ success: false, error: data.error.message }, { status: 500 })
     }
 
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
-    const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim()
+    let cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim()
+
+    const firstOpen = cleanJson.indexOf('{')
+    const lastClose = cleanJson.lastIndexOf('}')
+    if (firstOpen !== -1 && lastClose !== -1) {
+      cleanJson = cleanJson.substring(firstOpen, lastClose + 1)
+    }
+
     const parsed = JSON.parse(cleanJson)
 
     return NextResponse.json({
@@ -73,9 +88,7 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ, không bọc trong thẻ ma
     })
 
   } catch (err: any) {
-    return NextResponse.json({ 
-      success: false, 
-      error: err.message || 'Lỗi phân tích bill' 
-    }, { status: 500 })
+    console.error('Scan bill error:', err)
+    return NextResponse.json({ success: false, error: err.message || 'Lỗi bóc tách ảnh' }, { status: 500 })
   }
 }
