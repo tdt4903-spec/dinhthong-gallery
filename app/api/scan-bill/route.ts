@@ -10,28 +10,24 @@ export async function POST(req: Request) {
     }
 
     const apiKey = process.env.GEMINI_API_KEY
-    
-    // Nếu chưa cấu hình GEMINI_API_KEY trên Vercel, trả về thông báo lỗi cụ thể
     if (!apiKey) {
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Chưa cấu hình GEMINI_API_KEY trên Vercel. Vui lòng thêm biến môi trường này.' 
-      }, { status: 500 })
+      return NextResponse.json({ success: false, error: 'Thiếu GEMINI_API_KEY trên Vercel' }, { status: 500 })
     }
 
     const arrayBuffer = await file.arrayBuffer()
     const base64Data = Buffer.from(arrayBuffer).toString('base64')
     const mimeType = file.type || 'image/jpeg'
 
-    const prompt = `Bạn là chuyên gia đọc hóa đơn/bill ngân hàng Việt Nam. Hãy đọc bức ảnh này và trích xuất thông tin thành ĐÚNG định dạng JSON (không có markdown bao quanh, chỉ là chuỗi JSON thuần):
+    const prompt = `Phân tích ảnh biên lai chuyển khoản này và trả về ĐÚNG MỘT CHUỖI JSON thuần túy (không kèm markdown như \`\`\`json):
 {
-  "amount": con số số tiền giao dịch chính (dạng số nguyên thuần túy, ví dụ: 150000, tuyệt đối không lấy số tài khoản hay số dư),
+  "amount": con số số tiền giao dịch chính dạng số nguyên (ví dụ: 150000, tuyệt đối không lấy số tài khoản hay số dư),
   "note": "nội dung chuyển khoản hoặc ghi chú trên bill",
   "date": "ngày giao dịch định dạng YYYY-MM-DD",
   "type": "expense hoặc income"
 }`
 
-    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    // Sử dụng model gemini-1.5-flash hoặc gemini-2.5-flash chuẩn ổn định
+    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -58,11 +54,13 @@ export async function POST(req: Request) {
     const result = await geminiRes.json()
     
     if (result.error) {
+      console.error('Lỗi từ Google Gemini API:', result.error)
       return NextResponse.json({ success: false, error: result.error.message }, { status: 500 })
     }
 
     const textOutput = result?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
-    
+    console.log('Phản hồi thô từ AI:', textOutput)
+
     let cleanJsonStr = textOutput.trim()
     if (cleanJsonStr.includes('```json')) {
       cleanJsonStr = cleanJsonStr.split('```json')[1].split('```')[0].trim()
@@ -75,11 +73,12 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       amount: parsedData.amount || 0,
-      note: parsedData.note || '',
-      date: parsedData.date || '2026-08-28',
+      note: parsedData.note || 'Chuyển khoản',
+      date: parsedData.date || new Date().toISOString().split('T')[0],
       type: parsedData.type || 'expense'
     })
   } catch (error: any) {
+    console.error('Lỗi catch scan bill:', error.message)
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }
