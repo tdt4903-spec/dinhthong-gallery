@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { GoogleGenAI } from '@google/genai'
 
 export async function POST(req: Request) {
   try {
@@ -6,17 +7,20 @@ export async function POST(req: Request) {
     const file = formData.get('file') as File
 
     if (!file) {
-      return NextResponse.json({ success: false, error: 'Không tìm thấy file ảnh trong request' }, { status: 400 })
+      return NextResponse.json({ success: false, error: 'Không tìm thấy file ảnh' }, { status: 400 })
     }
 
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
-      return NextResponse.json({ success: false, error: 'Lỗi server: Chưa thiết lập GEMINI_API_KEY trên Vercel' }, { status: 500 })
+      return NextResponse.json({ success: false, error: 'Thiếu GEMINI_API_KEY trên Vercel' }, { status: 500 })
     }
 
     const arrayBuffer = await file.arrayBuffer()
     const base64Data = Buffer.from(arrayBuffer).toString('base64')
     const mimeType = file.type && file.type.includes('image/') ? file.type : 'image/jpeg'
+
+    // Khởi tạo SDK chính thức của Google
+    const ai = new GoogleGenAI({ apiKey })
 
     const promptText = `Đọc biên lai chuyển khoản ngân hàng trong ảnh này và trả về ĐÚNG MỘT CHUỖI JSON DUY NHẤT (không bọc trong bất kỳ markdown nào):
 {
@@ -26,41 +30,23 @@ export async function POST(req: Request) {
   "type": "expense"
 }`
 
-    // Sử dụng v1beta với model gemini-1.5-flash chuẩn tương thích mọi loại API key
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                inline_data: {
-                  mime_type: mimeType,
-                  data: base64Data
-                }
-              },
-              {
-                text: promptText
-              }
-            ]
+    // Gọi model qua SDK chính thức
+    const response = await ai.models.generateContent({
+      model: 'gemini-1.5-flash',
+      contents: [
+        {
+          inlineData: {
+            mimeType: mimeType,
+            data: base64Data
           }
-        ]
-      })
+        },
+        {
+          text: promptText
+        }
+      ]
     })
 
-    const data = await response.json()
-
-    if (data.error) {
-      console.error('Google Gemini API Error:', data.error)
-      return NextResponse.json({ success: false, error: data.error.message || 'Google từ chối xử lý ảnh' }, { status: 500 })
-    }
-
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    const rawText = response.text || '{}'
     console.log('AI raw response text:', rawText)
 
     let cleanJson = rawText.trim()
@@ -87,10 +73,10 @@ export async function POST(req: Request) {
     })
 
   } catch (err: any) {
-    console.error('CRITICAL SCAN BILL EXCEPTION:', err)
+    console.error('SDK SCAN BILL EXCEPTION:', err)
     return NextResponse.json({ 
       success: false, 
-      error: err.message || 'Lỗi xử lý nội bộ server' 
+      error: err.message || 'Lỗi xử lý AI SDK' 
     }, { status: 500 })
   }
 }
