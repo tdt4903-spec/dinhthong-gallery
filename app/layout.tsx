@@ -3,8 +3,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Dinh Thong Workspace',
-  description: 'Dinh Thong Workspace - All-in-one Management Platform',
+  title: 'Dinh Thong Gallery',
+  description: 'Khoảnh khắc lưu giữ cảm xúc',
 }
 
 export default function RootLayout({
