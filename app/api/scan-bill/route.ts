@@ -1,7 +1,4 @@
 import { NextResponse } from 'next/server'
-import { GoogleGenAI } from '@google/genai'
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
 
 export async function POST(req: Request) {
   try {
@@ -12,37 +9,50 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Không tìm thấy file ảnh' }, { status: 400 })
     }
 
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) {
+      return NextResponse.json({ success: false, error: 'Thiếu GEMINI_API_KEY trong cấu hình Vercel' }, { status: 500 })
+    }
+
     const arrayBuffer = await file.arrayBuffer()
     const base64Data = Buffer.from(arrayBuffer).toString('base64')
     const mimeType = file.type || 'image/jpeg'
 
-    // Yêu cầu Gemini AI phân tích ảnh biên lai chuyển khoản
-    const prompt = `
-      Phân tích ảnh biên lai chuyển khoản ngân hàng hoặc hóa đơn này và trích xuất các thông tin sau thành dạng JSON chuẩn (không kèm markdown khác):
-      {
-        "amount": con số số tiền (ví dụ: 500000, không lấy chữ đ hay dấu phẩy),
-        "note": "nội dung chuyển khoản hoặc ghi chú trên bill",
-        "date": "ngày giao dịch định dạng YYYY-MM-DD (nếu không có lấy ngày hiện tại 2026-08-28)",
-        "type": "expense" hoặc "income" (nếu là chuyển tiền đi/thanh toán là expense, nhận tiền là income)
-      }
-    `
+    const prompt = `Phân tích ảnh biên lai chuyển khoản ngân hàng hoặc hóa đơn này và trả về ĐÚNG định dạng JSON thuần (không kèm markdown như \`\`\`json):
+{
+  "amount": con số số tiền (ví dụ: 500000, không lấy chữ đ hay dấu phẩy),
+  "note": "nội dung chuyển khoản hoặc ghi chú trên bill",
+  "date": "ngày giao dịch định dạng YYYY-MM-DD",
+  "type": "expense hoặc income"
+}`
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          inlineData: {
-            data: base64Data,
-            mimeType: mimeType
+    const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                inlineData: {
+                  mimeType: mimeType,
+                  data: base64Data
+                }
+              },
+              {
+                text: prompt
+              }
+            ]
           }
-        },
-        prompt
-      ]
+        ]
+      })
     })
 
-    const textResult = response.text() || '{}'
-    // Làm sạch text để parse JSON
-    const cleanJsonStr = textResult.replace(/```json/g, '').replace(/```/g, '').trim()
+    const result = await geminiRes.json()
+    const textOutput = result?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'
+    const cleanJsonStr = textOutput.replace(/```json/g, '').replace(/```/g, '').trim()
     const parsedData = JSON.parse(cleanJsonStr)
 
     return NextResponse.json({
