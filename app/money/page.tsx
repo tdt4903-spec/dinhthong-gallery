@@ -12,7 +12,7 @@ import {
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
   ChevronDown, ChevronUp, PieChart, Layers, Filter, Loader2, LogOut, User as UserIcon,
-  Sparkles, RotateCcw, PenSquare, History
+  Sparkles, RotateCcw, PenSquare, History, Camera
 } from 'lucide-react'
 
 const CATEGORY_ID_MAP: Record<number, string> = {
@@ -137,7 +137,6 @@ export default function MoneyManagerPage() {
   const [user, setUser] = useState<any>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
-  // Mobile active tab: 'input' | 'charts' | 'history'
   const [mobileTab, setMobileTab] = useState<'input' | 'charts' | 'history'>('input')
 
   const [type, setType] = useState<'expense' | 'income'>('expense')
@@ -152,6 +151,7 @@ export default function MoneyManagerPage() {
   const [newCatName, setNewCatName] = useState('')
   const [isAddingCat, setIsAddingCat] = useState(false)
 
+  const [isScanningBill, setIsScanningBill] = useState(false)
   const [showSummaryDropdown, setShowSummaryDropdown] = useState(false)
 
   const [chartSubTab, setChartSubTab] = useState<'stats' | 'category'>('stats')
@@ -165,6 +165,7 @@ export default function MoneyManagerPage() {
 
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const billInputRef = useRef<HTMLInputElement>(null)
   const dateInputRef = useRef<HTMLInputElement>(null)
 
   const supabase = createBrowserClient(
@@ -214,6 +215,42 @@ export default function MoneyManagerPage() {
       .order('created_at', { ascending: false })
     if (!error && data) {
       setTransactions(data)
+    }
+  }
+
+  // TÍNH NĂNG: GỌI AI QUÉT BILL CHUYỂN KHOẢN
+  const handleScanBill = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setIsScanningBill(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/scan-bill', {
+        method: 'POST',
+        body: formData
+      })
+      const data = await res.json()
+
+      if (data.success) {
+        if (data.amount) setAmountStr(Number(data.amount).toLocaleString('vi-VN'))
+        if (data.note) setNote(data.note)
+        if (data.date) setCurrentDateStr(data.date)
+        if (data.type) {
+          setType(data.type)
+          setSelectedCategory(data.type === 'expense' ? 'Ăn uống' : 'Tiền lương')
+        }
+        alert('✨ AI đã nhận diện bill thành công! Bạn hãy kiểm tra lại thông tin và bấm Xác nhận.')
+      } else {
+        alert('Không nhận diện được thông tin từ ảnh bill này. Vui lòng nhập thủ công.')
+      }
+    } catch (err: any) {
+      alert('Lỗi quét bill: ' + err.message)
+    } finally {
+      setIsScanningBill(false)
+      if (billInputRef.current) billInputRef.current.value = ''
     }
   }
 
@@ -557,6 +594,26 @@ export default function MoneyManagerPage() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2">
+            
+            {/* NÚT QUÉT ẢNH BILL CHUYỂN KHOẢN (AI) */}
+            <button
+              type="button"
+              onClick={() => billInputRef.current?.click()}
+              disabled={isScanningBill}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 text-white hover:bg-amber-600 transition shadow-2xs cursor-pointer disabled:opacity-50"
+              title="Chụp hoặc tải ảnh bill chuyển khoản để AI tự nhận diện"
+            >
+              {isScanningBill ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+              <span className="hidden xs:inline">{isScanningBill ? 'Đang đọc...' : 'Quét Bill AI'}</span>
+            </button>
+            <input 
+              type="file" 
+              ref={billInputRef} 
+              onChange={handleScanBill} 
+              accept="image/*" 
+              className="hidden" 
+            />
+
             {/* Nút tóm tắt số dư */}
             <div className="relative">
               <button
@@ -565,7 +622,7 @@ export default function MoneyManagerPage() {
                 className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 transition cursor-pointer border border-slate-200"
               >
                 <TrendingUp className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-                <span className="max-w-[100px] sm:max-w-none truncate">{formatCurrency(totalBalance)}</span>
+                <span className="max-w-[90px] sm:max-w-none truncate">{formatCurrency(totalBalance)}</span>
                 {showSummaryDropdown ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
               </button>
 
@@ -736,11 +793,10 @@ export default function MoneyManagerPage() {
                     type="text"
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
-                    placeholder="Ví dụ: Ăn sáng, Mua cafe, Đổ xăng..."
+                    placeholder="Ví dụ: Ăn sáng, Mua cafe, Chuyển khoản..."
                     className="w-full py-2.5 sm:py-3.5 px-3.5 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-orange-500 focus:bg-white text-xs sm:text-sm font-medium text-slate-900 shadow-2xs transition"
                   />
 
-                  {/* Gợi ý các nội dung trước đó */}
                   {noteSuggestions.length > 0 && (
                     <div className="flex items-center gap-1 flex-wrap mt-1.5">
                       <span className="text-[10px] text-slate-400 font-semibold flex items-center gap-0.5">
@@ -760,7 +816,7 @@ export default function MoneyManagerPage() {
                   )}
                 </div>
 
-                {/* 3. Ô NHẬP SỐ TIỀN TO LỚN KÈM BÀN PHÍM SỐ */}
+                {/* 3. Ô NHẬP SỐ TIỀN */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[11px] sm:text-xs font-bold text-slate-700">
@@ -798,14 +854,12 @@ export default function MoneyManagerPage() {
                     <span className="ml-2 font-bold text-base sm:text-lg text-slate-500">đ</span>
                   </div>
 
-                  {/* Hiển thị dịch số thành chữ tiếng Việt */}
                   {amountInWords ? (
                     <div className="mt-1.5 px-2.5 py-1 bg-slate-100 rounded-xl text-[11px] font-semibold text-slate-700 italic border border-slate-200">
                       Bằng chữ: <span className="text-slate-900 font-bold not-italic">{amountInWords}</span>
                     </div>
                   ) : null}
 
-                  {/* CÁC NÚT BẤM GỢI Ý CỘNG TIỀN NHANH */}
                   <div className="mt-2">
                     <p className="text-[10px] font-bold text-slate-500 mb-1">Gợi ý cộng nhanh:</p>
                     <div className="grid grid-cols-5 gap-1">
@@ -955,7 +1009,7 @@ export default function MoneyManagerPage() {
                       chartPeriodMode === 'all' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-500'
                     }`}
                   >
-                    Tất cả
+                    Toàn bộ
                   </button>
                 </div>
               </div>
@@ -1192,7 +1246,7 @@ export default function MoneyManagerPage() {
         </div>
       </main>
 
-      {/* THANH ĐIỀU HƯỚNG DƯỚI CÙNG CHO MOBILE (BOTTOM NAV BAR) */}
+      {/* THANH ĐIỀU HƯỚNG DƯỚI CÙNG CHO MOBILE */}
       <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 z-40 flex items-center justify-around shadow-lg">
         <button
           type="button"
@@ -1247,7 +1301,7 @@ export default function MoneyManagerPage() {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="flex flex-col items-center gap-0.5 text-[10px] font-bold text-slate-400 hover:text-blue-600 cursor-pointer transition"
+          className="flex flex-col items-center gap-1 text-[10px] font-bold text-slate-400 hover:text-blue-600 cursor-pointer transition"
         >
           <div className="p-1.5 rounded-xl">
             <Upload className="w-4 h-4" />
