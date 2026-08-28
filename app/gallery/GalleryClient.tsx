@@ -120,7 +120,6 @@ export default function GalleryClient() {
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false)
 
   const [selectedAlbumIds, setSelectedAlbumIds] = useState<Set<string>>(new Set())
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
@@ -170,7 +169,6 @@ export default function GalleryClient() {
   const [useNewline, setUseNewline] = useState(true)
 
   const thumbnailRef = useRef<HTMLDivElement>(null)
-  const toolsMenuRef = useRef<HTMLDivElement>(null)
   const touchStartX = useRef<number | null>(null)
   const touchEndX = useRef<number | null>(null)
 
@@ -178,16 +176,6 @@ export default function GalleryClient() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (toolsMenuRef.current && !toolsMenuRef.current.contains(e.target as Node)) {
-        setIsToolsMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
 
   const formatDriveCoverUrl = (url: string) => {
     if (!url) return ''
@@ -885,7 +873,7 @@ export default function GalleryClient() {
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
         const ext = item.type === 'video' ? 'mp4' : 'jpg'
-        const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
+        const exactFileName = item.name.includes('.') ? file.name : `${item.name}.${ext}`
         const directProxy = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
         const fallbackLink = document.createElement('a')
         fallbackLink.href = directProxy
@@ -1271,7 +1259,7 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-      {/* HEADER ĐƯỢC TỐI ƯU GỌN GÀNG, CHUẨN RESPONSIVE */}
+      {/* HEADER: HIỂN THỊ TRỰC TIẾP CÁC NÚT ĐIỀU HƯỚNG CHÍNH */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/95 border-white/10' : 'bg-white/95 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
           
@@ -1295,8 +1283,8 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          {/* Khu Vực Nút Điều Khiển Chính */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0">
+          {/* Khu Vực Nút Header */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             {selectedAlbum ? (
               <>
                 <div className="relative w-28 sm:w-52">
@@ -1338,14 +1326,14 @@ export default function GalleryClient() {
               !isSharedGuest && (
                 <>
                   {/* Ô tìm kiếm */}
-                  <div className="relative w-28 sm:w-48">
+                  <div className="relative w-24 sm:w-44">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <input 
                       type="text"
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       placeholder="Tìm album..."
-                      className={`w-full pl-8 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
+                      className={`w-full pl-7 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
                         isDarkMode 
                           ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
                           : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-2xs'
@@ -1353,91 +1341,44 @@ export default function GalleryClient() {
                     />
                   </div>
 
-                  {/* Nút chính: Thêm album */}
+                  {/* Nút Sổ Thu Chi */}
+                  <button
+                    type="button"
+                    onClick={() => router.push('/money')}
+                    className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-bold border transition shadow-2xs cursor-pointer ${
+                      isDarkMode 
+                        ? 'bg-orange-500/10 hover:bg-orange-500/20 border-orange-500/30 text-orange-400' 
+                        : 'bg-orange-50 hover:bg-orange-100 border-orange-200 text-orange-700'
+                    }`}
+                    title="Mở Sổ Quản Lý Thu Chi Cá Nhân"
+                  >
+                    <Wallet className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" />
+                    <span className="hidden xs:inline">Sổ Thu Chi</span>
+                  </button>
+
+                  {/* Nút Key Panel */}
+                  <button
+                    type="button"
+                    onClick={() => setIsKeyGenOpen(true)}
+                    className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-2xs cursor-pointer ${
+                      isDarkMode 
+                        ? 'bg-white/10 hover:bg-white/20 border-white/10 text-white' 
+                        : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700'
+                    }`}
+                    title="Quản lý Key Panel"
+                  >
+                    <KeyRound className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                    <span className="hidden sm:inline">Key Panel</span>
+                  </button>
+
+                  {/* Nút Thêm album */}
                   <button
                     onClick={() => setIsModalOpen(true)}
-                    className="flex items-center gap-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer flex-shrink-0"
+                    className="flex items-center gap-1 px-3 sm:px-3.5 py-1.5 rounded-full text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer flex-shrink-0"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span className="hidden xs:inline">Thêm album</span>
                   </button>
-
-                  {/* MENU GOM CÔNG CỤ QUẢN TRỊ */}
-                  <div className="relative" ref={toolsMenuRef}>
-                    <button
-                      type="button"
-                      onClick={() => setIsToolsMenuOpen(!isToolsMenuOpen)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 rounded-full text-xs font-semibold border transition shadow-2xs cursor-pointer ${
-                        isDarkMode 
-                          ? 'bg-white/10 hover:bg-white/20 border-white/10 text-white' 
-                          : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700'
-                      }`}
-                      title="Menu công cụ quản trị"
-                    >
-                      <Settings className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-emerald-500' : ''}`} />
-                      <span className="hidden sm:inline">Công cụ</span>
-                      <ChevronDown className="w-3 h-3 text-gray-400" />
-                    </button>
-
-                    {isToolsMenuOpen && (
-                      <div className={`absolute right-0 mt-2 w-56 rounded-2xl p-2 shadow-2xl border z-50 animate-in fade-in zoom-in-95 duration-150 space-y-1 ${
-                        isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-800'
-                      }`}>
-                        {/* 1. Sổ Thu Chi */}
-                        <button
-                          type="button"
-                          onClick={() => { setIsToolsMenuOpen(false); router.push('/money'); }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold hover:bg-orange-50 dark:hover:bg-orange-500/10 text-orange-600 transition cursor-pointer"
-                        >
-                          <Wallet className="w-4 h-4 text-orange-500" />
-                          <span>Sổ Quản Lý Thu Chi</span>
-                        </button>
-
-                        {/* 2. Quét Drive */}
-                        <button
-                          type="button"
-                          onClick={() => { setIsToolsMenuOpen(false); checkAllMasterFolders(masterFoldersList, true); }}
-                          disabled={isSyncing}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-500/10 text-emerald-600 transition cursor-pointer"
-                        >
-                          <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                          <span>{isSyncing ? 'Đang quét Drive...' : 'Quét Thư Mục Mới'}</span>
-                        </button>
-
-                        {/* 3. Thư Mục Tổng */}
-                        <button
-                          type="button"
-                          onClick={() => { setIsToolsMenuOpen(false); setIsMasterModalOpen(true); }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-gray-100 dark:hover:bg-white/5 transition cursor-pointer"
-                        >
-                          <FolderSync className="w-4 h-4 text-emerald-500" />
-                          <span>Cài Đặt Thư Mục Tổng</span>
-                        </button>
-
-                        {/* 4. Key Panel */}
-                        <button
-                          type="button"
-                          onClick={() => { setIsToolsMenuOpen(false); setIsKeyGenOpen(true); }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold hover:bg-gray-100 dark:hover:bg-white/5 transition cursor-pointer"
-                        >
-                          <KeyRound className="w-4 h-4 text-amber-500" />
-                          <span>Quản Lý Key Panel</span>
-                        </button>
-
-                        <div className="h-[1px] bg-gray-100 dark:bg-white/10 my-1" />
-
-                        {/* 5. Dọn dẹp trang chủ */}
-                        <button
-                          type="button"
-                          onClick={() => { setIsToolsMenuOpen(false); handleCleanHomePage(); }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4 text-gray-400" />
-                          <span>Dọn Dẹp Trang Chủ</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
                 </>
               )
             )}
@@ -1507,13 +1448,64 @@ export default function GalleryClient() {
               </div>
             </section>
 
-            <div className={`w-full h-[1px] mb-6 sm:mb-10 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
+            <div className={`w-full h-[1px] mb-6 sm:mb-8 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
-            <div className="flex items-center justify-between gap-3 mb-6">
+            {/* HÀNG THƯ MỤC ALBUM + CÁC NÚT THAO TÁC QUẢN TRỊ */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
                 <span className="text-xs text-gray-400">({filteredAlbums.length})</span>
               </div>
+
+              {!isSharedGuest && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Nút Quét Drive */}
+                  <button
+                    type="button"
+                    onClick={() => checkAllMasterFolders(masterFoldersList, true)}
+                    disabled={isSyncing}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-2xs cursor-pointer ${
+                      isDarkMode 
+                        ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400' 
+                        : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700'
+                    }`}
+                    title="Quét các thư mục mới phát sinh trên Google Drive"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                    <span>{isSyncing ? 'Đang quét...' : 'Quét Thư Mục Mới'}</span>
+                  </button>
+
+                  {/* Nút Cài Đặt Thư Mục Tổng */}
+                  <button
+                    type="button"
+                    onClick={() => setIsMasterModalOpen(true)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-2xs cursor-pointer ${
+                      isDarkMode 
+                        ? 'bg-white/10 hover:bg-white/20 border-white/10 text-white' 
+                        : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700'
+                    }`}
+                    title="Cài đặt các Thư Mục Tổng Drive"
+                  >
+                    <FolderSync className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Cài Đặt Thư Mục Tổng</span>
+                  </button>
+
+                  {/* Nút Dọn Dẹp Trang Chủ */}
+                  <button
+                    type="button"
+                    onClick={handleCleanHomePage}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-2xs cursor-pointer ${
+                      isDarkMode 
+                        ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-400' 
+                        : 'bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700'
+                    }`}
+                    title="Dọn dẹp các thư mục con đang bị tràn ra ngoài trang chủ"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Dọn Dẹp Trang Chủ</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5 sm:gap-6">
