@@ -112,32 +112,25 @@ export default function MoneyManagerPage() {
     return `${year}-${month}-${day}`
   }
 
-  // Hàm chuyển đổi mọi định dạng ngày từ CSV về YYYY-MM-DD
+  // Chuẩn hóa ngày tháng từ mọi định dạng
   const normalizeDate = (rawDate: any) => {
     if (!rawDate) return formatDateDb(new Date())
-    const str = String(rawDate).trim().split(' ')[0] // Bỏ phần giờ nếu có
+    let str = String(rawDate).trim().split(' ')[0].replace(/[\.tT]/g, '-').replace(/[\/]/g, '-')
 
-    // Định dạng DD/MM/YYYY hoặc DD-MM-YYYY
-    if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(str)) {
-      const parts = str.split(/[\/\-]/)
-      const d = parts[0].padStart(2, '0')
-      const m = parts[1].padStart(2, '0')
-      const y = parts[2]
-      return `${y}-${m}-${d}`
+    const parts = str.split('-').filter(Boolean)
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        // YYYY-MM-DD
+        return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`
+      }
+      if (parts[2].length === 4) {
+        // DD-MM-YYYY
+        return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`
+      }
     }
 
-    // Định dạng YYYY/MM/DD hoặc YYYY-MM-DD
-    if (/^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(str)) {
-      const parts = str.split(/[\/\-]/)
-      const y = parts[0]
-      const m = parts[1].padStart(2, '0')
-      const d = parts[2].padStart(2, '0')
-      return `${y}-${m}-${d}`
-    }
-
-    // Nếu Excel trả về số timestamp ngày
-    if (!isNaN(Number(str)) && Number(str) > 30000) {
-      const d = new Date((Number(str) - (25567 + 2)) * 86400 * 1000)
+    if (!isNaN(Number(rawDate)) && Number(rawDate) > 30000) {
+      const d = new Date((Number(rawDate) - (25567 + 2)) * 86400 * 1000)
       return formatDateDb(d)
     }
 
@@ -213,7 +206,7 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // XUẤT FILE EXCEL / CSV
+  // Xuất file Excel / CSV
   const handleExportExcel = () => {
     if (transactions.length === 0) {
       alert('Chưa có dữ liệu để xuất!')
@@ -235,7 +228,7 @@ export default function MoneyManagerPage() {
     XLSX.writeFile(workbook, `Bao_Cao_Thu_Chi_${formatDateDb(new Date())}.xlsx`)
   }
 
-  // NHẬP FILE CSV / EXCEL THÔNG MINH
+  // NHẬP CSV / EXCEL THÔNG MINH BẤT KỲ CẤU TRÚC NÀO
   const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -243,107 +236,120 @@ export default function MoneyManagerPage() {
     const reader = new FileReader()
     reader.onload = async (evt) => {
       try {
-        let rawRows: any[] = []
-        
-        // Đọc dữ liệu từ file dạng text UTF-8 (dành cho CSV) hoặc binary (dành cho XLSX)
+        let workbook: XLSX.WorkBook
+
         if (file.name.endsWith('.csv')) {
-          const textContent = evt.target?.result as string
-          const workbook = XLSX.read(textContent, { type: 'string', raw: true })
-          const sheetName = workbook.SheetNames[0]
-          rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' })
+          const text = evt.target?.result as string
+          workbook = XLSX.read(text, { type: 'string', raw: false })
         } else {
-          const binaryContent = evt.target?.result
-          const workbook = XLSX.read(binaryContent, { type: 'binary' })
-          const sheetName = workbook.SheetNames[0]
-          rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' })
+          const buffer = evt.target?.result
+          workbook = XLSX.read(buffer, { type: 'binary', raw: false })
         }
 
-        if (!rawRows || rawRows.length === 0) {
-          alert('File trống hoặc không đọc được dữ liệu!')
+        const sheetName = workbook.SheetNames[0]
+        const worksheet = workbook.Sheets[sheetName]
+        // Đọc toàn bộ các hàng dưới dạng ma trận mảng 2 chiều
+        const rawGrid: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' })
+
+        if (!rawGrid || rawGrid.length === 0) {
+          alert('File không có dữ liệu!')
           return
         }
 
-        // Tự động nhận dạng cột thông minh cho mọi app thu chi
-        const formattedToInsert = rawRows.map((row) => {
-          // 1. Tìm giá trị số tiền
-          let rawAmount = ''
-          let rawType = ''
-          let rawCategory = ''
-          let rawNote = ''
-          let rawDate = ''
+        // 1. Tự động tìm hàng chứa Header (tiêu đề cột)
+        let headerIndex = -1
+        let colMap = { date: -1, amount: -1, category: -1, type: -1, note: -1 }
 
-          Object.keys(row).forEach((key) => {
-            const lowerKey = key.toLowerCase().trim()
-            const val = String(row[key]).trim()
+        for (let r = 0; r < Math.min(15, rawGrid.length); r++) {
+          const row = rawGrid[r].map(c => String(c).toLowerCase().trim())
+          const hasDate = row.some(c => c.includes('ngày') || c.includes('date') || c.includes('thời gian') || c.includes('time'))
+          const hasAmount = row.some(c => c.includes('tiền') || c.includes('amount') || c.includes('giá') || c.includes('chi') || c.includes('thu') || c.includes('vnđ') || c.includes('vnd'))
 
-            // Nhận diện Số tiền
-            if (lowerKey.includes('tiền') || lowerKey.includes('amount') || lowerKey.includes('số tiền') || lowerKey.includes('money') || lowerKey.includes('giá trị')) {
-              rawAmount = val
-            }
-            // Nhận diện Loại
-            if (lowerKey.includes('loại') || lowerKey.includes('type') || lowerKey.includes('thu/chi') || lowerKey.includes('khoản')) {
-              rawType = val
-            }
-            // Nhận diện Danh mục
-            if (lowerKey.includes('danh mục') || lowerKey.includes('category') || lowerKey.includes('hạng mục') || lowerKey.includes('nhóm')) {
-              rawCategory = val
-            }
-            // Nhận diện Ghi chú
-            if (lowerKey.includes('ghi chú') || lowerKey.includes('note') || lowerKey.includes('diễn giải') || lowerKey.includes('nội dung') || lowerKey.includes('description')) {
-              rawNote = val
-            }
-            // Nhận diện Ngày
-            if (lowerKey.includes('ngày') || lowerKey.includes('date') || lowerKey.includes('thời gian') || lowerKey.includes('time')) {
-              rawDate = val
-            }
-          })
+          if (hasDate || hasAmount) {
+            headerIndex = r
+            row.forEach((colName, cIdx) => {
+              if (colName.includes('ngày') || colName.includes('date') || colName.includes('thời gian') || colName.includes('time')) colMap.date = cIdx
+              else if (colName.includes('tiền') || colName.includes('amount') || colName.includes('giá') || colName.includes('vnđ') || colName.includes('vnd')) colMap.amount = cIdx
+              else if (colName.includes('danh mục') || colName.includes('category') || colName.includes('hạng mục') || colName.includes('nhóm') || colName.includes('khoản mục')) colMap.category = cIdx
+              else if (colName.includes('loại') || colName.includes('type') || colName.includes('thu/chi')) colMap.type = cIdx
+              else if (colName.includes('ghi chú') || colName.includes('note') || colName.includes('diễn giải') || colName.includes('nội dung') || colName.includes('chi tiết')) colMap.note = cIdx
+            })
+            break
+          }
+        }
 
-          // Xử lý làm sạch số tiền
-          const isNegative = rawAmount.includes('-')
-          const cleanAmountNum = Number(rawAmount.replace(/[^0-9]/g, ''))
+        const dataRows = headerIndex !== -1 ? rawGrid.slice(headerIndex + 1) : rawGrid
+        const formattedToInsert: any[] = []
 
-          // Phân loại Thu / Chi
+        for (const row of dataRows) {
+          if (!row || row.length === 0) continue
+
+          let rawDate = colMap.date !== -1 ? row[colMap.date] : ''
+          let rawAmount = colMap.amount !== -1 ? row[colMap.amount] : ''
+          let rawCategory = colMap.category !== -1 ? row[colMap.category] : ''
+          let rawType = colMap.type !== -1 ? row[colMap.type] : ''
+          let rawNote = colMap.note !== -1 ? row[colMap.note] : ''
+
+          // Nếu không map được theo header, tự dò tìm giá trị theo từng ô trong hàng
+          if (!rawAmount || !rawDate) {
+            row.forEach(cell => {
+              const cellStr = String(cell).trim()
+              if (!rawDate && (/^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}/.test(cellStr) || /^\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}/.test(cellStr))) {
+                rawDate = cellStr
+              }
+              if (!rawAmount && (/\d{1,3}(,\d{3})+/.test(cellStr) || /\d{1,3}(\.\d{3})+/.test(cellStr) || (/^\-?\d+$/.test(cellStr) && Number(cellStr) !== 0))) {
+                rawAmount = cellStr
+              }
+            })
+          }
+
+          if (!rawAmount) continue
+
+          const amountStrClean = String(rawAmount).replace(/\s/g, '').replace(/[₫đVNDvnd]/g, '')
+          const isNegative = amountStrClean.includes('-')
+          const cleanNum = Number(amountStrClean.replace(/[^0-9]/g, ''))
+
+          if (!cleanNum || cleanNum === 0) continue
+
           let finalType: 'expense' | 'income' = 'expense'
-          const lowerTypeStr = rawType.toLowerCase()
+          const typeStrLower = String(rawType).toLowerCase()
 
-          if (lowerTypeStr.includes('thu') || lowerTypeStr.includes('income') || lowerTypeStr.includes('lương') || lowerTypeStr.includes('thưởng')) {
+          if (typeStrLower.includes('thu') || typeStrLower.includes('income') || typeStrLower.includes('lương') || typeStrLower.includes('thưởng')) {
             finalType = 'income'
-          } else if (lowerTypeStr.includes('chi') || lowerTypeStr.includes('expense')) {
+          } else if (typeStrLower.includes('chi') || typeStrLower.includes('expense')) {
             finalType = 'expense'
           } else {
-            // Nếu không có cột Loại, dựa vào dấu âm/dương của số tiền
-            finalType = isNegative ? 'expense' : (cleanAmountNum > 0 ? 'expense' : 'income')
+            finalType = isNegative ? 'expense' : 'expense'
           }
 
-          return {
+          formattedToInsert.push({
             type: finalType,
-            amount: cleanAmountNum || 0,
-            category: rawCategory || (finalType === 'expense' ? 'Ăn uống' : 'Tiền lương'),
-            note: rawNote || '',
+            amount: cleanNum,
+            category: String(rawCategory || (finalType === 'expense' ? 'Ăn uống' : 'Tiền lương')).trim(),
+            note: String(rawNote || '').trim(),
             date: normalizeDate(rawDate)
-          }
-        }).filter(r => r.amount > 0)
+          })
+        }
 
         if (formattedToInsert.length === 0) {
-          alert('Không tìm thấy dòng dữ liệu hợp lệ trong file CSV/Excel!')
+          alert('Không tìm thấy dòng dữ liệu số tiền hợp lệ trong file!')
           return
         }
 
         const { error } = await supabase.from('transactions').insert(formattedToInsert)
         if (!error) {
-          alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch từ file CSV!`)
+          alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch vào sổ thu chi!`)
           fetchTransactions()
         } else {
-          alert('Lỗi import: ' + error.message)
+          alert('Lỗi lưu dữ liệu: ' + error.message)
         }
       } catch (err: any) {
-        alert('Lỗi đọc file: ' + err.message)
+        alert('Lỗi xử lý file: ' + err.message)
       } finally {
         if (fileInputRef.current) fileInputRef.current.value = ''
       }
     }
 
-    // Đọc dạng text UTF-8 nếu là file CSV để giữ nguyên dấu tiếng Việt
     if (file.name.endsWith('.csv')) {
       reader.readAsText(file, 'UTF-8')
     } else {
@@ -351,7 +357,7 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // Lọc dữ liệu phục vụ thống kê & biểu đồ
+  // Lọc dữ liệu thống kê
   const filteredTransactions = transactions.filter(t => {
     if (!t.date) return false
     const [y, m] = t.date.split('-').map(Number)
@@ -374,7 +380,6 @@ export default function MoneyManagerPage() {
 
   const balance = totalIncome - totalExpense
 
-  // Gom nhóm thống kê theo từng danh mục
   const categoryStats = filteredTransactions
     .filter(t => t.type === type)
     .reduce((acc: Record<string, number>, curr) => {
