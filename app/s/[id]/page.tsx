@@ -91,7 +91,6 @@ export async function generateMetadata({ params }: ShortPageProps) {
     ? `${targetTitle} - Dinh Thong Gallery` 
     : 'Dinh Thong Gallery'
 
-  // Sử dụng link trực tiếp từ CDN Google Photos/Drive không qua API trung gian
   const directImageUrl = coverImageDriveId 
     ? `https://lh3.googleusercontent.com/d/${coverImageDriveId}=w1200` 
     : `${baseUrl}/banner.jpg`
@@ -100,6 +99,9 @@ export async function generateMetadata({ params }: ShortPageProps) {
     title: finalTitle,
     description: 'Khoảnh khắc lưu giữ cảm xúc',
     metadataBase: new URL(baseUrl),
+    facebook: {
+      appId: '966242223397117',
+    },
     openGraph: {
       type: 'website',
       url: `${baseUrl}/s/${inputCode}`,

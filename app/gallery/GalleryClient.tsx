@@ -181,7 +181,7 @@ export default function GalleryClient() {
     if (!url) return ''
     const cleanId = extractDriveId(url)
     if (cleanId) {
-      return `https://lh3.googleusercontent.com/d/${cleanId}=w1000`
+      return `https://lh3.googleusercontent.com/d/${cleanId}=w500-h500-p-k-no`
     }
     return url
   }
@@ -1183,10 +1183,9 @@ export default function GalleryClient() {
     }
   }
 
-  // Hàm xử lý lưu ảnh bìa: Album gốc lưu vào albums, thư mục con lưu riêng vào custom_covers
   const handleSetAsCover = async (targetId: string, imageId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    const formattedCover = `https://lh3.googleusercontent.com/d/${imageId}=w1000`
+    const formattedCover = `https://lh3.googleusercontent.com/d/${imageId}=w500-h500-p-k-no`
     const isMasterAlbum = masterFoldersList.some(m => m.id === targetId) || albums.some(a => a.id === targetId && folderHistory.length === 0)
 
     if (isMasterAlbum) {
@@ -1204,7 +1203,7 @@ export default function GalleryClient() {
 
       if (!error) {
         setAlbumCovers(prev => ({ ...prev, [targetId]: formattedCover }))
-        alert('Đã đặt ảnh bìa cho thư mục con & ảnh xem trước link chia sẻ thành công!')
+        alert('Đã đặt ảnh bìa cho thư mục con thành công!')
       } else {
         alert('Lỗi lưu ảnh bìa: ' + error.message)
       }
@@ -1499,11 +1498,13 @@ export default function GalleryClient() {
                     >
                       {hasImageCover ? (
                         <img 
-                          src={coverImage} 
+                          src={coverImage.replace(/=w\d+.*$/, '=w500-h500-p-k-no')} 
                           alt={album.title} 
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                          loading="lazy"
+                          decoding="async"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                           onError={(e) => {
-                            (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${album.id}=w1000`
+                            (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${album.id}=w500-h500-p-k-no`
                           }}
                         />
                       ) : (
@@ -1698,7 +1699,9 @@ export default function GalleryClient() {
                               className={`rounded-2xl overflow-hidden border transition-all duration-300 hover:shadow-lg group flex flex-col justify-between ${
                                 isChecked ? 'ring-2 ring-emerald-500' : ''
                               } ${
-                                isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
+                                isDarkMode 
+                                  ? 'bg-[#16181e] border-white/10' 
+                                  : 'bg-white border-gray-100 shadow-sm'
                               }`}
                             >
                               <div 
@@ -1707,11 +1710,13 @@ export default function GalleryClient() {
                               >
                                 {hasCover ? (
                                   <img 
-                                    src={currentCover} 
+                                    src={(currentCover || '').replace(/=w\d+.*$/, '=w400-h400-p-k-no')} 
                                     alt={displayName} 
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                    loading="lazy"
+                                    decoding="async"
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                     onError={(e) => {
-                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${folder.id}=w1000`
+                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${folder.id}=w400-h400-p-k-no`
                                     }}
                                   />
                                 ) : (
@@ -1806,7 +1811,7 @@ export default function GalleryClient() {
                         .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map((item) => {
                           const currentStar = ratings[item.id] || 0
-                          const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w600`
+                          const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`
                           const displayName = customNames[item.id] || item.name
                           const isChecked = selectedItemIds.has(item.id)
 
@@ -1837,9 +1842,10 @@ export default function GalleryClient() {
                                     src={fastDisplayUrl} 
                                     alt={displayName} 
                                     loading="lazy"
+                                    decoding="async"
                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                                     onError={(e) => {
-                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}=w1000`
+                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}=w360`
                                     }}
                                   />
                                 )}
