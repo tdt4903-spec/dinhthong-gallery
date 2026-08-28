@@ -19,11 +19,20 @@ const toNumericCode = (str: string) => {
   return String(Math.abs(hash) % 900000 + 100000)
 }
 
+const extractDriveId = (url: string) => {
+  if (!url) return ''
+  const clean = url.trim()
+  const matchFolder = clean.match(/folders\/([a-zA-Z0-9_-]+)/)
+  if (matchFolder && matchFolder[1]) return matchFolder[1]
+  const matchFile = clean.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  if (matchFile && matchFile[1]) return matchFile[1]
+  return clean.replace(/[^a-zA-Z0-9_-]/g, '')
+}
+
 export async function generateMetadata({ params }: ShortPageProps) {
   const { id: inputCode } = await params
   let targetTitle = ''
-  let coverImageUrl = ''
-  let targetRealId = inputCode
+  let directCoverUrl = ''
   const baseUrl = 'https://dinhthong-gallery.vercel.app'
 
   const supabase = createClient(
@@ -31,42 +40,43 @@ export async function generateMetadata({ params }: ShortPageProps) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  // 1. Kiểm tra ảnh bìa riêng của thư mục con trong custom_covers
-  const { data: allCustomCovers } = await supabase.from('custom_covers').select('id, cover_url')
-  if (allCustomCovers) {
-    const matchedCover = allCustomCovers.find(c => c.id === inputCode || toNumericCode(c.id) === inputCode)
-    if (matchedCover?.cover_url) {
-      coverImageUrl = matchedCover.cover_url
-      targetRealId = matchedCover.id
+  // 1. Quét bảng custom_covers (Dành riêng cho Thư mục con đã chọn ảnh bìa)
+  const { data: allCovers } = await supabase.from('custom_covers').select('id, cover_url')
+  if (allCovers) {
+    const matched = allCovers.find(c => c.id === inputCode || toNumericCode(c.id) === inputCode)
+    if (matched?.cover_url) {
+      directCoverUrl = matched.cover_url
     }
   }
 
-  // 2. Kiểm tra tên tùy chỉnh do admin đặt trong custom_item_names
-  const { data: allCustomNames } = await supabase.from('custom_item_names').select('id, custom_name')
-  if (allCustomNames) {
-    const matchedName = allCustomNames.find(c => c.id === inputCode || toNumericCode(c.id) === inputCode || c.id === targetRealId)
-    if (matchedName?.custom_name) {
-      targetTitle = matchedName.custom_name
-    }
-  }
-
-  // 3. Nếu chưa có, kiểm tra trong bảng albums
-  if (!targetTitle || !coverImageUrl) {
-    const { data: allAlbums } = await supabase.from('albums').select('id, title, cover_url')
-    if (allAlbums) {
-      const matched = allAlbums.find(item => item.id === inputCode || toNumericCode(item.id) === inputCode || item.id === targetRealId)
-      if (matched) {
-        if (!targetTitle) targetTitle = matched.title
-        if (!coverImageUrl && matched.cover_url) coverImageUrl = matched.cover_url
+  // 2. Quét bảng albums (Dành cho Album trang chủ đã chọn ảnh bìa)
+  const { data: allAlbums } = await supabase.from('albums').select('id, title, cover_url')
+  if (allAlbums) {
+    const matched = allAlbums.find(a => a.id === inputCode || toNumericCode(a.id) === inputCode)
+    if (matched) {
+      targetTitle = matched.title
+      if (!directCoverUrl && matched.cover_url) {
+        directCoverUrl = matched.cover_url
       }
     }
   }
 
-  // 4. Kiểm tra trong known_drive_folders
+  // 3. Quét bảng custom_item_names (Lấy tên tiếng Việt Admin đổi)
+  if (!targetTitle) {
+    const { data: allNames } = await supabase.from('custom_item_names').select('id, custom_name')
+    if (allNames) {
+      const matched = allNames.find(n => n.id === inputCode || toNumericCode(n.id) === inputCode)
+      if (matched?.custom_name) {
+        targetTitle = matched.custom_name
+      }
+    }
+  }
+
+  // 4. Quét bảng known_drive_folders (Nếu chưa có tên tùy chỉnh)
   if (!targetTitle) {
     const { data: allKnown } = await supabase.from('known_drive_folders').select('id, name')
     if (allKnown) {
-      const matched = allKnown.find(item => item.id === inputCode || toNumericCode(item.id) === inputCode || item.id === targetRealId)
+      const matched = allKnown.find(k => k.id === inputCode || toNumericCode(k.id) === inputCode)
       if (matched?.name) {
         targetTitle = matched.name
       }
@@ -77,9 +87,11 @@ export async function generateMetadata({ params }: ShortPageProps) {
     ? `${targetTitle} - Dinh Thong Gallery` 
     : 'Dinh Thong Gallery'
 
-  const finalOgImage = coverImageUrl
-    ? `${baseUrl}/api/og?url=${encodeURIComponent(coverImageUrl)}`
-    : `${baseUrl}/banner.jpg`
+  // Tạo URL ảnh tĩnh thông qua API Proxy (Chống chặn bot)
+  let ogImageUrl = `${baseUrl}/banner.jpg`
+  if (directCoverUrl) {
+    ogImageUrl = `${baseUrl}/api/og?url=${encodeURIComponent(directCoverUrl)}`
+  }
 
   return {
     title: finalTitle,
@@ -93,7 +105,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
       siteName: 'Dinh Thong Gallery',
       images: [
         {
-          url: finalOgImage,
+          url: ogImageUrl,
           width: 1200,
           height: 630,
           alt: finalTitle,
@@ -105,7 +117,7 @@ export async function generateMetadata({ params }: ShortPageProps) {
       card: 'summary_large_image',
       title: finalTitle,
       description: 'Khoảnh khắc lưu giữ cảm xúc',
-      images: [finalOgImage],
+      images: [ogImageUrl],
     },
   }
 }
