@@ -1270,11 +1270,10 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-      {/* HEADER TỐI ƯU MOBILE: HỖ TRỢ CUỘN NGANG VÀ HIỂN THỊ ĐỦ THÔNG TIN */}
+      {/* HEADER */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/95 border-white/10' : 'bg-white/95 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
           
-          {/* Logo & Nút Quay Lại */}
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {selectedAlbum && !isSharedGuest && (
               <button 
@@ -1294,7 +1293,6 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          {/* KHU VỰC CÁC NÚT ĐIỀU HƯỚNG */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
             {selectedAlbum ? (
               <>
@@ -1390,7 +1388,6 @@ export default function GalleryClient() {
               )
             )}
 
-            {/* Dark Mode & Tài Khoản / Đăng xuất */}
             <div className="flex items-center gap-1.5 pl-1.5 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
               <button
                 onClick={() => setIsDarkMode(!isDarkMode)}
@@ -1457,7 +1454,6 @@ export default function GalleryClient() {
 
             <div className={`w-full h-[1px] mb-6 sm:mb-8 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
 
-            {/* HÀNG TIÊU ĐỀ ALBUM KÈM CÁC NÚT QUẢN TRỊ DRIVE */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
               <div className="flex items-center gap-2">
                 <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
@@ -1862,10 +1858,21 @@ export default function GalleryClient() {
                               >
                                 {item.type === 'video' ? (
                                   <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white relative">
-                                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
-                                      <Film className="w-8 h-8 sm:w-10 sm:h-10 text-emerald-400 drop-shadow-md" />
+                                    <img 
+                                      src={`https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`}
+                                      alt={displayName}
+                                      loading="lazy"
+                                      className="w-full h-full object-cover opacity-70 group-hover:scale-105 transition-transform duration-200"
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).style.display = 'none'
+                                      }}
+                                    />
+                                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 z-10">
+                                      <div className="p-3 rounded-full bg-black/60 backdrop-blur-sm text-emerald-400">
+                                        <Film className="w-6 h-6 sm:w-8 sm:h-8" />
+                                      </div>
                                     </div>
-                                    <span className="absolute top-2 left-2 bg-black/60 text-[9px] px-2 py-0.5 rounded flex items-center gap-1 z-20">
+                                    <span className="absolute top-2 left-2 bg-black/70 text-white font-bold text-[9px] px-2 py-0.5 rounded flex items-center gap-1 z-20">
                                       VIDEO
                                     </span>
                                   </div>
@@ -1997,16 +2004,17 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          {/* Vùng hiển thị ảnh chính */}
+          {/* Vùng hiển thị ảnh / video chính */}
           <div className="relative flex-1 flex items-center justify-center p-2 overflow-hidden">
             {previewMedia.type === 'video' ? (
-              <video 
-                src={previewMedia.fullUrl || previewMedia.downloadUrl} 
-                controls 
-                autoPlay 
-                playsInline
-                className="max-h-full max-w-full rounded-lg shadow-2xl"
-              />
+              <div className="relative w-full max-w-4xl h-[70vh] flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-2xl">
+                <iframe
+                  src={`https://drive.google.com/file/d/${previewMedia.id}/preview`}
+                  className="w-full h-full border-0 rounded-2xl"
+                  allow="autoplay; fullscreen"
+                  allowFullScreen
+                />
+              </div>
             ) : (
               <img 
                 src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
@@ -2015,7 +2023,6 @@ export default function GalleryClient() {
               />
             )}
 
-            {/* Nút Previous & Next cho máy tính */}
             <button
               onClick={(e) => { e.stopPropagation(); handlePrevImage(); }}
               className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block"
@@ -2062,7 +2069,6 @@ export default function GalleryClient() {
               )}
             </div>
 
-            {/* Thumbnail cuộn phía dưới */}
             <div 
               ref={thumbnailRef}
               className="flex items-center gap-2 overflow-x-auto max-w-full py-1 px-4 scrollbar-none"
