@@ -12,7 +12,6 @@ import {
   Sparkles, RotateCcw, PenSquare, History, Eye, EyeOff, Calculator, Equal, Search, FileSpreadsheet, FileText
 } from 'lucide-react'
 
-// Hàm lấy ngày hiện tại định dạng YYYY-MM-DD theo giờ địa phương
 function getTodayDateString(): string {
   const now = new Date()
   const yyyy = now.getFullYear()
@@ -200,7 +199,6 @@ export default function MoneyManagerPage() {
   const [mobileTab, setMobileTab] = useState<'input' | 'charts' | 'history'>('input')
   const [type, setType] = useState<'expense' | 'income'>('expense')
   
-  // Tự động khởi tạo theo ngày thực tế trên thiết bị
   const [currentDateStr, setCurrentDateStr] = useState<string>(getTodayDateString())
   const [note, setNote] = useState('')
   const [amountStr, setAmountStr] = useState('')
@@ -533,7 +531,6 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // HÀM NHẬP FILE ĐA NĂNG (CSV, XLSX, TXT) THÔNG MINH
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!supabase) return
     const file = e.target.files?.[0]
@@ -551,12 +548,10 @@ export default function MoneyManagerPage() {
           return
         }
 
-        // Dùng thư viện XLSX đọc cả file Excel (.xlsx/.xls) lẫn file text (.csv)
         const workbook = XLSX.read(buffer, { type: 'binary', cellDates: true })
         const firstSheetName = workbook.SheetNames[0]
         const worksheet = workbook.Sheets[firstSheetName]
         
-        // Chuyển Sheet thành mảng dạng mảng các dòng hoặc object
         const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' })
 
         if (!rawJson || rawJson.length === 0) {
@@ -569,7 +564,6 @@ export default function MoneyManagerPage() {
         let inDailyData = false
         let colIndexMap = { date: -1, amount: -1, memo: -1, cat: -1, type: -1 }
 
-        // Quét từng dòng
         for (let i = 0; i < rawJson.length; i++) {
           const row = rawJson[i]
           if (!Array.isArray(row) || row.length === 0) continue
@@ -577,7 +571,6 @@ export default function MoneyManagerPage() {
           const rowStr = row.map(c => String(c).trim()).join(' ')
           if (!rowStr) continue
 
-          // Kiểm tra xem dòng này có phải Header không
           const lowerHeaders = row.map(c => String(c).toLowerCase().trim())
           const isHeaderRow = lowerHeaders.some(h => 
             h.includes('date') || h.includes('ngày') || h.includes('amount') || 
@@ -601,69 +594,56 @@ export default function MoneyManagerPage() {
             break
           }
 
-          // Trích xuất dữ liệu dòng
-          let rawDate = ''
-          let rawAmount = ''
-          let rawMemo = ''
-          let rawCat = ''
-          let rawType = '0'
+          const rawDateCell: any = (colIndexMap.date !== -1 && row[colIndexMap.date] !== undefined)
+            ? row[colIndexMap.date]
+            : row[0]
 
-          if (colIndexMap.date !== -1 && row[colIndexMap.date] !== undefined) {
-            rawDate = String(row[colIndexMap.date]).trim()
-          } else {
-            rawDate = String(row[0] || '').trim()
-          }
+          const rawAmountCell: any = (colIndexMap.amount !== -1 && row[colIndexMap.amount] !== undefined)
+            ? row[colIndexMap.amount]
+            : row[1]
 
-          if (colIndexMap.amount !== -1 && row[colIndexMap.amount] !== undefined) {
-            rawAmount = String(row[colIndexMap.amount]).trim()
-          } else {
-            rawAmount = String(row[1] || '').trim()
-          }
+          const rawMemoCell: any = (colIndexMap.memo !== -1 && row[colIndexMap.memo] !== undefined)
+            ? row[colIndexMap.memo]
+            : (row.length > 2 ? row[2] : '')
 
-          if (colIndexMap.memo !== -1 && row[colIndexMap.memo] !== undefined) {
-            rawMemo = String(row[colIndexMap.memo]).trim()
-          } else if (row.length > 2) {
-            rawMemo = String(row[2] || '').trim()
-          }
+          const rawCatCell: any = (colIndexMap.cat !== -1 && row[colIndexMap.cat] !== undefined)
+            ? row[colIndexMap.cat]
+            : (row.length > 3 ? row[3] : '')
 
-          if (colIndexMap.cat !== -1 && row[colIndexMap.cat] !== undefined) {
-            rawCat = String(row[colIndexMap.cat]).trim()
-          } else if (row.length > 3) {
-            rawCat = String(row[3] || '').trim()
-          }
+          const rawTypeCell: any = (colIndexMap.type !== -1 && row[colIndexMap.type] !== undefined)
+            ? row[colIndexMap.type]
+            : (row.length > 4 ? row[4] : '0')
 
-          if (colIndexMap.type !== -1 && row[colIndexMap.type] !== undefined) {
-            rawType = String(row[colIndexMap.type]).trim()
-          } else if (row.length > 4) {
-            rawType = String(row[4] || '').trim()
-          }
+          const rawAmount = String(rawAmountCell ?? '').trim()
+          const rawMemo = String(rawMemoCell ?? '').trim()
+          const rawCat = String(rawCatCell ?? '').trim()
+          const rawType = String(rawTypeCell ?? '0').trim()
 
-          // Chuẩn hóa số tiền
-          let cleanAmountStr = rawAmount.replace(/[,.đ₫\s]/g, '').replace(/[^0-9-]/g, '')
-          let numAmount = Math.abs(Number(cleanAmountStr))
+          const cleanAmountStr = rawAmount.replace(/[,.đ₫\s]/g, '').replace(/[^0-9-]/g, '')
+          const numAmount = Math.abs(Number(cleanAmountStr))
           if (!numAmount || isNaN(numAmount)) continue
 
-          // Chuẩn hóa ngày
           let formattedDate = currentDateStr
-          let cleanDate = rawDate.replace(/[./]/g, '-').replace(/["']/g, '')
-
-          if (rawDate instanceof Date) {
-            const y = rawDate.getFullYear()
-            const m = String(rawDate.getMonth() + 1).padStart(2, '0')
-            const d = String(rawDate.getDate()).padStart(2, '0')
+          if (rawDateCell && typeof rawDateCell === 'object' && 'getFullYear' in rawDateCell) {
+            const dateObj = rawDateCell as Date
+            const y = dateObj.getFullYear()
+            const m = String(dateObj.getMonth() + 1).padStart(2, '0')
+            const d = String(dateObj.getDate()).padStart(2, '0')
             formattedDate = `${y}-${m}-${d}`
-          } else if (cleanDate.includes('-')) {
-            const dParts = cleanDate.split('T')[0].split('-')
-            if (dParts.length === 3) {
-              if (dParts[0].length === 4) {
-                formattedDate = `${dParts[0]}-${dParts[1].padStart(2, '0')}-${dParts[2].padStart(2, '0')}`
-              } else if (dParts[2].length === 4) {
-                formattedDate = `${dParts[2]}-${dParts[1].padStart(2, '0')}-${dParts[0].padStart(2, '0')}`
+          } else {
+            const rawDateStr = String(rawDateCell ?? '').trim().replace(/[./]/g, '-').replace(/["']/g, '')
+            if (rawDateStr.includes('-')) {
+              const dParts = rawDateStr.split('T')[0].split('-')
+              if (dParts.length === 3) {
+                if (dParts[0].length === 4) {
+                  formattedDate = `${dParts[0]}-${dParts[1].padStart(2, '0')}-${dParts[2].padStart(2, '0')}`
+                } else if (dParts[2].length === 4) {
+                  formattedDate = `${dParts[2]}-${dParts[1].padStart(2, '0')}-${dParts[0].padStart(2, '0')}`
+                }
               }
             }
           }
 
-          // Xác định Loại & Danh mục
           const isIncome = rawType === '1' || rawType.toLowerCase().includes('thu') || rawType.toLowerCase().includes('income')
           let categoryName = rawCat
           if (!categoryName || !isNaN(Number(categoryName))) {
@@ -686,7 +666,6 @@ export default function MoneyManagerPage() {
           return
         }
 
-        // Chèn vào Supabase theo từng đợt
         const CHUNK_SIZE = 300
         for (let i = 0; i < formattedToInsert.length; i += CHUNK_SIZE) {
           const chunk = formattedToInsert.slice(i, i + CHUNK_SIZE)
@@ -707,7 +686,6 @@ export default function MoneyManagerPage() {
     reader.readAsBinaryString(file)
   }
 
-  // Xuất file Excel (.xlsx)
   const handleExportExcel = () => {
     setShowExportMenu(false)
     if (!transactions || transactions.length === 0) {
@@ -746,7 +724,6 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // Xuất file CSV (.csv)
   const handleExportCSV = () => {
     setShowExportMenu(false)
     if (!transactions || transactions.length === 0) {
@@ -895,11 +872,10 @@ export default function MoneyManagerPage() {
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 pb-28 sm:pb-12">
       
-      {/* HEADER TỐI ƯU GỌN GÀNG */}
+      {/* HEADER */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-2xs">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
           
-          {/* Cụm Logo & Quay lại */}
           <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <button
               onClick={() => router.push('/gallery')}
@@ -914,10 +890,8 @@ export default function MoneyManagerPage() {
             </h1>
           </div>
 
-          {/* Thanh công cụ tối ưu cuộn ngang */}
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[62vw] sm:max-w-none justify-end">
             
-            {/* Box Số Dư & Dropdown Thống Kê */}
             <div className="relative flex-shrink-0">
               <div className="flex items-center bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition shadow-2xs">
                 <button
@@ -971,7 +945,6 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
-            {/* Nút Nhập File (Hiển thị cả trên Mobile & Máy tính) */}
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isImporting}
@@ -982,7 +955,6 @@ export default function MoneyManagerPage() {
               <span className="hidden xs:inline">{isImporting ? 'Đang nạp...' : 'Nhập File'}</span>
             </button>
 
-            {/* Menu Xuất File Tùy Chọn (Excel / CSV) */}
             <div className="relative hidden sm:block flex-shrink-0" ref={exportMenuRef}>
               <button
                 type="button"
@@ -1014,7 +986,6 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
-            {/* Nút Xóa Dữ Liệu */}
             <button
               onClick={handleDeleteAll}
               disabled={isDeletingAll || transactions.length === 0}
@@ -1032,7 +1003,6 @@ export default function MoneyManagerPage() {
               className="hidden" 
             />
 
-            {/* Tài Khoản & Đăng Xuất */}
             <div className="flex items-center gap-1 pl-1 sm:pl-1.5 border-l border-slate-200 flex-shrink-0">
               {user?.user_metadata?.avatar_url ? (
                 <img 
@@ -1100,7 +1070,6 @@ export default function MoneyManagerPage() {
 
               <form onSubmit={handleSubmit} className="space-y-3.5 sm:space-y-4">
                 
-                {/* 1. Chọn ngày qua lịch */}
                 <div>
                   <label className="block text-[11px] sm:text-xs font-bold text-slate-700 mb-1">Ngày thực hiện:</label>
                   <div className="flex items-center justify-between bg-[#fff9db]/90 border border-[#ffe066] px-3.5 py-2.5 sm:py-3 rounded-2xl font-bold text-slate-800 relative shadow-2xs">
@@ -1130,7 +1099,6 @@ export default function MoneyManagerPage() {
                   </div>
                 </div>
 
-                {/* 2. Ô Ghi chú */}
                 <div>
                   <label className="block text-[11px] sm:text-xs font-bold text-slate-700 mb-1">Nội dung chi tiết (Ghi chú):</label>
                   <input 
@@ -1160,7 +1128,6 @@ export default function MoneyManagerPage() {
                   )}
                 </div>
 
-                {/* 3. Ô NHẬP SỐ TIỀN */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[11px] sm:text-xs font-bold text-slate-700 flex items-center gap-1">
@@ -1206,7 +1173,6 @@ export default function MoneyManagerPage() {
                     )}
                   </div>
 
-                  {/* TOÁN TỬ & GỢI Ý TIỀN */}
                   <div className="mt-2.5 space-y-2">
                     <div>
                       <p className="text-[10px] font-bold text-slate-500 mb-1">Toán tử tính toán:</p>
@@ -1267,7 +1233,6 @@ export default function MoneyManagerPage() {
                   </div>
                 </div>
 
-                {/* 4. Danh mục */}
                 <div className="pt-1">
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="font-bold text-[11px] sm:text-xs text-slate-700">Chọn Danh Mục:</span>
@@ -1351,7 +1316,6 @@ export default function MoneyManagerPage() {
           {/* CỘT PHẢI: BIỂU ĐỒ & LỊCH SỬ GIAO DỊCH */}
           <div className={`lg:col-span-7 space-y-5 sm:space-y-6 ${mobileTab === 'input' ? 'hidden lg:block' : 'block'}`}>
             
-            {/* BOX BIỂU ĐỒ & THỐNG KÊ */}
             <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm transition-all ${mobileTab === 'history' ? 'hidden lg:block' : 'block'}`}>
               
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3.5 border-b border-slate-100 mb-3.5">
@@ -1535,7 +1499,6 @@ export default function MoneyManagerPage() {
 
             </div>
 
-            {/* BOX LỊCH SỬ GIAO DỊCH */}
             <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm ${mobileTab === 'charts' ? 'hidden lg:block' : 'block'}`}>
               
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3.5 border-b border-slate-100 mb-3.5">
@@ -1576,7 +1539,6 @@ export default function MoneyManagerPage() {
                 </div>
               </div>
 
-              {/* Ô TÌM KIẾM TRONG LỊCH SỬ */}
               <div className="relative mb-3.5">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input 
@@ -1596,7 +1558,6 @@ export default function MoneyManagerPage() {
                 )}
               </div>
 
-              {/* DANH SÁCH LỊCH SỬ */}
               <div className="space-y-4 max-h-[520px] overflow-y-auto pr-0.5">
                 {groupedByDayHistory.length === 0 ? (
                   <p className="text-center py-10 text-xs text-slate-400">Không tìm thấy giao dịch nào trong khoảng thời gian đã lọc.</p>
@@ -1604,7 +1565,6 @@ export default function MoneyManagerPage() {
                   groupedByDayHistory.map((dayGroup) => (
                     <div key={dayGroup.date} className="rounded-2xl border border-slate-100 overflow-hidden shadow-2xs bg-white">
                       
-                      {/* HEADER NGÀY */}
                       <div className="bg-slate-50/90 border-b border-slate-100 px-3.5 py-2 flex items-center justify-between text-xs">
                         <div className="flex items-center gap-1.5 font-bold text-slate-800">
                           <Calendar className="w-3.5 h-3.5 text-orange-500" />
@@ -1622,7 +1582,6 @@ export default function MoneyManagerPage() {
                         </div>
                       </div>
 
-                      {/* DANH SÁCH THU CHI */}
                       <div className="divide-y divide-slate-100">
                         {dayGroup.items.map((t) => (
                           <div 
@@ -1708,7 +1667,6 @@ export default function MoneyManagerPage() {
           <span>Lịch sử</span>
         </button>
 
-        {/* Nút Nhập File trên Mobile */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -1721,7 +1679,6 @@ export default function MoneyManagerPage() {
           <span>{isImporting ? 'Đang nạp...' : 'Nhập File'}</span>
         </button>
 
-        {/* Nút Xuất Excel trên Mobile */}
         <button
           type="button"
           onClick={handleExportExcel}
