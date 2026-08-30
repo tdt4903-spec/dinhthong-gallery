@@ -12,6 +12,15 @@ import {
   Sparkles, RotateCcw, PenSquare, History, Eye, EyeOff, Calculator, Equal, Search, FileSpreadsheet, FileText
 } from 'lucide-react'
 
+// Hàm lấy ngày hiện tại định dạng YYYY-MM-DD theo giờ địa phương
+function getTodayDateString(): string {
+  const now = new Date()
+  const yyyy = now.getFullYear()
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  const dd = String(now.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
 const CATEGORY_ID_MAP: Record<number, string> = {
   1: 'Ăn uống',
   2: 'Chi tiêu hàng ngày',
@@ -36,7 +45,6 @@ const CATEGORY_ID_MAP: Record<number, string> = {
   21: 'Tết',
 }
 
-// Bảng ánh xạ ngược từ Tên danh mục -> ID để xuất CSV chuẩn
 const CATEGORY_NAME_TO_ID: Record<string, number> = Object.entries(CATEGORY_ID_MAP).reduce((acc, [id, name]) => {
   acc[name] = Number(id)
   return acc
@@ -191,7 +199,9 @@ export default function MoneyManagerPage() {
 
   const [mobileTab, setMobileTab] = useState<'input' | 'charts' | 'history'>('input')
   const [type, setType] = useState<'expense' | 'income'>('expense')
-  const [currentDateStr, setCurrentDateStr] = useState<string>('2026-08-28')
+  
+  // Tự động khởi tạo theo ngày thực tế trên thiết bị
+  const [currentDateStr, setCurrentDateStr] = useState<string>(getTodayDateString())
   const [note, setNote] = useState('')
   const [amountStr, setAmountStr] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('Ăn uống')
@@ -209,14 +219,16 @@ export default function MoneyManagerPage() {
 
   const [chartSubTab, setChartSubTab] = useState<'stats' | 'category'>('stats')
   const [chartPeriodMode, setChartPeriodMode] = useState<'year' | 'month' | 'all'>('year')
-  const [chartSelectedYear, setChartSelectedYear] = useState<number>(2026)
-  const [chartSelectedMonth, setChartSelectedMonth] = useState<number>(8)
+  
+  const [chartSelectedYear, setChartSelectedYear] = useState<number>(new Date().getFullYear())
+  const [chartSelectedMonth, setChartSelectedMonth] = useState<number>(new Date().getMonth() + 1)
 
   const [historyFilterYear, setHistoryFilterYear] = useState<string>('all')
   const [historyFilterMonth, setHistoryFilterMonth] = useState<string>('all')
   const [historySearchTerm, setHistorySearchTerm] = useState<string>('')
 
   const [isDeletingAll, setIsDeletingAll] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dateInputRef = useRef<HTMLInputElement>(null)
   const exportMenuRef = useRef<HTMLDivElement>(null)
@@ -260,6 +272,9 @@ export default function MoneyManagerPage() {
 
   useEffect(() => {
     setMounted(true)
+    setCurrentDateStr(getTodayDateString())
+    setChartSelectedYear(new Date().getFullYear())
+    setChartSelectedMonth(new Date().getMonth() + 1)
     try {
       if (typeof window !== 'undefined') {
         const saved = localStorage.getItem('dinhthong_hide_balance')
@@ -337,11 +352,8 @@ export default function MoneyManagerPage() {
   }, [transactions, selectedCategory])
 
   const availableYears = useMemo(() => {
-    const yearSet = new Set<number>()
-    yearSet.add(2026)
-    yearSet.add(2025)
-    yearSet.add(2024)
-    yearSet.add(2023)
+    const currentY = new Date().getFullYear()
+    const yearSet = new Set<number>([currentY, currentY - 1, currentY - 2, currentY - 3])
     transactions.forEach(t => {
       if (t && t.date) {
         const y = Number(String(t.date).split('-')[0])
@@ -357,9 +369,9 @@ export default function MoneyManagerPage() {
       const clean = String(dateStr).split('T')[0]
       const parts = clean.split('-')
       if (parts.length === 3) {
-        const y = Number(parts[0]) || 2026
-        const m = Number(parts[1]) || 1
-        const d = Number(parts[2]) || 1
+        const y = Number(parts[0])
+        const m = Number(parts[1])
+        const d = Number(parts[2])
         const dateObj = new Date(y, m - 1, d)
         const daysOfWeek = ['CN', 'Th 2', 'Th 3', 'Th 4', 'Th 5', 'Th 6', 'Th 7']
         const dayName = daysOfWeek[dateObj.getDay()] || 'CN'
@@ -521,92 +533,160 @@ export default function MoneyManagerPage() {
     }
   }
 
+  // HÀM NHẬP FILE ĐA NĂNG (CSV, XLSX, TXT) THÔNG MINH
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!supabase) return
     const file = e.target.files?.[0]
     if (!file) return
 
+    setIsImporting(true)
     const reader = new FileReader()
+
     reader.onload = async (evt) => {
       try {
-        const text = evt.target?.result as string
-        if (!text) {
-          alert('File rỗng!')
+        const buffer = evt.target?.result
+        if (!buffer) {
+          alert('File không có nội dung!')
+          setIsImporting(false)
           return
         }
 
-        const lines = text.split(/\r?\n/)
+        // Dùng thư viện XLSX đọc cả file Excel (.xlsx/.xls) lẫn file text (.csv)
+        const workbook = XLSX.read(buffer, { type: 'binary', cellDates: true })
+        const firstSheetName = workbook.SheetNames[0]
+        const worksheet = workbook.Sheets[firstSheetName]
+        
+        // Chuyển Sheet thành mảng dạng mảng các dòng hoặc object
+        const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' })
+
+        if (!rawJson || rawJson.length === 0) {
+          alert('File rỗng hoặc không có dữ liệu!')
+          setIsImporting(false)
+          return
+        }
+
         const formattedToInsert: any[] = []
-
         let inDailyData = false
-        let colMap = { date: 0, amount: 1, memo: 2, catId: 3, type: 4 }
+        let colIndexMap = { date: -1, amount: -1, memo: -1, cat: -1, type: -1 }
 
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].trim()
-          if (!line) continue
+        // Quét từng dòng
+        for (let i = 0; i < rawJson.length; i++) {
+          const row = rawJson[i]
+          if (!Array.isArray(row) || row.length === 0) continue
 
-          if (line.includes('#DAILY_DATAS') || line.includes('inputDateString')) {
+          const rowStr = row.map(c => String(c).trim()).join(' ')
+          if (!rowStr) continue
+
+          // Kiểm tra xem dòng này có phải Header không
+          const lowerHeaders = row.map(c => String(c).toLowerCase().trim())
+          const isHeaderRow = lowerHeaders.some(h => 
+            h.includes('date') || h.includes('ngày') || h.includes('amount') || 
+            h.includes('tiền') || h.includes('memo') || h.includes('ghi chú') ||
+            h.includes('category') || h.includes('danh mục') || h.includes('#daily_datas')
+          )
+
+          if (isHeaderRow) {
             inDailyData = true
-            if (line.includes('inputDateString')) {
-              const headers = line.split(',').map(h => h.trim())
-              colMap.date = headers.indexOf('inputDateString')
-              colMap.amount = headers.indexOf('amount')
-              colMap.memo = headers.indexOf('memo')
-              colMap.catId = headers.indexOf('categoryId')
-              colMap.type = headers.indexOf('type')
+            colIndexMap = {
+              date: lowerHeaders.findIndex(h => h.includes('date') || h.includes('ngày') || h === 'inputdatestring'),
+              amount: lowerHeaders.findIndex(h => h.includes('amount') || h.includes('tiền') || h.includes('số tiền') || h.includes('chi') || h.includes('thu')),
+              memo: lowerHeaders.findIndex(h => h.includes('memo') || h.includes('ghi chú') || h.includes('nội dung') || h.includes('note')),
+              cat: lowerHeaders.findIndex(h => h.includes('category') || h.includes('danh mục') || h.includes('phân loại') || h.includes('categoryid')),
+              type: lowerHeaders.findIndex(h => h.includes('type') || h.includes('loại'))
             }
             continue
           }
 
-          if (inDailyData && line.startsWith('#') && !line.includes('#DAILY_DATAS')) {
+          if (inDailyData && rowStr.startsWith('#') && !rowStr.includes('#DAILY_DATAS')) {
             break
           }
 
-          if (inDailyData) {
-            const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',')
-            if (!parts || parts.length < 3) continue
+          // Trích xuất dữ liệu dòng
+          let rawDate = ''
+          let rawAmount = ''
+          let rawMemo = ''
+          let rawCat = ''
+          let rawType = '0'
 
-            const rawDate = (parts[colMap.date] || '').replace(/["']/g, '').trim()
-            const rawAmount = (parts[colMap.amount] || '').replace(/["']/g, '').trim()
-            const rawMemo = (parts[colMap.memo] || '').replace(/["\\n\r]/g, ' ').trim()
-            const rawCatId = Number((parts[colMap.catId] || '1').replace(/["']/g, '').trim())
-            const rawType = (parts[colMap.type] || '0').replace(/["']/g, '').trim()
+          if (colIndexMap.date !== -1 && row[colIndexMap.date] !== undefined) {
+            rawDate = String(row[colIndexMap.date]).trim()
+          } else {
+            rawDate = String(row[0] || '').trim()
+          }
 
-            const numAmount = Number(rawAmount)
-            if (!numAmount || isNaN(numAmount)) continue
+          if (colIndexMap.amount !== -1 && row[colIndexMap.amount] !== undefined) {
+            rawAmount = String(row[colIndexMap.amount]).trim()
+          } else {
+            rawAmount = String(row[1] || '').trim()
+          }
 
-            let formattedDate = currentDateStr
-            const cleanDate = rawDate.replace(/\./g, '-').replace(/\//g, '-')
-            const dParts = cleanDate.split('-')
+          if (colIndexMap.memo !== -1 && row[colIndexMap.memo] !== undefined) {
+            rawMemo = String(row[colIndexMap.memo]).trim()
+          } else if (row.length > 2) {
+            rawMemo = String(row[2] || '').trim()
+          }
 
+          if (colIndexMap.cat !== -1 && row[colIndexMap.cat] !== undefined) {
+            rawCat = String(row[colIndexMap.cat]).trim()
+          } else if (row.length > 3) {
+            rawCat = String(row[3] || '').trim()
+          }
+
+          if (colIndexMap.type !== -1 && row[colIndexMap.type] !== undefined) {
+            rawType = String(row[colIndexMap.type]).trim()
+          } else if (row.length > 4) {
+            rawType = String(row[4] || '').trim()
+          }
+
+          // Chuẩn hóa số tiền
+          let cleanAmountStr = rawAmount.replace(/[,.đ₫\s]/g, '').replace(/[^0-9-]/g, '')
+          let numAmount = Math.abs(Number(cleanAmountStr))
+          if (!numAmount || isNaN(numAmount)) continue
+
+          // Chuẩn hóa ngày
+          let formattedDate = currentDateStr
+          let cleanDate = rawDate.replace(/[./]/g, '-').replace(/["']/g, '')
+
+          if (rawDate instanceof Date) {
+            const y = rawDate.getFullYear()
+            const m = String(rawDate.getMonth() + 1).padStart(2, '0')
+            const d = String(rawDate.getDate()).padStart(2, '0')
+            formattedDate = `${y}-${m}-${d}`
+          } else if (cleanDate.includes('-')) {
+            const dParts = cleanDate.split('T')[0].split('-')
             if (dParts.length === 3) {
               if (dParts[0].length === 4) {
                 formattedDate = `${dParts[0]}-${dParts[1].padStart(2, '0')}-${dParts[2].padStart(2, '0')}`
               } else if (dParts[2].length === 4) {
                 formattedDate = `${dParts[2]}-${dParts[1].padStart(2, '0')}-${dParts[0].padStart(2, '0')}`
               }
-            } else if (rawDate.includes('T')) {
-              formattedDate = rawDate.split('T')[0]
             }
-
-            const isIncome = rawType === '1'
-            const categoryName = CATEGORY_ID_MAP[rawCatId] || (isIncome ? 'Tiền lương' : 'Ăn uống')
-
-            formattedToInsert.push({
-              type: isIncome ? 'income' : 'expense',
-              amount: numAmount,
-              category: categoryName,
-              note: rawMemo,
-              date: formattedDate
-            })
           }
+
+          // Xác định Loại & Danh mục
+          const isIncome = rawType === '1' || rawType.toLowerCase().includes('thu') || rawType.toLowerCase().includes('income')
+          let categoryName = rawCat
+          if (!categoryName || !isNaN(Number(categoryName))) {
+            const catIdNum = Number(categoryName)
+            categoryName = CATEGORY_ID_MAP[catIdNum] || (isIncome ? 'Tiền lương' : 'Ăn uống')
+          }
+
+          formattedToInsert.push({
+            type: isIncome ? 'income' : 'expense',
+            amount: numAmount,
+            category: categoryName,
+            note: rawMemo.replace(/["\r\n]/g, ' '),
+            date: formattedDate
+          })
         }
 
         if (formattedToInsert.length === 0) {
-          alert('Không tìm thấy dữ liệu hợp lệ trong file CSV!')
+          alert('Không tìm thấy dữ liệu thu chi hợp lệ trong file!')
+          setIsImporting(false)
           return
         }
 
+        // Chèn vào Supabase theo từng đợt
         const CHUNK_SIZE = 300
         for (let i = 0; i < formattedToInsert.length; i += CHUNK_SIZE) {
           const chunk = formattedToInsert.slice(i, i + CHUNK_SIZE)
@@ -614,69 +694,93 @@ export default function MoneyManagerPage() {
           if (error) throw error
         }
 
-        alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch đầy đủ từ năm 2023 đến nay!`)
+        alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch vào Sổ Thu Chi!`)
         fetchTransactions()
       } catch (err: any) {
-        alert('Lỗi nạp file CSV: ' + err.message)
+        alert('Lỗi nạp file: ' + err.message)
       } finally {
+        setIsImporting(false)
         if (fileInputRef.current) fileInputRef.current.value = ''
       }
     }
-    reader.readAsText(file, 'UTF-8')
+
+    reader.readAsBinaryString(file)
   }
 
   // Xuất file Excel (.xlsx)
   const handleExportExcel = () => {
     setShowExportMenu(false)
-    if (transactions.length === 0) {
-      alert('Chưa có dữ liệu để xuất!')
+    if (!transactions || transactions.length === 0) {
+      alert('Chưa có dữ liệu nào trong sổ để xuất!')
       return
     }
 
-    const exportData = transactions.map((t, index) => ({
-      'STT': index + 1,
-      'Ngày': t.date,
-      'Loại': t.type === 'expense' ? 'Tiền chi' : 'Tiền thu',
-      'Danh mục': t.category,
-      'Số tiền (VNĐ)': t.amount,
-      'Ghi chú': t.note || ''
-    }))
+    try {
+      const exportData = transactions.map((t, index) => ({
+        'STT': index + 1,
+        'Ngày': t.date,
+        'Loại': t.type === 'expense' ? 'Tiền chi' : 'Tiền thu',
+        'Danh mục': t.category,
+        'Số tiền (VNĐ)': t.amount,
+        'Ghi chú': t.note || ''
+      }))
 
-    const worksheet = XLSX.utils.json_to_sheet(exportData)
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Thu_Chi')
-    XLSX.writeFile(workbook, `Bao_Cao_Thu_Chi_${currentDateStr}.xlsx`)
+      const worksheet = XLSX.utils.json_to_sheet(exportData)
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Thu_Chi')
+
+      const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
+      const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `Bao_Cao_Thu_Chi_${currentDateStr}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      setTimeout(() => {
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+      }, 500)
+    } catch (err: any) {
+      alert('Lỗi xuất file Excel: ' + err.message)
+    }
   }
 
-  // Xuất file CSV (.csv) đúng chuẩn #DAILY_DATAS để nhập ngược lại
+  // Xuất file CSV (.csv)
   const handleExportCSV = () => {
     setShowExportMenu(false)
-    if (transactions.length === 0) {
-      alert('Chưa có dữ liệu để xuất!')
+    if (!transactions || transactions.length === 0) {
+      alert('Chưa có dữ liệu nào trong sổ để xuất!')
       return
     }
 
-    const headerBlock = '#DAILY_DATAS\ninputDateString,amount,memo,categoryId,type\n'
-    const rows = transactions.map((t) => {
-      const dateStr = t.date || '2026-08-28'
-      const amountVal = t.amount || 0
-      const memoVal = (t.note || '').replace(/"/g, '""')
-      const catId = CATEGORY_NAME_TO_ID[t.category] || (t.type === 'income' ? 12 : 1)
-      const typeVal = t.type === 'income' ? '1' : '0'
+    try {
+      const headerBlock = '#DAILY_DATAS\ninputDateString,amount,memo,categoryId,type\n'
+      const rows = transactions.map((t) => {
+        const dateStr = t.date || getTodayDateString()
+        const amountVal = t.amount || 0
+        const memoVal = (t.note || '').replace(/"/g, '""')
+        const catId = CATEGORY_NAME_TO_ID[t.category] || (t.type === 'income' ? 12 : 1)
+        const typeVal = t.type === 'income' ? '1' : '0'
 
-      return `"${dateStr}",${amountVal},"${memoVal}",${catId},${typeVal}`
-    }).join('\n')
+        return `"${dateStr}",${amountVal},"${memoVal}",${catId},${typeVal}`
+      }).join('\n')
 
-    const csvContent = '\uFEFF' + headerBlock + rows
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.setAttribute('download', `Du_Lieu_Thu_Chi_${currentDateStr}.csv`)
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+      const csvContent = '\uFEFF' + headerBlock + rows
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `Du_Lieu_Thu_Chi_${currentDateStr}.csv`
+      document.body.appendChild(link)
+      link.click()
+      setTimeout(() => {
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+      }, 500)
+    } catch (err: any) {
+      alert('Lỗi xuất file CSV: ' + err.message)
+    }
   }
 
   const handleSignOut = async () => {
@@ -760,7 +864,7 @@ export default function MoneyManagerPage() {
     const map: Record<string, { date: string; items: Transaction[]; totalExpense: number; totalIncome: number }> = {}
     
     historyFiltered.forEach(t => {
-      const d = t.date || '2026-08-28'
+      const d = t.date || getTodayDateString()
       if (!map[d]) {
         map[d] = {
           date: d,
@@ -867,6 +971,17 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
+            {/* Nút Nhập File (Hiển thị cả trên Mobile & Máy tính) */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isImporting}
+              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer flex-shrink-0 disabled:opacity-50"
+              title="Nhập dữ liệu từ file CSV / Excel"
+            >
+              {isImporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+              <span className="hidden xs:inline">{isImporting ? 'Đang nạp...' : 'Nhập File'}</span>
+            </button>
+
             {/* Menu Xuất File Tùy Chọn (Excel / CSV) */}
             <div className="relative hidden sm:block flex-shrink-0" ref={exportMenuRef}>
               <button
@@ -899,14 +1014,6 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition cursor-pointer flex-shrink-0"
-            >
-              <Upload className="w-4 h-4" />
-              <span>Nhập File</span>
-            </button>
-
             {/* Nút Xóa Dữ Liệu */}
             <button
               onClick={handleDeleteAll}
@@ -921,7 +1028,7 @@ export default function MoneyManagerPage() {
               type="file" 
               ref={fileInputRef} 
               onChange={handleImportCSV} 
-              accept=".csv, .txt, .xlsx" 
+              accept=".csv, .txt, .xlsx, .xls" 
               className="hidden" 
             />
 
@@ -1601,6 +1708,19 @@ export default function MoneyManagerPage() {
           <span>Lịch sử</span>
         </button>
 
+        {/* Nút Nhập File trên Mobile */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isImporting}
+          className="flex flex-col items-center gap-0.5 text-[10px] font-bold text-slate-400 hover:text-blue-600 cursor-pointer transition"
+        >
+          <div className="p-1.5 rounded-xl">
+            {isImporting ? <Loader2 className="w-4 h-4 animate-spin text-blue-600" /> : <Upload className="w-4 h-4" />}
+          </div>
+          <span>{isImporting ? 'Đang nạp...' : 'Nhập File'}</span>
+        </button>
+
         {/* Nút Xuất Excel trên Mobile */}
         <button
           type="button"
@@ -1610,19 +1730,7 @@ export default function MoneyManagerPage() {
           <div className="p-1.5 rounded-xl">
             <FileSpreadsheet className="w-4 h-4" />
           </div>
-          <span>Xuất Excel</span>
-        </button>
-
-        {/* Nút Xuất CSV trên Mobile */}
-        <button
-          type="button"
-          onClick={handleExportCSV}
-          className="flex flex-col items-center gap-0.5 text-[10px] font-bold text-slate-400 hover:text-blue-600 cursor-pointer transition"
-        >
-          <div className="p-1.5 rounded-xl">
-            <FileText className="w-4 h-4" />
-          </div>
-          <span>Xuất CSV</span>
+          <span>Xuất File</span>
         </button>
       </div>
 

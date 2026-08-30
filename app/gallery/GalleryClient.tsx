@@ -177,7 +177,6 @@ export default function GalleryClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
-  // CẬP NHẬT TIÊU ĐỀ TAB TRÌNH DUYỆT ĐỘNG
   useEffect(() => {
     if (previewMedia) {
       const fileName = customNames[previewMedia.id] || previewMedia.name
@@ -1859,7 +1858,7 @@ export default function GalleryClient() {
                             >
                               <div 
                                 onClick={() => setPreviewMedia(item)}
-                                className="h-44 sm:h-56 bg-gray-100 dark:bg-gray-800 relative cursor-pointer overflow-hidden flex items-center justify-center"
+                                className="h-44 sm:h-56 bg-gray-100 dark:bg-gray-800 relative cursor-pointer overflow-hidden flex items-center justify-center select-none"
                               >
                                 {item.type === 'video' ? (
                                   <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white relative">
@@ -1876,7 +1875,7 @@ export default function GalleryClient() {
                                     alt={displayName} 
                                     loading="lazy"
                                     decoding="async"
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200 pointer-events-none"
                                     onError={(e) => {
                                       (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}=w360`
                                     }}
@@ -1885,7 +1884,7 @@ export default function GalleryClient() {
 
                                 <button
                                   onClick={(e) => handleToggleSelectItem(item.id, e)}
-                                  className="absolute bottom-2 left-2 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
+                                  className="absolute bottom-2 left-2 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
                                   title={isChecked ? 'Bỏ chọn' : 'Chọn tệp'}
                                 >
                                   {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
@@ -1960,6 +1959,134 @@ export default function GalleryClient() {
         )}
       </main>
 
+      {/* MODAL LIGHTBOX / XEM ẢNH & VIDEO PHÓNG TO TOÀN MÀN HÌNH */}
+      {previewMedia && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-2 sm:p-4 select-none touch-pan-y"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          {/* Header Lightbox */}
+          <div className="flex items-center justify-between px-3 py-2 text-white/90 z-20">
+            <div className="truncate max-w-[60vw]">
+              <h4 className="text-xs sm:text-sm font-medium truncate">
+                {customNames[previewMedia.id] || previewMedia.name}
+              </h4>
+              <span className="text-[10px] text-white/50">
+                {currentIndex + 1} / {previewSourceList.length}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={(e) => handleDownloadMedia(previewMedia, e)}
+                disabled={downloadingId === previewMedia.id}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                title="Tải về máy"
+              >
+                {downloadingId === previewMedia.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={handleClosePreview}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                title="Đóng (Esc)"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Vùng hiển thị ảnh chính */}
+          <div className="relative flex-1 flex items-center justify-center p-2 overflow-hidden">
+            {previewMedia.type === 'video' ? (
+              <video 
+                src={previewMedia.fullUrl || previewMedia.downloadUrl} 
+                controls 
+                autoPlay 
+                playsInline
+                className="max-h-full max-w-full rounded-lg shadow-2xl"
+              />
+            ) : (
+              <img 
+                src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
+                alt={previewMedia.name}
+                className="max-h-full max-w-full object-contain rounded-lg shadow-2xl transition-all duration-150"
+              />
+            )}
+
+            {/* Nút Previous & Next cho máy tính */}
+            <button
+              onClick={(e) => { e.stopPropagation(); handlePrevImage(); }}
+              className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); handleNextImage(); }}
+              className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+          </div>
+
+          {/* Thanh công cụ đánh giá Sao & Đặt ảnh bìa ở dưới cùng */}
+          <div className="flex flex-col items-center gap-2 pb-2 z-20">
+            <div className="flex items-center gap-1.5 bg-black/60 px-4 py-2 rounded-full backdrop-blur-md border border-white/10">
+              <span className="text-[11px] text-white/70 mr-1">Đánh giá:</span>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  onClick={() => handleRateImage(previewMedia.id, (ratings[previewMedia.id] || 0) === star ? 0 : star)}
+                  className="p-1 text-white hover:scale-110 transition cursor-pointer"
+                >
+                  <Star className={`w-4 h-4 sm:w-5 sm:h-5 ${
+                    (ratings[previewMedia.id] || 0) >= star ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'
+                  }`} />
+                </button>
+              ))}
+
+              {!isSharedGuest && selectedAlbum && (
+                <>
+                  <div className="h-4 w-[1px] bg-white/20 mx-1" />
+                  <button
+                    onClick={(e) => {
+                      const currentFolderId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : selectedAlbum.id
+                      handleSetAsCover(currentFolderId, previewMedia.id, e)
+                    }}
+                    className="text-[10px] sm:text-xs text-emerald-400 hover:text-emerald-300 font-medium px-2 py-0.5 rounded-full hover:bg-white/10 transition"
+                  >
+                    Đặt làm bìa
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Thumbnail cuộn phía dưới */}
+            <div 
+              ref={thumbnailRef}
+              className="flex items-center gap-2 overflow-x-auto max-w-full py-1 px-4 scrollbar-none"
+            >
+              {previewSourceList.map((thumb) => (
+                <button
+                  key={thumb.id}
+                  onClick={() => setPreviewMedia(thumb)}
+                  className={`relative w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden flex-shrink-0 border-2 transition ${
+                    thumb.id === previewMedia.id ? 'border-emerald-500 scale-105' : 'border-transparent opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  <img 
+                    src={`https://lh3.googleusercontent.com/d/${thumb.id}=w120-h120-p-k-no`} 
+                    alt={thumb.name} 
+                    className="w-full h-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* THANH CÔNG CỤ NỔI KHI TICK CHỌN CHECKBOX */}
       {currentSelectionCount > 0 && (
         <div className="fixed bottom-6 inset-x-0 z-40 flex justify-center px-4 animate-in slide-in-from-bottom-5 duration-200">
@@ -1999,6 +2126,146 @@ export default function GalleryClient() {
             >
               <X className="w-4 h-4" />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP XEM DANH SÁCH ẢNH ĐÃ CHỌN (TXT) */}
+      {isAdminPanelOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-emerald-500" />
+                <h3 className="font-serif font-bold text-base">Danh Sách Tệp Đã Đánh Dấu</h3>
+              </div>
+              <button onClick={() => setIsAdminPanelOpen(false)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="my-4 space-y-3">
+              <div className="flex items-center gap-3 text-xs">
+                <label className="flex items-center gap-1 cursor-pointer">
+                  <input type="checkbox" checked={useNewline} onChange={(e) => setUseNewline(e.target.checked)} className="rounded text-emerald-600" />
+                  <span>Xuống dòng</span>
+                </label>
+                {!useNewline && (
+                  <>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input type="checkbox" checked={useComma} onChange={(e) => setUseComma(e.target.checked)} className="rounded text-emerald-600" />
+                      <span>Dấu phẩy</span>
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input type="checkbox" checked={useSpace} onChange={(e) => setUseSpace(e.target.checked)} className="rounded text-emerald-600" />
+                      <span>Dấu cách</span>
+                    </label>
+                  </>
+                )}
+              </div>
+
+              <textarea
+                readOnly
+                value={textFileContent}
+                rows={8}
+                className={`w-full p-3 rounded-2xl text-xs font-mono border outline-none ${
+                  isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-800'
+                }`}
+                placeholder="Chưa có ảnh nào được đánh giá sao..."
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-white/10">
+              <span className="text-xs text-gray-400">{selectedImagesList.length} tệp đã chọn</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleCopyText(textFileContent)}
+                  disabled={selectedImagesList.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 transition cursor-pointer disabled:opacity-50"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copied ? 'Đã chép' : 'Sao chép'}</span>
+                </button>
+                <button
+                  onClick={handleDownloadTxt}
+                  disabled={selectedImagesList.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow transition cursor-pointer disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Lưu file TXT</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL THÊM ALBUM MỚI */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <h3 className="font-serif font-bold text-base">Thêm Album Mới</h3>
+              <button onClick={() => setIsModalOpen(false)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleAddAlbum} className="mt-4 space-y-3.5 text-xs">
+              <div>
+                <label className="block font-medium mb-1">Tên album:</label>
+                <input type="text" name="title" required placeholder="Ví dụ: Đám cưới Hương & Tuấn" className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+              </div>
+              <div>
+                <label className="block font-medium mb-1">Link Google Drive:</label>
+                <input type="text" name="url" required placeholder="https://drive.google.com/drive/folders/..." className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+              </div>
+              <div>
+                <label className="block font-medium mb-1">Link ảnh bìa (Tùy chọn):</label>
+                <input type="text" name="cover" placeholder="Link ảnh hoặc để trống tự động lấy" className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+              </div>
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">Hủy</button>
+                <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Thêm Album</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CHỈNH SỬA ALBUM */}
+      {editingAlbum && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <h3 className="font-serif font-bold text-base">Sửa Thông Tin Album</h3>
+              <button onClick={() => setEditingAlbum(null)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateAlbum} className="mt-4 space-y-3.5 text-xs">
+              <div>
+                <label className="block font-medium mb-1">Tên album:</label>
+                <input type="text" value={editingAlbum.title} onChange={(e) => setEditingAlbum({ ...editingAlbum, title: e.target.value })} required className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+              </div>
+              <div>
+                <label className="block font-medium mb-1">Link Google Drive:</label>
+                <input type="text" value={editingAlbum.driveUrl} onChange={(e) => setEditingAlbum({ ...editingAlbum, driveUrl: e.target.value })} required className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+              </div>
+              <div>
+                <label className="block font-medium mb-1">Link ảnh bìa:</label>
+                <input type="text" value={editingAlbum.coverUrl} onChange={(e) => setEditingAlbum({ ...editingAlbum, coverUrl: e.target.value })} placeholder="Link ảnh bìa" className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+              </div>
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
+                <button type="button" onClick={() => setEditingAlbum(null)} className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">Hủy</button>
+                <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Cập nhật</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
