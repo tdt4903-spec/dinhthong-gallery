@@ -9,7 +9,7 @@ import {
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
   ChevronDown, ChevronUp, PieChart, Filter, Loader2, LogOut, User as UserIcon,
-  Sparkles, RotateCcw, PenSquare, History, Eye, EyeOff, Calculator, Equal, Search, FileSpreadsheet, FileText
+  Sparkles, RotateCcw, PenSquare, History, Eye, EyeOff, Calculator, Equal, Search, FileSpreadsheet, FileText, Edit3
 } from 'lucide-react'
 
 function getTodayDateString(): string {
@@ -209,6 +209,11 @@ export default function MoneyManagerPage() {
   const [incomeCats, setIncomeCats] = useState(INITIAL_INCOME_CATS)
   const [newCatName, setNewCatName] = useState('')
   const [isAddingCat, setIsAddingCat] = useState(false)
+
+  // State chỉnh sửa giao dịch
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
+  const [editAmountStr, setEditAmountStr] = useState('')
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
 
   const [showSummaryDropdown, setShowSummaryDropdown] = useState(false)
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -490,6 +495,49 @@ export default function MoneyManagerPage() {
       fetchTransactions()
     } else {
       alert('Lỗi lưu: ' + error.message)
+    }
+  }
+
+  // Bắt đầu chỉnh sửa
+  const handleOpenEdit = (t: Transaction) => {
+    setEditingTransaction({ ...t })
+    setEditAmountStr(String(t.amount || ''))
+  }
+
+  // Lưu chỉnh sửa
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!supabase || !editingTransaction) return
+
+    const finalAmount = safeCalculateMath(editAmountStr)
+    if (!finalAmount || finalAmount <= 0) {
+      alert('Vui lòng nhập số tiền hợp lệ!')
+      return
+    }
+
+    setIsSavingEdit(true)
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .update({
+          type: editingTransaction.type,
+          amount: finalAmount,
+          date: editingTransaction.date,
+          category: editingTransaction.category,
+          note: editingTransaction.note.trim()
+        })
+        .eq('id', editingTransaction.id)
+
+      if (!error) {
+        setTransactions(prev => prev.map(item => item.id === editingTransaction.id ? { ...editingTransaction, amount: finalAmount } : item))
+        setEditingTransaction(null)
+      } else {
+        alert('Lỗi lưu: ' + error.message)
+      }
+    } catch (err: any) {
+      alert('Lỗi: ' + err.message)
+    } finally {
+      setIsSavingEdit(false)
     }
   }
 
@@ -859,6 +907,7 @@ export default function MoneyManagerPage() {
   }, [historyFiltered])
 
   const currentCategories = type === 'expense' ? expenseCats : incomeCats
+  const editCategories = editingTransaction?.type === 'expense' ? expenseCats : incomeCats
 
   if (!mounted || authLoading) {
     return (
@@ -1599,13 +1648,24 @@ export default function MoneyManagerPage() {
                               )}
                             </div>
 
-                            <div className="flex items-center gap-2.5 flex-shrink-0">
-                              <span className={`font-extrabold text-xs sm:text-sm ${t.type === 'expense' ? 'text-red-500' : 'text-emerald-600'}`}>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className={`font-extrabold text-xs sm:text-sm mr-1 ${t.type === 'expense' ? 'text-red-500' : 'text-emerald-600'}`}>
                                 {t.type === 'expense' ? '-' : '+'}{formatDisplayCurrencyOrHidden(Number(t.amount || 0))}
                               </span>
+                              
+                              {/* Nút sửa */}
+                              <button
+                                onClick={() => handleOpenEdit(t)}
+                                className="p-1.5 rounded-lg bg-slate-100 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 transition cursor-pointer"
+                                title="Chỉnh sửa giao dịch này"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* Nút xóa */}
                               <button
                                 onClick={() => handleDelete(t.id)}
-                                className="p-1 text-slate-300 hover:text-red-500 transition cursor-pointer"
+                                className="p-1.5 rounded-lg bg-slate-100 text-slate-400 hover:text-red-500 hover:bg-red-50 transition cursor-pointer"
                                 title="Xóa giao dịch này"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -1625,6 +1685,142 @@ export default function MoneyManagerPage() {
 
         </div>
       </main>
+
+      {/* POPUP / MODAL CHỈNH SỬA GIAO DỊCH */}
+      {editingTransaction && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-lg bg-white rounded-3xl p-5 sm:p-7 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <h3 className="font-bold text-base text-slate-900">Sửa Giao Dịch</h3>
+              </div>
+              <button 
+                onClick={() => setEditingTransaction(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="mt-4 space-y-4 text-xs">
+              
+              {/* 1. Chọn loại Thu / Chi */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Loại giao dịch:</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingTransaction({ ...editingTransaction, type: 'expense' })}
+                    className={`py-2 rounded-xl font-bold transition cursor-pointer border ${
+                      editingTransaction.type === 'expense'
+                        ? 'bg-orange-50 border-orange-300 text-orange-600 shadow-2xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    Tiền chi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingTransaction({ ...editingTransaction, type: 'income' })}
+                    className={`py-2 rounded-xl font-bold transition cursor-pointer border ${
+                      editingTransaction.type === 'income'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-600 shadow-2xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    Tiền thu
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Ngày giao dịch */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Ngày thực hiện:</label>
+                <input 
+                  type="date"
+                  value={editingTransaction.date}
+                  onChange={(e) => setEditingTransaction({ ...editingTransaction, date: e.target.value })}
+                  required
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none font-bold text-slate-800 text-xs focus:bg-white focus:border-emerald-500"
+                />
+              </div>
+
+              {/* 3. Số tiền */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Số tiền (VNĐ):</label>
+                <input 
+                  type="text"
+                  value={editAmountStr}
+                  onChange={(e) => setEditAmountStr(e.target.value)}
+                  placeholder="Nhập số tiền..."
+                  required
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none font-extrabold text-sm text-slate-900 focus:bg-white focus:border-emerald-500"
+                />
+              </div>
+
+              {/* 4. Ghi chú */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Ghi chú:</label>
+                <input 
+                  type="text"
+                  value={editingTransaction.note}
+                  onChange={(e) => setEditingTransaction({ ...editingTransaction, note: e.target.value })}
+                  placeholder="Nội dung chi tiết..."
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none text-xs focus:bg-white focus:border-emerald-500"
+                />
+              </div>
+
+              {/* 5. Phân loại danh mục */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1.5">Phân loại danh mục:</label>
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-40 overflow-y-auto p-1 border border-slate-100 rounded-2xl bg-slate-50">
+                  {editCategories.map((cat) => {
+                    const isSelected = editingTransaction.category === cat.name
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setEditingTransaction({ ...editingTransaction, category: cat.name })}
+                        className={`flex flex-col items-center justify-center p-2 rounded-xl border text-center transition cursor-pointer ${
+                          isSelected 
+                            ? 'border-emerald-500 bg-white ring-1 ring-emerald-500 shadow-2xs font-bold text-emerald-700' 
+                            : 'border-transparent bg-transparent hover:bg-white/80 text-slate-600'
+                        }`}
+                      >
+                        <Tag className={`w-3.5 h-3.5 mb-1 ${cat.color.split(' ')[0]}`} />
+                        <span className="text-[10px] truncate w-full">{cat.name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Nút thao tác */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingTransaction(null)}
+                  className="px-4 py-2.5 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md transition cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingEdit ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  <span>{isSavingEdit ? 'Đang lưu...' : 'Lưu Thay Đổi'}</span>
+                </button>
+              </div>
+
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* THANH ĐIỀU HƯỚNG DƯỚI CÙNG CHO MOBILE */}
       <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 z-40 flex items-center justify-around shadow-lg">
