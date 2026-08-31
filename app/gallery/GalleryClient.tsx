@@ -147,7 +147,9 @@ export default function GalleryClient() {
   const [currentCommentInput, setCurrentCommentInput] = useState('')
   const [starFilter, setStarFilter] = useState<number | 'all'>('all')
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
+  const [isCommentModalOpen, setIsCommentModalOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [commentCopied, setCommentCopied] = useState(false)
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
@@ -203,10 +205,10 @@ export default function GalleryClient() {
   const activeSetting: FolderSettings = folderSettingsMap[currentActiveFolderId] || {
     id: currentActiveFolderId,
     title: currentActiveFolderTitle,
-    password: selectedAlbum?.password || '',
-    max_select: selectedAlbum?.max_select || 0,
-    allow_comments: selectedAlbum?.allow_comments ?? true,
-    enable_watermark: selectedAlbum?.enable_watermark ?? false
+    password: '',
+    max_select: 0,
+    allow_comments: true,
+    enable_watermark: false
   }
 
   useEffect(() => {
@@ -245,7 +247,11 @@ export default function GalleryClient() {
       const { data } = await supabase.from('item_comments').select('id, comment')
       if (data) {
         const commentMap: Record<string, string> = {}
-        data.forEach((c: any) => { commentMap[c.id] = c.comment })
+        data.forEach((c: any) => { 
+          if (c.comment && c.comment.trim()) {
+            commentMap[c.id] = c.comment 
+          }
+        })
         setComments(commentMap)
       }
     } catch {}
@@ -663,7 +669,6 @@ export default function GalleryClient() {
     })
   }
 
-  // Chặn tuyệt đối khi chọn bằng Checkbox nếu đã đạt max_select
   const handleToggleSelectItem = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     const maxSel = Number(activeSetting?.max_select || 0)
@@ -681,7 +686,6 @@ export default function GalleryClient() {
     })
   }
 
-  // Chặn tuyệt đối khi chọn bằng cách chấm Sao (Rating) nếu đã đạt max_select
   const handleRateImage = (imageId: string, stars: number) => {
     const maxSel = Number(activeSetting?.max_select || 0)
     const isCurrentlyRated = (ratings[imageId] || 0) > 0
@@ -996,6 +1000,18 @@ export default function GalleryClient() {
     setComments(newMap)
     await supabase.from('item_comments').upsert({ id: itemId, comment: text })
     alert('Đã lưu bình luận thành công!')
+  }
+
+  const handleDeleteAllComments = async () => {
+    if (confirm('CẢNH BÁO: Bạn có chắc muốn XÓA TẤT CẢ bình luận của khách hàng trên hệ thống?')) {
+      const { error } = await supabase.from('item_comments').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      if (!error) {
+        setComments({})
+        alert('Đã xóa tất cả bình luận thành công!')
+      } else {
+        alert('Lỗi xóa bình luận: ' + error.message)
+      }
+    }
   }
 
   const durationOptions = [
@@ -1386,6 +1402,12 @@ export default function GalleryClient() {
 
   const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
 
+  // Danh sách các ảnh có bình luận của khách trong thư mục hiện tại
+  const commentedImagesList = visibleItems.filter(img => img.type !== 'folder' && comments[img.id] && comments[img.id].trim() !== '')
+
+  // Chuỗi định dạng danh sách bình luận: Số/Tên ảnh - Khách bình luận gì
+  const commentTextListContent = commentedImagesList.map(img => `${img.name} - ${comments[img.id]}`).join('\n')
+
   let separator = '\n'
   if (!useNewline) {
     let sep = ''
@@ -1405,12 +1427,28 @@ export default function GalleryClient() {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const handleCopyCommentList = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCommentCopied(true)
+    setTimeout(() => setCommentCopied(false), 2000)
+  }
+
   const handleDownloadTxt = () => {
     const blob = new Blob([textFileContent], { type: 'text/plain;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
     link.download = 'danh-sach-tieu-de-chon.txt'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadCommentTxt = () => {
+    const blob = new Blob([commentTextListContent], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'danh-sach-binh-luan-khach.txt'
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -1479,6 +1517,21 @@ export default function GalleryClient() {
                   {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
                   <span>{isZipping ? zipProgress : 'Tải album'}</span>
                 </button>
+
+                {/* NÚT XEM BÌNH LUẬN KHÁCH HÀNG (CHỈ ADMIN MỚI THẤY) */}
+                {!isSharedGuest && (
+                  <button
+                    onClick={() => setIsCommentModalOpen(true)}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition cursor-pointer flex-shrink-0"
+                    title="Xem danh sách bình luận của khách"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>Bình luận</span>
+                    <span className="bg-amber-800 px-1.5 py-0.5 rounded-full text-[10px]">
+                      {commentedImagesList.length}
+                    </span>
+                  </button>
+                )}
 
                 <button
                   onClick={() => setIsAdminPanelOpen(true)}
@@ -2242,6 +2295,7 @@ export default function GalleryClient() {
           </div>
 
           <div className="flex flex-col items-center gap-2 pb-2 z-20 max-w-xl mx-auto w-full px-2">
+            {/* Phía khách: chỉ thấy khung nhập bình luận & nút Lưu */}
             {activeSetting.allow_comments && (
               <div className="w-full flex items-center gap-1.5 bg-black/70 px-3 py-1.5 rounded-2xl backdrop-blur-md border border-white/10">
                 <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
@@ -2307,6 +2361,67 @@ export default function GalleryClient() {
                   />
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL XEM TẤT CẢ BÌNH LUẬN CỦA KHÁCH (CHỈ ADMIN MỚI MỞ ĐƯỢC) */}
+      {isCommentModalOpen && !isSharedGuest && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-amber-500" />
+                <h3 className="font-serif font-bold text-base">Bình Luận Yêu Cầu Của Khách ({commentedImagesList.length})</h3>
+              </div>
+              <button onClick={() => setIsCommentModalOpen(false)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="my-4">
+              <textarea
+                readOnly
+                value={commentTextListContent}
+                rows={8}
+                className={`w-full p-3.5 rounded-2xl text-xs font-mono border outline-none ${
+                  isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-800'
+                }`}
+                placeholder="Chưa có bình luận nào từ khách hàng..."
+              />
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-3 border-t border-gray-100 dark:border-white/10">
+              <button
+                onClick={handleDeleteAllComments}
+                disabled={commentedImagesList.length === 0}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 transition cursor-pointer disabled:opacity-40"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xóa tất cả bình luận</span>
+              </button>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleCopyCommentList(commentTextListContent)}
+                  disabled={commentedImagesList.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 transition cursor-pointer disabled:opacity-50"
+                >
+                  {commentCopied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{commentCopied ? 'Đã chép' : 'Sao chép'}</span>
+                </button>
+                <button
+                  onClick={handleDownloadCommentTxt}
+                  disabled={commentedImagesList.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white shadow transition cursor-pointer disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Lưu file TXT</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
