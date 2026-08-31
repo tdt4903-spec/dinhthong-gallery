@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet, MoreVertical, LayoutGrid, ChevronDown, Lock, Unlock, MessageSquare, ShieldAlert, Sparkles, Link2, ZoomIn, ZoomOut, RotateCcw, Send
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, ZoomIn, ZoomOut, RotateCcw, Send
 } from 'lucide-react'
 
 interface MediaItem {
@@ -178,13 +178,11 @@ export default function GalleryClient() {
 
   useEffect(() => {
     setIsDarkMode(isTimeForDarkMode())
-
     const interval = setInterval(() => {
       if (!hasUserToggledMode.current) {
         setIsDarkMode(isTimeForDarkMode())
       }
     }, 60 * 1000)
-
     return () => clearInterval(interval)
   }, [])
 
@@ -284,28 +282,46 @@ export default function GalleryClient() {
   const activeSetting: FolderSettings = folderSettingsMap[currentActiveFolderId] || {
     id: currentActiveFolderId,
     title: currentActiveFolderTitle,
-    password: '',
-    max_select: 0,
-    allow_comments: true,
-    enable_watermark: false
+    password: selectedAlbum?.password || '',
+    max_select: selectedAlbum?.max_select || 0,
+    allow_comments: selectedAlbum?.allow_comments ?? true,
+    enable_watermark: selectedAlbum?.enable_watermark ?? false
   }
 
-  useEffect(() => {
-    if (previewMedia) {
-      const fileName = customNames[previewMedia.id] || previewMedia.name
-      document.title = `${fileName} - Dinh Thong Gallery`
-      setCurrentCommentInput(comments[previewMedia.id] || '')
-      setZoomScale(1)
-      setPanPosition({ x: 0, y: 0 })
-    } else if (folderHistory.length > 0) {
-      const currentFolder = folderHistory[folderHistory.length - 1]
-      document.title = `${currentFolder.title} - Dinh Thong Gallery`
-    } else if (selectedAlbum) {
-      document.title = `${selectedAlbum.title} - Dinh Thong Gallery`
-    } else {
-      document.title = 'Dinh Thong Gallery'
-    }
-  }, [previewMedia, folderHistory, selectedAlbum, customNames, comments])
+  const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
+  const subFolders = visibleItems.filter(item => item.type === 'folder')
+  const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
+
+  const filteredMediaFiles = mediaFiles.filter(img => {
+    if (starFilter === 'all') return true
+    const imgStar = ratings[img.id] || 0
+    return imgStar === starFilter
+  })
+
+  const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
+  const commentedImagesList = visibleItems.filter(img => img.type !== 'folder' && comments[img.id] && comments[img.id].trim() !== '')
+  const commentTextListContent = commentedImagesList.map(img => `${img.name} - ${comments[img.id]}`).join('\n')
+
+  let separator = '\n'
+  if (!useNewline) {
+    let sep = ''
+    if (useComma) sep += ','
+    if (useSpace) sep += ' '
+    if (!useComma && !useSpace) sep = ' '
+    separator = sep
+  }
+  const textFileContent = selectedImagesList.map(img => {
+    const cmt = comments[img.id] ? ` (Ghi chú: ${comments[img.id]})` : ''
+    return `${img.name}${cmt}`
+  }).join(separator)
+
+  const filteredAlbums = (albums || []).filter(album => album && album.title && album.title.toLowerCase().includes(searchTerm.toLowerCase()))
+  const currentSelectionCount = selectedAlbum ? selectedItemIds.size : selectedAlbumIds.size
+
+  const totalPages = Math.ceil(filteredMediaFiles.length / itemsPerPage)
+  const paginatedImages = filteredMediaFiles.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+  const previewSourceList = filteredMediaFiles
+  const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
 
   const formatDriveCoverUrl = (url: string) => {
     if (!url) return ''
@@ -472,16 +488,795 @@ export default function GalleryClient() {
     }
   }
 
-  useEffect(() => {
-    if (isSharedGuest) return
-    const interval = setInterval(async () => {
-      const masters = await fetchMasterFoldersList()
-      if (masters && masters.length > 0) {
-        checkAllMasterFolders(masters, false)
+  const fetchAlbumImages = async (driveUrl: string) => {
+    setLoadingImages(true)
+    setStarFilter('all')
+    setCurrentPage(1)
+    setSelectedItemIds(new Set())
+    try {
+      const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}`)
+      const data = await res.json()
+      const files = data.files || []
+      setItems(files)
+      return files
+    } catch (e) {
+      console.error(e)
+      setItems([])
+      return []
+    } finally {
+      setLoadingImages(false)
+      fetchComments()
+    }
+  }
+
+  const handleCopyText = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleCopyCommentList = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCommentCopied(true)
+    setTimeout(() => setCommentCopied(false), 2000)
+  }
+
+  const handleDownloadTxt = () => {
+    const blob = new Blob([textFileContent], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'danh-sach-tieu-de-chon.txt'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadCommentTxt = () => {
+    const blob = new Blob([commentTextListContent], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'danh-sach-binh-luan-khach.txt'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    if (downloadingId || item.type === 'folder') return
+
+    setDownloadingId(item.id)
+    const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+
+    try {
+      const ext = item.type === 'video' ? 'mp4' : 'jpg'
+      const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
+      const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
+
+      const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
+      const res = await fetch(proxyUrl)
+      if (!res.ok) throw new Error('Fetch failed')
+      
+      let blob = await res.blob()
+
+      if (activeSetting.enable_watermark && item.type === 'image') {
+        blob = await applyWatermarkToImageBlob(blob)
       }
-    }, 5 * 60 * 1000)
-    return () => clearInterval(interval)
-  }, [isSharedGuest])
+
+      const fileObj = new File([blob], exactFileName, { type: mimeType })
+
+      if (isIOS && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
+        await navigator.share({ files: [fileObj], title: exactFileName })
+        setDownloadingId(null)
+        return
+      }
+
+      const blobUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.setAttribute('download', exactFileName)
+      link.style.display = 'none'
+      document.body.appendChild(link)
+      link.click()
+      setTimeout(() => {
+        document.body.removeChild(link)
+        URL.revokeObjectURL(blobUrl)
+      }, 1000)
+    } catch (err) {
+      console.error(err)
+      window.open(item.downloadUrl, '_blank')
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
+  const handleDownloadAlbumZip = async (targetInfo?: { title: string; driveUrl: string }, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    const currentFolder = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1] : null
+    const target = targetInfo || currentFolder || selectedAlbum
+    if (!target || isZipping) return
+
+    setIsZipping(true)
+    setZipProgress('Vui lòng đợi...')
+
+    try {
+      let targetFiles = visibleItems.filter(f => f.type !== 'folder')
+      if (targetInfo && targetInfo.driveUrl !== (currentFolder?.driveUrl || selectedAlbum?.driveUrl)) {
+        const res = await fetch(`/api/drive?url=${encodeURIComponent(targetInfo.driveUrl)}`)
+        const data = await res.json()
+        targetFiles = (data.files || []).filter((f: any) => f.type !== 'folder' && !hiddenItemIds.has(f.id))
+      }
+
+      if (targetFiles.length === 0) {
+        alert('Thư mục này hiện không có tệp ảnh/video nào để tải!')
+        setIsZipping(false)
+        return
+      }
+
+      const zip = new JSZip()
+      const total = targetFiles.length
+      let completedCount = 0
+
+      const CONCURRENCY_LIMIT = 8
+      const fetchRawOriginalFile = async (fileItem: MediaItem) => {
+        const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
+        const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
+        try {
+          const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
+          if (res.ok) {
+            let blob = await res.blob()
+            if (activeSetting.enable_watermark && fileItem.type === 'image') {
+              blob = await applyWatermarkToImageBlob(blob)
+            }
+            zip.file(exactFileName, blob, { compression: 'STORE' })
+          }
+        } catch (err) {
+          console.error(`Lỗi tải: ${exactFileName}`, err)
+        } finally {
+          completedCount++
+          setZipProgress(`${completedCount}/${total}`)
+        }
+      }
+
+      for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+        const chunk = targetFiles.slice(i, i + CONCURRENCY_LIMIT)
+        await Promise.all(chunk.map(fileItem => fetchRawOriginalFile(fileItem)))
+      }
+
+      setZipProgress('Vui lòng đợi...')
+      const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE', streamFiles: true }, (metadata) => {
+        setZipProgress(`${Math.floor(metadata.percent)}%`)
+      })
+      saveAs(zipContent, `${target.title}.zip`)
+    } catch (err: any) {
+      alert('Có lỗi xảy ra khi tải album: ' + err.message)
+    } finally {
+      setIsZipping(false)
+      setZipProgress('')
+    }
+  }
+
+  const handleBatchDownload = async () => {
+    if (isZipping) return
+    if (!selectedAlbum) {
+      const selectedAlbumsList = (albums || []).filter(a => a && selectedAlbumIds.has(a.id))
+      if (selectedAlbumsList.length === 0) return
+
+      setIsZipping(true)
+      setZipProgress('Chuẩn bị tải...')
+      try {
+        for (const alb of selectedAlbumsList) {
+          await handleDownloadAlbumZip({ title: alb.title, driveUrl: alb.driveUrl })
+        }
+        setSelectedAlbumIds(new Set())
+      } finally {
+        setIsZipping(false)
+        setZipProgress('')
+      }
+    } else {
+      const selectedFiles = visibleItems.filter(f => selectedItemIds.has(f.id) && f.type !== 'folder')
+      if (selectedFiles.length === 0) {
+        alert('Vui lòng chọn ít nhất 1 tệp ảnh/video để tải!')
+        return
+      }
+
+      setIsZipping(true)
+      setZipProgress('Đang nén...')
+      try {
+        const zip = new JSZip()
+        const total = selectedFiles.length
+        let completedCount = 0
+
+        const CONCURRENCY_LIMIT = 8
+        const fetchFile = async (fileItem: MediaItem) => {
+          const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
+          const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
+          try {
+            const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
+            if (res.ok) {
+              let blob = await res.blob()
+              if (activeSetting.enable_watermark && fileItem.type === 'image') {
+                blob = await applyWatermarkToImageBlob(blob)
+              }
+              zip.file(exactFileName, blob, { compression: 'STORE' })
+            }
+          } catch (err) {
+            console.error(err)
+          } finally {
+            completedCount++
+            setZipProgress(`${completedCount}/${total}`)
+          }
+        }
+
+        for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+          const chunk = selectedFiles.slice(i, i + CONCURRENCY_LIMIT)
+          await Promise.all(chunk.map(fileItem => fetchFile(fileItem)))
+        }
+
+        setZipProgress('Tạo file ZIP...')
+        const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+        saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
+        setSelectedItemIds(new Set())
+      } catch (e: any) {
+        alert('Lỗi tải tệp: ' + e.message)
+      } finally {
+        setIsZipping(false)
+        setZipProgress('')
+      }
+    }
+  }
+
+  const handleDeleteAlbum = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (isSharedGuest) return
+    if (confirm('Bạn có chắc muốn xóa album này không?')) {
+      const { error } = await supabase.from('albums').delete().eq('id', id)
+      if (!error) await fetchAlbumsFromSupabase()
+      else alert('Lỗi khi xóa: ' + error.message)
+    }
+  }
+
+  const handleSetAsCover = async (targetId: string, imageId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const formattedCover = `https://lh3.googleusercontent.com/d/${imageId}=w500-h500-p-k-no`
+    const isMasterAlbum = masterFoldersList.some(m => m.id === targetId) || albums.some(a => a.id === targetId && folderHistory.length === 0)
+
+    if (isMasterAlbum) {
+      const { error } = await supabase.from('albums').update({ cover_url: formattedCover }).eq('id', targetId)
+      if (!error) {
+        await fetchAlbumsFromSupabase()
+        alert('Đã cập nhật ảnh bìa Album trang chủ thành công!')
+      } else {
+        alert('Lỗi cập nhật ảnh bìa: ' + error.message)
+      }
+    } else {
+      const { error } = await supabase.from('custom_covers').upsert([
+        { id: targetId, cover_url: formattedCover }
+      ], { onConflict: 'id' })
+
+      if (!error) {
+        setAlbumCovers(prev => ({ ...prev, [targetId]: formattedCover }))
+        alert('Đã đặt ảnh bìa cho thư mục con thành công!')
+      } else {
+        alert('Lỗi lưu ảnh bìa: ' + error.message)
+      }
+    }
+  }
+
+  const handleAddAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const form = e.currentTarget
+    const titleInput = form.elements.namedItem('title') as HTMLInputElement
+    const urlInput = form.elements.namedItem('url') as HTMLInputElement
+    const coverInput = form.elements.namedItem('cover') as HTMLInputElement
+    const passInput = form.elements.namedItem('password') as HTMLInputElement
+    const maxSelectInput = form.elements.namedItem('max_select') as HTMLInputElement
+    const watermarkInput = form.elements.namedItem('enable_watermark') as HTMLInputElement
+    const commentsInput = form.elements.namedItem('allow_comments') as HTMLInputElement
+
+    const newTitle = titleInput.value
+    const newDriveUrl = urlInput.value
+    const newId = extractDriveId(newDriveUrl) || Date.now().toString()
+    const newCoverUrl = coverInput.value.trim() ? formatDriveCoverUrl(coverInput.value) : ''
+
+    const { error } = await supabase.from('albums').insert([
+      { 
+        id: newId, 
+        title: newTitle, 
+        drive_url: newDriveUrl, 
+        cover_url: newCoverUrl,
+        password: passInput.value.trim(),
+        max_select: Number(maxSelectInput.value || 0),
+        enable_watermark: watermarkInput.checked,
+        allow_comments: commentsInput.checked
+      }
+    ])
+
+    if (!error) {
+      await fetchAlbumsFromSupabase()
+      setIsModalOpen(false)
+    } else {
+      alert('Lỗi khi thêm album: ' + error.message)
+    }
+  }
+
+  const handleSaveComment = async (itemId: string) => {
+    const text = currentCommentInput.trim()
+    setIsSavingComment(true)
+    try {
+      const newMap = { ...comments, [itemId]: text }
+      setComments(newMap)
+      
+      const { error } = await supabase.from('item_comments').upsert({ id: itemId, comment: text })
+      if (error) throw error
+      alert('Đã lưu bình luận yêu cầu thành công!')
+    } catch (err: any) {
+      alert('Lỗi lưu bình luận: ' + err.message)
+    } finally {
+      setIsSavingComment(false)
+    }
+  }
+
+  const handleDeleteAllComments = async () => {
+    if (confirm('CẢNH BÁO: Bạn có chắc muốn XÓA TẤT CẢ bình luận của khách hàng trên hệ thống?')) {
+      const { error } = await supabase.from('item_comments').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      if (!error) {
+        setComments({})
+        alert('Đã xóa tất cả bình luận thành công!')
+      } else {
+        alert('Lỗi xóa bình luận: ' + error.message)
+      }
+    }
+  }
+
+  const handleClosePreview = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    setDownloadingId(null)
+    setPreviewMedia(null)
+    setZoomScale(1)
+    setPanPosition({ x: 0, y: 0 })
+  }
+
+  const handleClearAllSelections = () => {
+    if (confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) {
+      setRatings({})
+      localStorage.removeItem('dinhthong_image_ratings')
+    }
+  }
+
+  const handleToggleSelectAlbum = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedAlbumIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleToggleSelectItem = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const maxSel = Number(activeSetting?.max_select || 0)
+    
+    if (maxSel > 0 && !selectedItemIds.has(id) && selectedItemIds.size >= maxSel) {
+      alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
+      return
+    }
+
+    setSelectedItemIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleRateImage = (imageId: string, stars: number) => {
+    const maxSel = Number(activeSetting?.max_select || 0)
+    const isCurrentlyRated = (ratings[imageId] || 0) > 0
+
+    if (stars > 0 && !isCurrentlyRated) {
+      const currentRatedCount = Object.values(ratings).filter(s => s > 0).length
+      if (maxSel > 0 && currentRatedCount >= maxSel) {
+        alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
+        return
+      }
+    }
+
+    const newRatings = { ...ratings, [imageId]: stars }
+    setRatings(newRatings)
+    localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
+  }
+
+  const handleBatchDelete = async () => {
+    if (isSharedGuest) return
+    if (!selectedAlbum) {
+      if (selectedAlbumIds.size === 0) return
+      if (confirm(`Bạn có chắc muốn XÓA ${selectedAlbumIds.size} album đã chọn khỏi hệ thống?`)) {
+        const idsToDelete = Array.from(selectedAlbumIds)
+        const { error } = await supabase.from('albums').delete().in('id', idsToDelete)
+        if (!error) {
+          await fetchAlbumsFromSupabase()
+          setSelectedAlbumIds(new Set())
+          alert('Đã xóa thành công các album đã chọn!')
+        } else {
+          alert('Lỗi khi xóa: ' + error.message)
+        }
+      }
+    } else {
+      if (selectedItemIds.size === 0) return
+      if (confirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM ${selectedItemIds.size} mục đã chọn khỏi hiển thị?`)) {
+        const idsToHide = Array.from(selectedItemIds).map(id => ({ id }))
+        const { error } = await supabase.from('hidden_items').insert(idsToHide)
+        if (!error) {
+          setHiddenItemIds(prev => new Set([...Array.from(prev), ...Array.from(selectedItemIds)]))
+          setSelectedItemIds(new Set())
+          alert('Đã xóa dứt điểm các mục đã chọn!')
+        } else {
+          alert('Lỗi khi xóa: ' + error.message)
+        }
+      }
+    }
+  }
+
+  const handleOpenVisibilityManager = () => {
+    const visibleSet = new Set(items.map(i => i.id).filter(id => !hiddenItemIds.has(id)))
+    setTempVisibleIds(visibleSet)
+    setIsManageVisibilityOpen(true)
+  }
+
+  const handleSaveVisibilityChanges = async () => {
+    setIsSavingVisibility(true)
+    try {
+      const allCurrentItemIds = items.map(i => i.id)
+      const newlyHiddenIds = allCurrentItemIds.filter(id => !tempVisibleIds.has(id))
+      const newlyShownIds = allCurrentItemIds.filter(id => tempVisibleIds.has(id))
+
+      if (newlyHiddenIds.length > 0) {
+        await supabase.from('hidden_items').upsert(newlyHiddenIds.map(id => ({ id })), { onConflict: 'id' })
+      }
+      if (newlyShownIds.length > 0) {
+        await supabase.from('hidden_items').delete().in('id', newlyShownIds)
+      }
+
+      setHiddenItemIds(prev => {
+        const next = new Set(prev)
+        newlyHiddenIds.forEach(id => next.add(id))
+        newlyShownIds.forEach(id => next.delete(id))
+        return next
+      })
+
+      setIsManageVisibilityOpen(false)
+      alert('Đã cập nhật trạng thái hiển thị thành công!')
+    } catch (err: any) {
+      alert('Lỗi lưu: ' + err.message)
+    } finally {
+      setIsSavingVisibility(false)
+    }
+  }
+
+  const handleOpenCurrentFolderSetting = () => {
+    setEditingFolderSetting({
+      id: currentActiveFolderId,
+      title: currentActiveFolderTitle,
+      password: activeSetting.password || '',
+      max_select: activeSetting.max_select || 0,
+      allow_comments: activeSetting.allow_comments ?? true,
+      enable_watermark: activeSetting.enable_watermark ?? false
+    })
+  }
+
+  const handleSaveCurrentFolderSetting = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingFolderSetting) return
+
+    try {
+      const newTitle = editingFolderSetting.title.trim()
+      const payload = {
+        id: editingFolderSetting.id,
+        password: editingFolderSetting.password?.trim() || '',
+        max_select: Number(editingFolderSetting.max_select || 0),
+        allow_comments: editingFolderSetting.allow_comments ?? true,
+        enable_watermark: editingFolderSetting.enable_watermark ?? false
+      }
+
+      await supabase.from('folder_settings').upsert(payload, { onConflict: 'id' })
+
+      if (newTitle) {
+        await supabase.from('custom_item_names').upsert({ id: editingFolderSetting.id, custom_name: newTitle }, { onConflict: 'id' })
+        setCustomNames(prev => ({ ...prev, [editingFolderSetting.id]: newTitle }))
+      }
+
+      if (folderHistory.length === 0 && selectedAlbum?.id === editingFolderSetting.id) {
+        await supabase.from('albums').update({ ...payload, title: newTitle || selectedAlbum.title }).eq('id', editingFolderSetting.id)
+        await fetchAlbumsFromSupabase()
+      }
+
+      setFolderSettingsMap(prev => ({
+        ...prev,
+        [editingFolderSetting.id]: editingFolderSetting
+      }))
+
+      setEditingFolderSetting(null)
+      alert(`Đã lưu cài đặt cho "${newTitle || currentActiveFolderTitle}" thành công!`)
+    } catch (err: any) {
+      alert('Lỗi lưu cài đặt: ' + err.message)
+    }
+  }
+
+  const handleShareFolder = (folderId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    const numericCode = toNumericCode(folderId)
+    const shareUrl = `${window.location.origin}/s/${numericCode}`
+    navigator.clipboard.writeText(shareUrl)
+    setShareCopiedId(folderId)
+    setTimeout(() => setShareCopiedId(null), 2500)
+  }
+
+  const handleOpenSubFolder = (folderItem: MediaItem) => {
+    const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
+    const displayName = customNames[folderItem.id] || folderItem.name
+    setFolderHistory(prev => [...prev, { id: folderItem.id, title: displayName, driveUrl: folderDriveUrl }])
+
+    const fSetting = folderSettingsMap[folderItem.id]
+    if (fSetting?.password && isSharedGuest) {
+      setIsLocked(true)
+    } else {
+      setIsLocked(false)
+      fetchAlbumImages(folderDriveUrl)
+    }
+  }
+
+  const handleNavigateBreadcrumb = (index: number) => {
+    if (index === -1) {
+      if (selectedAlbum) {
+        setFolderHistory([])
+        const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
+        if (mainPass && isSharedGuest) {
+          setIsLocked(true)
+        } else {
+          setIsLocked(false)
+          fetchAlbumImages(selectedAlbum.driveUrl)
+        }
+      }
+    } else {
+      const target = folderHistory[index]
+      setFolderHistory(prev => prev.slice(0, index + 1))
+      const targetPass = folderSettingsMap[target.id]?.password
+      if (targetPass && isSharedGuest) {
+        setIsLocked(true)
+      } else {
+        setIsLocked(false)
+        fetchAlbumImages(target.driveUrl)
+      }
+    }
+  }
+
+  const handleBackToParentFolder = () => {
+    if (folderHistory.length > 1) {
+      const prev = folderHistory[folderHistory.length - 2]
+      setFolderHistory(p => p.slice(0, -1))
+      const prevPass = folderSettingsMap[prev.id]?.password
+      if (prevPass && isSharedGuest) {
+        setIsLocked(true)
+      } else {
+        setIsLocked(false)
+        fetchAlbumImages(prev.driveUrl)
+      }
+    } else if (folderHistory.length === 1 && selectedAlbum) {
+      setFolderHistory([])
+      const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
+      if (mainPass && isSharedGuest) {
+        setIsLocked(true)
+      } else {
+        setIsLocked(false)
+        fetchAlbumImages(selectedAlbum.driveUrl)
+      }
+    } else {
+      if (!isSharedGuest) {
+        setSelectedAlbum(null)
+      }
+    }
+  }
+
+  const handleOpenAlbum = (album: Album) => {
+    setSelectedAlbum(album)
+    setFolderHistory([])
+    const fSetting = folderSettingsMap[album.id]
+    const currentPass = fSetting?.password || album.password
+    if (currentPass && isSharedGuest) {
+      setIsLocked(true)
+    } else {
+      setIsLocked(false)
+      fetchAlbumImages(album.driveUrl)
+    }
+  }
+
+  const handlePermanentlyHideItem = async (itemId: string, itemName: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    if (isSharedGuest) return
+    if (confirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM mục "${itemName}" khỏi hiển thị không?`)) {
+      const { error } = await supabase.from('hidden_items').insert([{ id: itemId }])
+      if (!error) {
+        setHiddenItemIds(prev => new Set([...Array.from(prev), itemId]))
+        if (previewMedia?.id === itemId) setPreviewMedia(null)
+      } else {
+        alert('Lỗi khi xóa: ' + error.message)
+      }
+    }
+  }
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    router.replace('/')
+  }
+
+  const handleCheckPassword = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (passwordInput.trim() === activeSetting.password?.trim()) {
+      setIsLocked(false)
+      setPasswordError(false)
+      const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
+      if (targetUrl) fetchAlbumImages(targetUrl)
+    } else {
+      setPasswordError(true)
+    }
+  }
+
+  const handleTouchStart = (e: React.TouchEvent) => { 
+    if (e.touches.length === 1) {
+      touchStartX.current = e.targetTouches[0].clientX 
+    }
+  }
+  const handleTouchMove = (e: React.TouchEvent) => { 
+    if (e.touches.length === 1) {
+      touchEndX.current = e.targetTouches[0].clientX 
+    }
+  }
+  const handleTouchEnd = () => {
+    if (zoomScale > 1) return
+    if (!touchStartX.current || !touchEndX.current) return
+    const distance = touchStartX.current - touchEndX.current
+    if (distance > 45) handleNextImage()
+    if (distance < -45) handlePrevImage()
+    touchStartX.current = null
+    touchEndX.current = null
+  }
+
+  const handleZoomIn = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setZoomScale(prev => Math.min(prev + 0.4, 4))
+  }
+
+  const handleZoomOut = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setZoomScale(prev => {
+      const next = Math.max(prev - 0.4, 1)
+      if (next === 1) setPanPosition({ x: 0, y: 0 })
+      return next
+    })
+  }
+
+  const handleResetZoom = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setZoomScale(1)
+    setPanPosition({ x: 0, y: 0 })
+  }
+
+  const handleDoubleTap = (e: React.TouchEvent | React.MouseEvent) => {
+    const now = Date.now()
+    if (now - lastTapRef.current < 300) {
+      if (zoomScale > 1) {
+        handleResetZoom()
+      } else {
+        setZoomScale(2.2)
+      }
+    }
+    lastTapRef.current = now
+  }
+
+  const handlePrevImage = useCallback(() => {
+    if (previewSourceList.length === 0) return
+    if (currentIndex > 0) setPreviewMedia(previewSourceList[currentIndex - 1])
+    else setPreviewMedia(previewSourceList[previewSourceList.length - 1])
+  }, [currentIndex, previewSourceList])
+
+  const handleNextImage = useCallback(() => {
+    if (previewSourceList.length === 0) return
+    if (currentIndex < previewSourceList.length - 1) setPreviewMedia(previewSourceList[currentIndex + 1])
+    else setPreviewMedia(previewSourceList[0])
+  }, [currentIndex, previewSourceList])
+
+  const durationOptions = [
+    { value: '10m', label: '10 Phút' },
+    { value: '7d', label: '7 Ngày' },
+    { value: '1M', label: '1 Tháng' },
+    { value: '3M', label: '3 Tháng' },
+    { value: '6M', label: '6 Tháng' },
+    { value: '1Y', label: '1 Năm' },
+    { value: 'LIFE', label: 'Vĩnh viễn' },
+  ]
+
+  const handleGenerateKey = async () => {
+    if (!customerName.trim()) { alert('Vui lòng nhập Tên khách hàng!'); return; }
+    if (!serialInput.trim()) { alert('Vui lòng nhập Số Seri máy của khách!'); return; }
+
+    setIsSavingKey(true)
+    let expireTimestamp = 0
+    const now = Date.now()
+
+    switch (duration) {
+      case '10m': expireTimestamp = now + 10 * 60 * 1000; break;
+      case '7d': expireTimestamp = now + 7 * 24 * 60 * 60 * 1000; break;
+      case '1M': expireTimestamp = now + 30 * 24 * 60 * 60 * 1000; break;
+      case '3M': expireTimestamp = now + 90 * 24 * 60 * 60 * 1000; break;
+      case '6M': expireTimestamp = now + 180 * 24 * 60 * 60 * 1000; break;
+      case '1Y': expireTimestamp = now + 365 * 24 * 60 * 60 * 1000; break;
+      case 'LIFE': expireTimestamp = 9999999999999; break;
+    }
+
+    const cleanSerial = serialInput.trim().toUpperCase()
+    const payload = `${cleanSerial}|${expireTimestamp}|${SECRET_SALT}`
+    let hash = 0
+    for (let i = 0; i < payload.length; i++) {
+      hash = ((hash << 5) - hash) + payload.charCodeAt(i)
+      hash |= 0
+    }
+    const signature = Math.abs(hash).toString(36).toUpperCase()
+    const finalKey = `DT-${expireTimestamp.toString(36).toUpperCase()}-${signature}`
+    setGeneratedKey(finalKey)
+
+    const durLabel = durationOptions.find((d) => d.value === duration)?.label || duration
+    const newRecord: KeyRecord = {
+      id: Date.now().toString(),
+      customer_name: customerName.trim(),
+      serial: cleanSerial,
+      duration_label: durLabel,
+      license_key: finalKey,
+      status: 'active',
+    }
+
+    const { error } = await supabase.from('panel_licenses').upsert(newRecord, { onConflict: 'serial' })
+    if (!error) await fetchLicenses()
+    else alert('Lỗi lưu Supabase: ' + error.message)
+    setIsSavingKey(false)
+  }
+
+  const handleToggleRevoke = async (record: KeyRecord) => {
+    const newStatus = record.status === 'revoked' ? 'active' : 'revoked'
+    const actionName = newStatus === 'revoked' ? 'khóa máy và thu hồi quyền' : 'mở khóa lại cho'
+    
+    if (confirm(`Bạn có chắc muốn ${actionName} khách hàng: ${record.customer_name} (${record.serial})?`)) {
+      const { error } = await supabase.from('panel_licenses').update({ status: newStatus }).eq('id', record.id)
+      if (!error) await fetchLicenses()
+      else alert('Lỗi cập nhật: ' + error.message)
+    }
+  }
+
+  const handleDeleteRecord = async (id: string) => {
+    if (confirm('Bạn có chắc muốn xóa bản ghi này khỏi danh sách quản lý?')) {
+      const { error } = await supabase.from('panel_licenses').delete().eq('id', id)
+      if (!error) await fetchLicenses()
+      else alert('Lỗi khi xóa: ' + error.message)
+    }
+  }
+
+  const fetchLicenses = async () => {
+    const { data, error } = await supabase.from('panel_licenses').select('*').order('created_at', { ascending: false })
+    if (!error && data) setKeyRecords(data)
+  }
 
   const handleAddMasterFolder = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -599,739 +1394,22 @@ export default function GalleryClient() {
     }
   }
 
-  const fetchLicenses = async () => {
-    const { data, error } = await supabase.from('panel_licenses').select('*').order('created_at', { ascending: false })
-    if (!error && data) setKeyRecords(data)
-  }
-
   useEffect(() => {
-    if (isKeyGenOpen) fetchLicenses()
-  }, [isKeyGenOpen])
-
-  const fetchAlbumImages = async (driveUrl: string) => {
-    setLoadingImages(true)
-    setStarFilter('all')
-    setCurrentPage(1)
-    setSelectedItemIds(new Set())
-    try {
-      const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}`)
-      const data = await res.json()
-      const files = data.files || []
-      setItems(files)
-      return files
-    } catch (e) {
-      console.error(e)
-      setItems([])
-      return []
-    } finally {
-      setLoadingImages(false)
-      fetchComments()
-    }
-  }
-
-  const handleOpenSubFolder = (folderItem: MediaItem) => {
-    const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
-    const displayName = customNames[folderItem.id] || folderItem.name
-    setFolderHistory(prev => [...prev, { id: folderItem.id, title: displayName, driveUrl: folderDriveUrl }])
-
-    const fSetting = folderSettingsMap[folderItem.id]
-    if (fSetting?.password && isSharedGuest) {
-      setIsLocked(true)
+    if (previewMedia) {
+      const fileName = customNames[previewMedia.id] || previewMedia.name
+      document.title = `${fileName} - Dinh Thong Gallery`
+      setCurrentCommentInput(comments[previewMedia.id] || '')
+      setZoomScale(1)
+      setPanPosition({ x: 0, y: 0 })
+    } else if (folderHistory.length > 0) {
+      const currentFolder = folderHistory[folderHistory.length - 1]
+      document.title = `${currentFolder.title} - Dinh Thong Gallery`
+    } else if (selectedAlbum) {
+      document.title = `${selectedAlbum.title} - Dinh Thong Gallery`
     } else {
-      setIsLocked(false)
-      fetchAlbumImages(folderDriveUrl)
+      document.title = 'Dinh Thong Gallery'
     }
-  }
-
-  const handleNavigateBreadcrumb = (index: number) => {
-    if (index === -1) {
-      if (selectedAlbum) {
-        setFolderHistory([])
-        const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
-        if (mainPass && isSharedGuest) {
-          setIsLocked(true)
-        } else {
-          setIsLocked(false)
-          fetchAlbumImages(selectedAlbum.driveUrl)
-        }
-      }
-    } else {
-      const target = folderHistory[index]
-      setFolderHistory(prev => prev.slice(0, index + 1))
-      const targetPass = folderSettingsMap[target.id]?.password
-      if (targetPass && isSharedGuest) {
-        setIsLocked(true)
-      } else {
-        setIsLocked(false)
-        fetchAlbumImages(target.driveUrl)
-      }
-    }
-  }
-
-  const handleBackToParentFolder = () => {
-    if (folderHistory.length > 1) {
-      const prev = folderHistory[folderHistory.length - 2]
-      setFolderHistory(p => p.slice(0, -1))
-      const prevPass = folderSettingsMap[prev.id]?.password
-      if (prevPass && isSharedGuest) {
-        setIsLocked(true)
-      } else {
-        setIsLocked(false)
-        fetchAlbumImages(prev.driveUrl)
-      }
-    } else if (folderHistory.length === 1 && selectedAlbum) {
-      setFolderHistory([])
-      const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
-      if (mainPass && isSharedGuest) {
-        setIsLocked(true)
-      } else {
-        setIsLocked(false)
-        fetchAlbumImages(selectedAlbum.driveUrl)
-      }
-    } else {
-      if (!isSharedGuest) {
-        setSelectedAlbum(null)
-      }
-    }
-  }
-
-  useEffect(() => {
-    (albums || []).forEach(async (album) => {
-      if (album && !album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
-        try {
-          const res = await fetch(`/api/drive?url=${encodeURIComponent(album.driveUrl)}`)
-          const data = await res.json()
-          const firstImage = data.files?.find((f: MediaItem) => f.type === 'image' && !hiddenItemIds.has(f.id))
-          if (firstImage) {
-            setAlbumCovers(prev => ({ ...prev, [album.id]: firstImage.url }))
-          } else {
-            setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
-          }
-        } catch {
-          setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
-        }
-      }
-    })
-  }, [albums, hiddenItemIds])
-
-  const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
-  const subFolders = visibleItems.filter(item => item.type === 'folder')
-  const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
-
-  const filteredMediaFiles = mediaFiles.filter(img => {
-    if (starFilter === 'all') return true
-    const imgStar = ratings[img.id] || 0
-    return imgStar === starFilter
-  })
-
-  const totalPages = Math.ceil(filteredMediaFiles.length / itemsPerPage)
-  const paginatedImages = filteredMediaFiles.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-  const previewSourceList = filteredMediaFiles
-  const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
-
-  useEffect(() => {
-    if (currentIndex === -1 || previewSourceList.length === 0) return
-
-    const indicesToPreload = [
-      (currentIndex + 1) % previewSourceList.length,
-      (currentIndex + 2) % previewSourceList.length,
-      (currentIndex + 3) % previewSourceList.length,
-      (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
-      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
-    ]
-
-    indicesToPreload.forEach(idx => {
-      const item = previewSourceList[idx]
-      if (item && item.type === 'image') {
-        const previewUrl = `https://lh3.googleusercontent.com/d/${item.id}=w1600`
-        if (!preloadedCache.has(previewUrl)) {
-          preloadedCache.add(previewUrl)
-          const img = new window.Image()
-          img.src = previewUrl
-        }
-      }
-    })
-
-    if (thumbnailRef.current) {
-      const activeThumb = thumbnailRef.current.children[currentIndex] as HTMLElement
-      if (activeThumb) activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
-    }
-  }, [currentIndex, previewSourceList])
-
-  const handlePrevImage = useCallback(() => {
-    if (previewSourceList.length === 0) return
-    if (currentIndex > 0) setPreviewMedia(previewSourceList[currentIndex - 1])
-    else setPreviewMedia(previewSourceList[previewSourceList.length - 1])
-  }, [currentIndex, previewSourceList])
-
-  const handleNextImage = useCallback(() => {
-    if (previewSourceList.length === 0) return
-    if (currentIndex < previewSourceList.length - 1) setPreviewMedia(previewSourceList[currentIndex + 1])
-    else setPreviewMedia(previewSourceList[0])
-  }, [currentIndex, previewSourceList])
-
-  const handleTouchStart = (e: React.TouchEvent) => { 
-    if (e.touches.length === 1) {
-      touchStartX.current = e.targetTouches[0].clientX 
-    }
-  }
-  const handleTouchMove = (e: React.TouchEvent) => { 
-    if (e.touches.length === 1) {
-      touchEndX.current = e.targetTouches[0].clientX 
-    }
-  }
-  const handleTouchEnd = () => {
-    if (zoomScale > 1) return
-    if (!touchStartX.current || !touchEndX.current) return
-    const distance = touchStartX.current - touchEndX.current
-    if (distance > 45) handleNextImage()
-    if (distance < -45) handlePrevImage()
-    touchStartX.current = null
-    touchEndX.current = null
-  }
-
-  const handleZoomIn = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    setZoomScale(prev => Math.min(prev + 0.4, 4))
-  }
-
-  const handleZoomOut = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    setZoomScale(prev => {
-      const next = Math.max(prev - 0.4, 1)
-      if (next === 1) setPanPosition({ x: 0, y: 0 })
-      return next
-    })
-  }
-
-  const handleResetZoom = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    setZoomScale(1)
-    setPanPosition({ x: 0, y: 0 })
-  }
-
-  const handleDoubleTap = (e: React.TouchEvent | React.MouseEvent) => {
-    const now = Date.now()
-    if (now - lastTapRef.current < 300) {
-      if (zoomScale > 1) {
-        handleResetZoom()
-      } else {
-        setZoomScale(2.2)
-      }
-    }
-    lastTapRef.current = now
-  }
-
-  const handleToggleSelectAlbum = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setSelectedAlbumIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const handleToggleSelectItem = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const maxSel = Number(activeSetting?.max_select || 0)
-    
-    if (maxSel > 0 && !selectedItemIds.has(id) && selectedItemIds.size >= maxSel) {
-      alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
-      return
-    }
-
-    setSelectedItemIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const handleRateImage = (imageId: string, stars: number) => {
-    const maxSel = Number(activeSetting?.max_select || 0)
-    const isCurrentlyRated = (ratings[imageId] || 0) > 0
-
-    if (stars > 0 && !isCurrentlyRated) {
-      const currentRatedCount = Object.values(ratings).filter(s => s > 0).length
-      if (maxSel > 0 && currentRatedCount >= maxSel) {
-        alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
-        return
-      }
-    }
-
-    const newRatings = { ...ratings, [imageId]: stars }
-    setRatings(newRatings)
-    localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
-  }
-
-  const handleBatchDownload = async () => {
-    if (isZipping) return
-    if (!selectedAlbum) {
-      const selectedAlbumsList = (albums || []).filter(a => a && selectedAlbumIds.has(a.id))
-      if (selectedAlbumsList.length === 0) return
-
-      setIsZipping(true)
-      setZipProgress('Chuẩn bị tải...')
-      try {
-        for (const alb of selectedAlbumsList) {
-          await handleDownloadAlbumZip({ title: alb.title, driveUrl: alb.driveUrl })
-        }
-        setSelectedAlbumIds(new Set())
-      } finally {
-        setIsZipping(false)
-        setZipProgress('')
-      }
-    } else {
-      const selectedFiles = visibleItems.filter(f => selectedItemIds.has(f.id) && f.type !== 'folder')
-      if (selectedFiles.length === 0) {
-        alert('Vui lòng chọn ít nhất 1 tệp ảnh/video để tải!')
-        return
-      }
-
-      setIsZipping(true)
-      setZipProgress('Đang nén...')
-      try {
-        const zip = new JSZip()
-        const total = selectedFiles.length
-        let completedCount = 0
-
-        const CONCURRENCY_LIMIT = 8
-        const fetchFile = async (fileItem: MediaItem) => {
-          const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
-          const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
-          try {
-            const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
-            if (res.ok) {
-              let blob = await res.blob()
-              if (activeSetting.enable_watermark && fileItem.type === 'image') {
-                blob = await applyWatermarkToImageBlob(blob)
-              }
-              zip.file(exactFileName, blob, { compression: 'STORE' })
-            }
-          } catch (err) {
-            console.error(err)
-          } finally {
-            completedCount++
-            setZipProgress(`${completedCount}/${total}`)
-          }
-        }
-
-        for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
-          const chunk = selectedFiles.slice(i, i + CONCURRENCY_LIMIT)
-          await Promise.all(chunk.map(fileItem => fetchFile(fileItem)))
-        }
-
-        setZipProgress('Tạo file ZIP...')
-        const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
-        saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
-        setSelectedItemIds(new Set())
-      } catch (e: any) {
-        alert('Lỗi tải tệp: ' + e.message)
-      } finally {
-        setIsZipping(false)
-        setZipProgress('')
-      }
-    }
-  }
-
-  const handleBatchDelete = async () => {
-    if (isSharedGuest) return
-    if (!selectedAlbum) {
-      if (selectedAlbumIds.size === 0) return
-      if (confirm(`Bạn có chắc muốn XÓA ${selectedAlbumIds.size} album đã chọn khỏi hệ thống?`)) {
-        const idsToDelete = Array.from(selectedAlbumIds)
-        const { error } = await supabase.from('albums').delete().in('id', idsToDelete)
-        if (!error) {
-          await fetchAlbumsFromSupabase()
-          setSelectedAlbumIds(new Set())
-          alert('Đã xóa thành công các album đã chọn!')
-        } else {
-          alert('Lỗi khi xóa: ' + error.message)
-        }
-      }
-    } else {
-      if (selectedItemIds.size === 0) return
-      if (confirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM ${selectedItemIds.size} mục đã chọn khỏi hiển thị?`)) {
-        const idsToHide = Array.from(selectedItemIds).map(id => ({ id }))
-        const { error } = await supabase.from('hidden_items').insert(idsToHide)
-        if (!error) {
-          setHiddenItemIds(prev => new Set([...Array.from(prev), ...Array.from(selectedItemIds)]))
-          setSelectedItemIds(new Set())
-          alert('Đã xóa dứt điểm các mục đã chọn!')
-        } else {
-          alert('Lỗi khi xóa: ' + error.message)
-        }
-      }
-    }
-  }
-
-  const handleDownloadAlbumZip = async (targetInfo?: { title: string; driveUrl: string }, e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault()
-      e.stopPropagation()
-    }
-    const currentFolder = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1] : null
-    const target = targetInfo || currentFolder || selectedAlbum
-    if (!target || isZipping) return
-
-    setIsZipping(true)
-    setZipProgress('Vui lòng đợi...')
-
-    try {
-      let targetFiles = visibleItems.filter(f => f.type !== 'folder')
-      if (targetInfo && targetInfo.driveUrl !== (currentFolder?.driveUrl || selectedAlbum?.driveUrl)) {
-        const res = await fetch(`/api/drive?url=${encodeURIComponent(targetInfo.driveUrl)}`)
-        const data = await res.json()
-        targetFiles = (data.files || []).filter((f: any) => f.type !== 'folder' && !hiddenItemIds.has(f.id))
-      }
-
-      if (targetFiles.length === 0) {
-        alert('Thư mục này hiện không có tệp ảnh/video nào để tải!')
-        setIsZipping(false)
-        return
-      }
-
-      const zip = new JSZip()
-      const total = targetFiles.length
-      let completedCount = 0
-
-      const CONCURRENCY_LIMIT = 8
-      const fetchRawOriginalFile = async (fileItem: MediaItem) => {
-        const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
-        const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
-        try {
-          const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
-          if (res.ok) {
-            let blob = await res.blob()
-            if (activeSetting.enable_watermark && fileItem.type === 'image') {
-              blob = await applyWatermarkToImageBlob(blob)
-            }
-            zip.file(exactFileName, blob, { compression: 'STORE' })
-          }
-        } catch (err) {
-          console.error(`Lỗi tải: ${exactFileName}`, err)
-        } finally {
-          completedCount++
-          setZipProgress(`${completedCount}/${total}`)
-        }
-      }
-
-      for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
-        const chunk = targetFiles.slice(i, i + CONCURRENCY_LIMIT)
-        await Promise.all(chunk.map(fileItem => fetchRawOriginalFile(fileItem)))
-      }
-
-      setZipProgress('Vui lòng đợi...')
-      const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE', streamFiles: true }, (metadata) => {
-        setZipProgress(`${Math.floor(metadata.percent)}%`)
-      })
-      saveAs(zipContent, `${target.title}.zip`)
-    } catch (err: any) {
-      alert('Có lỗi xảy ra khi tải album: ' + err.message)
-    } finally {
-      setIsZipping(false)
-      setZipProgress('')
-    }
-  }
-
-  const handlePermanentlyHideItem = async (itemId: string, itemName: string, e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault()
-      e.stopPropagation()
-    }
-    if (isSharedGuest) return
-    if (confirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM mục "${itemName}" khỏi hiển thị không?`)) {
-      const { error } = await supabase.from('hidden_items').insert([{ id: itemId }])
-      if (!error) {
-        setHiddenItemIds(prev => new Set([...Array.from(prev), itemId]))
-        if (previewMedia?.id === itemId) setPreviewMedia(null)
-      } else {
-        alert('Lỗi khi xóa: ' + error.message)
-      }
-    }
-  }
-
-  const handleOpenVisibilityManager = () => {
-    const visibleSet = new Set(items.map(i => i.id).filter(id => !hiddenItemIds.has(id)))
-    setTempVisibleIds(visibleSet)
-    setIsManageVisibilityOpen(true)
-  }
-
-  const handleSaveVisibilityChanges = async () => {
-    setIsSavingVisibility(true)
-    try {
-      const allCurrentItemIds = items.map(i => i.id)
-      const newlyHiddenIds = allCurrentItemIds.filter(id => !tempVisibleIds.has(id))
-      const newlyShownIds = allCurrentItemIds.filter(id => tempVisibleIds.has(id))
-
-      if (newlyHiddenIds.length > 0) {
-        await supabase.from('hidden_items').upsert(newlyHiddenIds.map(id => ({ id })), { onConflict: 'id' })
-      }
-      if (newlyShownIds.length > 0) {
-        await supabase.from('hidden_items').delete().in('id', newlyShownIds)
-      }
-
-      setHiddenItemIds(prev => {
-        const next = new Set(prev)
-        newlyHiddenIds.forEach(id => next.add(id))
-        newlyShownIds.forEach(id => next.delete(id))
-        return next
-      })
-
-      setIsManageVisibilityOpen(false)
-      alert('Đã cập nhật trạng thái hiển thị thành công!')
-    } catch (err: any) {
-      alert('Lỗi lưu: ' + err.message)
-    } finally {
-      setIsSavingVisibility(false)
-    }
-  }
-
-  const handleShareFolder = (folderId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    const numericCode = toNumericCode(folderId)
-    const shareUrl = `${window.location.origin}/s/${numericCode}`
-    navigator.clipboard.writeText(shareUrl)
-    setShareCopiedId(folderId)
-    setTimeout(() => setShareCopiedId(null), 2500)
-  }
-
-  // TẢI FILE CHUẨN XÁC NGUYÊN VẸN TRỰC TIẾP
-  const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault()
-      e.stopPropagation()
-    }
-    if (downloadingId || item.type === 'folder') return
-
-    setDownloadingId(item.id)
-    const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
-
-    try {
-      const ext = item.type === 'video' ? 'mp4' : 'jpg'
-      const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
-      const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
-
-      const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
-      const res = await fetch(proxyUrl)
-      if (!res.ok) throw new Error('Fetch failed')
-      
-      let blob = await res.blob()
-
-      if (activeSetting.enable_watermark && item.type === 'image') {
-        blob = await applyWatermarkToImageBlob(blob)
-      }
-
-      const fileObj = new File([blob], exactFileName, { type: mimeType })
-
-      if (isIOS && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
-        await navigator.share({ files: [fileObj], title: exactFileName })
-        setDownloadingId(null)
-        return
-      }
-
-      const blobUrl = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = blobUrl
-      link.setAttribute('download', exactFileName)
-      link.style.display = 'none'
-      document.body.appendChild(link)
-      link.click()
-      setTimeout(() => {
-        document.body.removeChild(link)
-        URL.revokeObjectURL(blobUrl)
-      }, 1000)
-    } catch (err) {
-      console.error(err)
-      window.open(item.downloadUrl, '_blank')
-    } finally {
-      setDownloadingId(null)
-    }
-  }
-
-  const handleClosePreview = (e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault()
-      e.stopPropagation()
-    }
-    setDownloadingId(null)
-    setPreviewMedia(null)
-    setZoomScale(1)
-    setPanPosition({ x: 0, y: 0 })
-  }
-
-  const handleClearAllSelections = () => {
-    if (confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) {
-      setRatings({})
-      localStorage.removeItem('dinhthong_image_ratings')
-    }
-  }
-
-  const handleSaveComment = async (itemId: string) => {
-    const text = currentCommentInput.trim()
-    setIsSavingComment(true)
-    try {
-      const newMap = { ...comments, [itemId]: text }
-      setComments(newMap)
-      
-      const { error } = await supabase.from('item_comments').upsert({ id: itemId, comment: text })
-      if (error) throw error
-      alert('Đã lưu bình luận yêu cầu thành công!')
-    } catch (err: any) {
-      alert('Lỗi lưu bình luận: ' + err.message)
-    } finally {
-      setIsSavingComment(false)
-    }
-  }
-
-  const handleDeleteAllComments = async () => {
-    if (confirm('CẢNH BÁO: Bạn có chắc muốn XÓA TẤT CẢ bình luận của khách hàng trên hệ thống?')) {
-      const { error } = await supabase.from('item_comments').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-      if (!error) {
-        setComments({})
-        alert('Đã xóa tất cả bình luận thành công!')
-      } else {
-        alert('Lỗi xóa bình luận: ' + error.message)
-      }
-    }
-  }
-
-  const durationOptions = [
-    { value: '10m', label: '10 Phút' },
-    { value: '7d', label: '7 Ngày' },
-    { value: '1M', label: '1 Tháng' },
-    { value: '3M', label: '3 Tháng' },
-    { value: '6M', label: '6 Tháng' },
-    { value: '1Y', label: '1 Năm' },
-    { value: 'LIFE', label: 'Vĩnh viễn' },
-  ]
-
-  const handleGenerateKey = async () => {
-    if (!customerName.trim()) { alert('Vui lòng nhập Tên khách hàng!'); return; }
-    if (!serialInput.trim()) { alert('Vui lòng nhập Số Seri máy của khách!'); return; }
-
-    setIsSavingKey(true)
-    let expireTimestamp = 0
-    const now = Date.now()
-
-    switch (duration) {
-      case '10m': expireTimestamp = now + 10 * 60 * 1000; break;
-      case '7d': expireTimestamp = now + 7 * 24 * 60 * 60 * 1000; break;
-      case '1M': expireTimestamp = now + 30 * 24 * 60 * 60 * 1000; break;
-      case '3M': expireTimestamp = now + 90 * 24 * 60 * 60 * 1000; break;
-      case '6M': expireTimestamp = now + 180 * 24 * 60 * 60 * 1000; break;
-      case '1Y': expireTimestamp = now + 365 * 24 * 60 * 60 * 1000; break;
-      case 'LIFE': expireTimestamp = 9999999999999; break;
-    }
-
-    const cleanSerial = serialInput.trim().toUpperCase()
-    const payload = `${cleanSerial}|${expireTimestamp}|${SECRET_SALT}`
-    let hash = 0
-    for (let i = 0; i < payload.length; i++) {
-      hash = ((hash << 5) - hash) + payload.charCodeAt(i)
-      hash |= 0
-    }
-    const signature = Math.abs(hash).toString(36).toUpperCase()
-    const finalKey = `DT-${expireTimestamp.toString(36).toUpperCase()}-${signature}`
-    setGeneratedKey(finalKey)
-
-    const durLabel = durationOptions.find((d) => d.value === duration)?.label || duration
-    const newRecord: KeyRecord = {
-      id: Date.now().toString(),
-      customer_name: customerName.trim(),
-      serial: cleanSerial,
-      duration_label: durLabel,
-      license_key: finalKey,
-      status: 'active',
-    }
-
-    const { error } = await supabase.from('panel_licenses').upsert(newRecord, { onConflict: 'serial' })
-    if (!error) await fetchLicenses()
-    else alert('Lỗi lưu Supabase: ' + error.message)
-    setIsSavingKey(false)
-  }
-
-  const handleToggleRevoke = async (record: KeyRecord) => {
-    const newStatus = record.status === 'revoked' ? 'active' : 'revoked'
-    const actionName = newStatus === 'revoked' ? 'khóa máy và thu hồi quyền' : 'mở khóa lại cho'
-    
-    if (confirm(`Bạn có chắc muốn ${actionName} khách hàng: ${record.customer_name} (${record.serial})?`)) {
-      const { error } = await supabase.from('panel_licenses').update({ status: newStatus }).eq('id', record.id)
-      if (!error) await fetchLicenses()
-      else alert('Lỗi cập nhật: ' + error.message)
-    }
-  }
-
-  const handleDeleteRecord = async (id: string) => {
-    if (confirm('Bạn có chắc muốn xóa bản ghi này khỏi danh sách quản lý?')) {
-      const { error } = await supabase.from('panel_licenses').delete().eq('id', id)
-      if (!error) await fetchLicenses()
-      else alert('Lỗi khi xóa: ' + error.message)
-    }
-  }
-
-  const handleCheckPassword = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (passwordInput.trim() === activeSetting.password?.trim()) {
-      setIsLocked(false)
-      setPasswordError(false)
-      const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
-      if (targetUrl) fetchAlbumImages(targetUrl)
-    } else {
-      setPasswordError(true)
-    }
-  }
-
-  const handleOpenCurrentFolderSetting = () => {
-    setEditingFolderSetting({
-      id: currentActiveFolderId,
-      title: currentActiveFolderTitle,
-      password: activeSetting.password || '',
-      max_select: activeSetting.max_select || 0,
-      allow_comments: activeSetting.allow_comments ?? true,
-      enable_watermark: activeSetting.enable_watermark ?? false
-    })
-  }
-
-  const handleSaveCurrentFolderSetting = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editingFolderSetting) return
-
-    try {
-      const newTitle = editingFolderSetting.title.trim()
-      const payload = {
-        id: editingFolderSetting.id,
-        password: editingFolderSetting.password?.trim() || '',
-        max_select: Number(editingFolderSetting.max_select || 0),
-        allow_comments: editingFolderSetting.allow_comments ?? true,
-        enable_watermark: editingFolderSetting.enable_watermark ?? false
-      }
-
-      await supabase.from('folder_settings').upsert(payload, { onConflict: 'id' })
-
-      if (newTitle) {
-        await supabase.from('custom_item_names').upsert({ id: editingFolderSetting.id, custom_name: newTitle }, { onConflict: 'id' })
-        setCustomNames(prev => ({ ...prev, [editingFolderSetting.id]: newTitle }))
-      }
-
-      if (folderHistory.length === 0 && selectedAlbum?.id === editingFolderSetting.id) {
-        await supabase.from('albums').update({ ...payload, title: newTitle || selectedAlbum.title }).eq('id', editingFolderSetting.id)
-        await fetchAlbumsFromSupabase()
-      }
-
-      setFolderSettingsMap(prev => ({
-        ...prev,
-        [editingFolderSetting.id]: editingFolderSetting
-      }))
-
-      setEditingFolderSetting(null)
-      alert(`Đã lưu cài đặt cho "${newTitle || currentActiveFolderTitle}" thành công!`)
-    } catch (err: any) {
-      alert('Lỗi lưu cài đặt: ' + err.message)
-    }
-  }
+  }, [previewMedia, folderHistory, selectedAlbum, customNames, comments])
 
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
@@ -1468,6 +1546,54 @@ export default function GalleryClient() {
   }, [router, supabase])
 
   useEffect(() => {
+    (albums || []).forEach(async (album) => {
+      if (album && !album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
+        try {
+          const res = await fetch(`/api/drive?url=${encodeURIComponent(album.driveUrl)}`)
+          const data = await res.json()
+          const firstImage = data.files?.find((f: MediaItem) => f.type === 'image' && !hiddenItemIds.has(f.id))
+          if (firstImage) {
+            setAlbumCovers(prev => ({ ...prev, [album.id]: firstImage.url }))
+          } else {
+            setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
+          }
+        } catch {
+          setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
+        }
+      }
+    })
+  }, [albums, hiddenItemIds])
+
+  useEffect(() => {
+    if (currentIndex === -1 || previewSourceList.length === 0) return
+
+    const indicesToPreload = [
+      (currentIndex + 1) % previewSourceList.length,
+      (currentIndex + 2) % previewSourceList.length,
+      (currentIndex + 3) % previewSourceList.length,
+      (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
+      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
+    ]
+
+    indicesToPreload.forEach(idx => {
+      const item = previewSourceList[idx]
+      if (item && item.type === 'image') {
+        const previewUrl = `https://lh3.googleusercontent.com/d/${item.id}=w1600`
+        if (!preloadedCache.has(previewUrl)) {
+          preloadedCache.add(previewUrl)
+          const img = new window.Image()
+          img.src = previewUrl
+        }
+      }
+    })
+
+    if (thumbnailRef.current) {
+      const activeThumb = thumbnailRef.current.children[currentIndex] as HTMLElement
+      if (activeThumb) activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    }
+  }, [currentIndex, previewSourceList])
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!previewMedia) return
       if (e.key === 'ArrowLeft') handlePrevImage()
@@ -1481,27 +1607,6 @@ export default function GalleryClient() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [previewMedia, handlePrevImage, handleNextImage, zoomScale])
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.replace('/')
-  }
-
-  const handleOpenAlbum = (album: Album) => {
-    setSelectedAlbum(album)
-    setFolderHistory([])
-    const fSetting = folderSettingsMap[album.id]
-    const currentPass = fSetting?.password || album.password
-    if (currentPass && isSharedGuest) {
-      setIsLocked(true)
-    } else {
-      setIsLocked(false)
-      fetchAlbumImages(album.driveUrl)
-    }
-  }
-
-  const filteredAlbums = (albums || []).filter(album => album && album.title && album.title.toLowerCase().includes(searchTerm.toLowerCase()))
-  const currentSelectionCount = selectedAlbum ? selectedItemIds.size : selectedAlbumIds.size
-
   if (loading) {
     return (
       <div className="min-h-screen bg-[#07130c] flex flex-col items-center justify-center text-white">
@@ -1513,10 +1618,8 @@ export default function GalleryClient() {
 
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
-      
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/95 border-white/10' : 'bg-white/95 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
-          
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {((selectedAlbum && !isSharedGuest) || (isSharedGuest && folderHistory.length > 0)) && (
               <button 
@@ -1671,7 +1774,6 @@ export default function GalleryClient() {
         </div>
       </header>
 
-      {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
         {!selectedAlbum ? (
           <div>
@@ -2260,7 +2362,7 @@ export default function GalleryClient() {
         )}
       </main>
 
-      {/* MODAL LIGHTBOX / XEM ẢNH & VIDEO */}
+      {/* MODAL LIGHTBOX */}
       {previewMedia && (
         <div 
           className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-2 sm:p-4 select-none touch-pan-y"
@@ -2268,7 +2370,6 @@ export default function GalleryClient() {
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          {/* Header Lightbox */}
           <div className="flex items-center justify-between px-3 py-2 text-white/90 z-30">
             <div className="truncate max-w-[50vw]">
               <h4 className="text-xs sm:text-sm font-medium truncate">
@@ -3244,7 +3345,6 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* Footer */}
       <footer className={`border-t py-6 sm:py-8 text-xs transition-colors ${
         isDarkMode ? 'border-white/10 text-gray-500' : 'border-gray-100 text-gray-400'
       }`}>
@@ -3252,7 +3352,6 @@ export default function GalleryClient() {
           <p>© 2026 DinhThong Gallery</p>
         </div>
       </footer>
-
     </div>
   )
 }
