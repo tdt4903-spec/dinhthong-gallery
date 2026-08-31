@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, ZoomIn, ZoomOut, RotateCcw, Send
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, Lock as LockIcon, ZoomIn, ZoomOut, RotateCcw, Send
 } from 'lucide-react'
 
 interface MediaItem {
@@ -323,6 +323,16 @@ export default function GalleryClient() {
   const previewSourceList = filteredMediaFiles
   const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
 
+  const durationOptions = [
+    { value: '10m', label: '10 Phút' },
+    { value: '7d', label: '7 Ngày' },
+    { value: '1M', label: '1 Tháng' },
+    { value: '3M', label: '3 Tháng' },
+    { value: '6M', label: '6 Tháng' },
+    { value: '1Y', label: '1 Năm' },
+    { value: 'LIFE', label: 'Vĩnh viễn' },
+  ]
+
   const formatDriveCoverUrl = (url: string) => {
     if (!url) return ''
     const cleanId = extractDriveId(url)
@@ -449,6 +459,13 @@ export default function GalleryClient() {
       console.error(e)
     }
     return []
+  }
+
+  const fetchLicenses = async () => {
+    try {
+      const { data, error } = await supabase.from('panel_licenses').select('*').order('created_at', { ascending: false })
+      if (!error && data) setKeyRecords(data)
+    } catch {}
   }
 
   const checkAllMasterFolders = async (folders: MasterFolderItem[], isManual = false, existingKnown?: Set<string>) => {
@@ -1199,16 +1216,6 @@ export default function GalleryClient() {
     else setPreviewMedia(previewSourceList[0])
   }, [currentIndex, previewSourceList])
 
-  const durationOptions = [
-    { value: '10m', label: '10 Phút' },
-    { value: '7d', label: '7 Ngày' },
-    { value: '1M', label: '1 Tháng' },
-    { value: '3M', label: '3 Tháng' },
-    { value: '6M', label: '6 Tháng' },
-    { value: '1Y', label: '1 Năm' },
-    { value: 'LIFE', label: 'Vĩnh viễn' },
-  ]
-
   const handleGenerateKey = async () => {
     if (!customerName.trim()) { alert('Vui lòng nhập Tên khách hàng!'); return; }
     if (!serialInput.trim()) { alert('Vui lòng nhập Số Seri máy của khách!'); return; }
@@ -1271,11 +1278,6 @@ export default function GalleryClient() {
       if (!error) await fetchLicenses()
       else alert('Lỗi khi xóa: ' + error.message)
     }
-  }
-
-  const fetchLicenses = async () => {
-    const { data, error } = await supabase.from('panel_licenses').select('*').order('created_at', { ascending: false })
-    if (!error && data) setKeyRecords(data)
   }
 
   const handleAddMasterFolder = async (e: React.FormEvent) => {
@@ -1395,231 +1397,16 @@ export default function GalleryClient() {
   }
 
   useEffect(() => {
-    if (previewMedia) {
-      const fileName = customNames[previewMedia.id] || previewMedia.name
-      document.title = `${fileName} - Dinh Thong Gallery`
-      setCurrentCommentInput(comments[previewMedia.id] || '')
-      setZoomScale(1)
-      setPanPosition({ x: 0, y: 0 })
-    } else if (folderHistory.length > 0) {
-      const currentFolder = folderHistory[folderHistory.length - 1]
-      document.title = `${currentFolder.title} - Dinh Thong Gallery`
-    } else if (selectedAlbum) {
-      document.title = `${selectedAlbum.title} - Dinh Thong Gallery`
-    } else {
-      document.title = 'Dinh Thong Gallery'
-    }
-  }, [previewMedia, folderHistory, selectedAlbum, customNames, comments])
-
-  useEffect(() => {
-    const pathParts = window.location.pathname.split('/').filter(Boolean)
-    const isShortRoute = pathParts[0] === 's'
-    const params = new URLSearchParams(window.location.search)
-    const sharedId = isShortRoute ? pathParts[1] : params.get('id')
-
-    if (sharedId) {
-      setIsSharedGuest(true)
-      fetchHiddenItemIds()
-      fetchCustomNames()
-      fetchCustomCovers()
-      fetchComments()
-      fetchFolderSettings().then(fSettingsMap => {
-        supabase
-          .from('albums')
-          .select('*')
-          .then(async ({ data: allAlbums }) => {
-            const matchedAlbum = allAlbums?.find(a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.drive_url) === sharedId)
-
-            if (matchedAlbum) {
-              const sharedAlbumObj: Album = {
-                id: matchedAlbum.id,
-                title: matchedAlbum.title,
-                coverUrl: matchedAlbum.cover_url || '',
-                driveUrl: matchedAlbum.drive_url,
-                password: matchedAlbum.password || '',
-                max_select: Number(matchedAlbum.max_select || 0),
-                allow_comments: matchedAlbum.allow_comments ?? true,
-                enable_watermark: matchedAlbum.enable_watermark ?? false
-              }
-              setSelectedAlbum(sharedAlbumObj)
-              setFolderHistory([])
-
-              const currentPass = fSettingsMap[sharedAlbumObj.id]?.password || sharedAlbumObj.password
-              if (currentPass) {
-                setIsLocked(true)
-              } else {
-                await fetchAlbumImages(sharedAlbumObj.driveUrl)
-              }
-              setLoading(false)
-              return
-            }
-
-            let realFolderId = sharedId
-            let adminSetTitle = ''
-
-            const { data: allCustom } = await supabase.from('custom_item_names').select('id, custom_name')
-            const matchedCustom = allCustom?.find(c => c.id === sharedId || toNumericCode(c.id) === sharedId)
-
-            if (matchedCustom) {
-              realFolderId = matchedCustom.id
-              adminSetTitle = matchedCustom.custom_name
-            } else {
-              const { data: allKnown } = await supabase.from('known_drive_folders').select('id, name')
-              const matchedKnown = allKnown?.find(k => k.id === sharedId || toNumericCode(k.id) === sharedId)
-              if (matchedKnown) {
-                realFolderId = matchedKnown.id
-                adminSetTitle = matchedKnown.name
-              }
-            }
-
-            const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
-            const fallbackAlbum: Album = {
-              id: realFolderId,
-              title: adminSetTitle || 'DinhThong Album',
-              coverUrl: '',
-              driveUrl: folderDriveUrl
-            }
-
-            setSelectedAlbum(fallbackAlbum)
-
-            const subPass = fSettingsMap[realFolderId]?.password
-            if (subPass) {
-              setIsLocked(true)
-            } else {
-              await fetchAlbumImages(folderDriveUrl)
-            }
-            setLoading(false)
-          })
-      })
-      
-      const savedRatings = localStorage.getItem('dinhthong_image_ratings')
-      if (savedRatings) {
-        try { setRatings(JSON.parse(savedRatings)) } catch {}
-      }
-      return
-    }
-
-    const checkAuth = async () => {
-      try {
-        const { data } = await supabase.auth.getSession()
-        if (!data.session) {
-          setLoading(false)
-          router.replace('/')
-          return
-        }
-
-        const loggedInEmail = data.session.user.email
-        const { data: whitelist, error } = await supabase.from('allowed_emails').select('email').eq('email', loggedInEmail).single()
-
-        if (error || !whitelist) {
-          alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
-          await supabase.auth.signOut()
-          setLoading(false)
-          router.replace('/')
-          return
-        }
-
-        setUser(data.session.user)
-        await fetchHiddenItemIds()
-        const knownSet = await fetchKnownFolderIds()
-        await fetchCustomNames()
-        await fetchCustomCovers()
-        await fetchComments()
-        await fetchFolderSettings()
-        await fetchAlbumsFromSupabase()
-        const masterFolders = await fetchMasterFoldersList()
-
-        checkAllMasterFolders(masterFolders, false, knownSet)
-
-        const savedRatings = localStorage.getItem('dinhthong_image_ratings')
-        if (savedRatings) {
-          try { setRatings(JSON.parse(savedRatings)) } catch {}
-        }
-        setLoading(false)
-      } catch {
-        setLoading(false)
-        router.replace('/')
-      }
-    }
-
-    checkAuth()
-  }, [router, supabase])
-
-  useEffect(() => {
-    (albums || []).forEach(async (album) => {
-      if (album && !album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
-        try {
-          const res = await fetch(`/api/drive?url=${encodeURIComponent(album.driveUrl)}`)
-          const data = await res.json()
-          const firstImage = data.files?.find((f: MediaItem) => f.type === 'image' && !hiddenItemIds.has(f.id))
-          if (firstImage) {
-            setAlbumCovers(prev => ({ ...prev, [album.id]: firstImage.url }))
-          } else {
-            setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
-          }
-        } catch {
-          setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
-        }
-      }
-    })
-  }, [albums, hiddenItemIds])
-
-  useEffect(() => {
-    if (currentIndex === -1 || previewSourceList.length === 0) return
-
-    const indicesToPreload = [
-      (currentIndex + 1) % previewSourceList.length,
-      (currentIndex + 2) % previewSourceList.length,
-      (currentIndex + 3) % previewSourceList.length,
-      (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
-      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
-    ]
-
-    indicesToPreload.forEach(idx => {
-      const item = previewSourceList[idx]
-      if (item && item.type === 'image') {
-        const previewUrl = `https://lh3.googleusercontent.com/d/${item.id}=w1600`
-        if (!preloadedCache.has(previewUrl)) {
-          preloadedCache.add(previewUrl)
-          const img = new window.Image()
-          img.src = previewUrl
-        }
-      }
-    })
-
-    if (thumbnailRef.current) {
-      const activeThumb = thumbnailRef.current.children[currentIndex] as HTMLElement
-      if (activeThumb) activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
-    }
-  }, [currentIndex, previewSourceList])
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!previewMedia) return
-      if (e.key === 'ArrowLeft') handlePrevImage()
-      if (e.key === 'ArrowRight') handleNextImage()
-      if (e.key === 'Escape') handleClosePreview()
-      if (e.key === '+' || e.key === '=') handleZoomIn()
-      if (e.key === '-' || e.key === '_') handleZoomOut()
-      if (e.key === '0') handleResetZoom()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [previewMedia, handlePrevImage, handleNextImage, zoomScale])
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#07130c] flex flex-col items-center justify-center text-white">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
-        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Vui lòng đợi</p>
-      </div>
-    )
-  }
+    if (isKeyGenOpen) fetchLicenses()
+  }, [isKeyGenOpen])
 
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
+      
+      {/* HEADER */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/95 border-white/10' : 'bg-white/95 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
+          
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {((selectedAlbum && !isSharedGuest) || (isSharedGuest && folderHistory.length > 0)) && (
               <button 
@@ -1774,6 +1561,7 @@ export default function GalleryClient() {
         </div>
       </header>
 
+      {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
         {!selectedAlbum ? (
           <div>
@@ -1893,7 +1681,7 @@ export default function GalleryClient() {
                         className="absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
                         title={isChecked ? 'Bỏ chọn' : 'Chọn album'}
                       >
-                        {isChecked ? <CheckSquare className="w-5 h-5 text-emerald-400" /> : <Square className="w-5 h-5 text-white/80" />}
+                        {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
                       </button>
 
                       {!isSharedGuest && (
@@ -1935,7 +1723,7 @@ export default function GalleryClient() {
               isDarkMode ? 'bg-[#181a20] border-white/10' : 'bg-white border-gray-100'
             }`}>
               <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4">
-                <Lock className="w-7 h-7" />
+                <LockIcon className="w-7 h-7" />
               </div>
               <h3 className="font-bold font-serif text-lg text-gray-900 dark:text-white">Thư Mục Đã Được Bảo Vệ</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-6">
@@ -3345,6 +3133,7 @@ export default function GalleryClient() {
         </div>
       )}
 
+      {/* Footer */}
       <footer className={`border-t py-6 sm:py-8 text-xs transition-colors ${
         isDarkMode ? 'border-white/10 text-gray-500' : 'border-gray-100 text-gray-400'
       }`}>
@@ -3352,6 +3141,7 @@ export default function GalleryClient() {
           <p>© 2026 DinhThong Gallery</p>
         </div>
       </footer>
+
     </div>
   )
 }
