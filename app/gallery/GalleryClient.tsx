@@ -115,12 +115,60 @@ function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }
   )
 }
 
+// HÀM ĐÓNG DẤU WATERMARK TRỰC TIẾP LÊN FILE ẢNH TRƯỚC KHI TẢI
+const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG GALLERY'): Promise<Blob> => {
+  return new Promise((resolve) => {
+    const img = new window.Image()
+    const objectUrl = URL.createObjectURL(blob)
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth || img.width
+      canvas.height = img.naturalHeight || img.height
+      const ctx = canvas.getContext('2d')
+      
+      if (!ctx) {
+        resolve(blob)
+        return
+      }
+
+      ctx.drawImage(img, 0, 0)
+
+      const fontSize = Math.max(Math.floor(canvas.width / 15), 36)
+      ctx.save()
+      ctx.translate(canvas.width / 2, canvas.height / 2)
+      ctx.rotate((-18 * Math.PI) / 180)
+      ctx.font = `900 ${fontSize}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)'
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)'
+      ctx.lineWidth = Math.max(fontSize / 20, 2)
+      
+      ctx.strokeText(watermarkText, 0, 0)
+      ctx.fillText(watermarkText, 0, 0)
+      ctx.restore()
+
+      canvas.toBlob((watermarkedBlob) => {
+        if (watermarkedBlob) resolve(watermarkedBlob)
+        else resolve(blob)
+      }, 'image/jpeg', 0.95)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      resolve(blob)
+    }
+    img.src = objectUrl
+  })
+}
+
 export default function GalleryClient() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
-  // LOGIC TỰ ĐỘNG CHUYỂN GIAO DIỆN THEO GIỜ (6H - 18H SÁNG, 18H - 6H TỐI)
+  // LOGIC TỰ ĐỘNG ĐỔI GIAO DIỆN THEO GIỜ (6H - 18H SÁNG, 18H - 6H TỐI)
   const isTimeForDarkMode = () => {
     const currentHour = new Date().getHours()
     return currentHour < 6 || currentHour >= 18
@@ -782,6 +830,7 @@ export default function GalleryClient() {
     localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
   }
 
+  // TẢI ZIP DANH SÁCH TICK CHỌN (TỰ ĐỘNG ĐÓNG WATERMARK NẾU BẬT)
   const handleBatchDownload = async () => {
     if (isZipping) return
     if (!selectedAlbum) {
@@ -813,14 +862,18 @@ export default function GalleryClient() {
         const total = selectedFiles.length
         let completedCount = 0
 
-        const CONCURRENCY_LIMIT = 16
+        const CONCURRENCY_LIMIT = 12
         const fetchFile = async (fileItem: MediaItem) => {
           const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
           const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
           try {
             const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
             if (res.ok) {
-              const blob = await res.blob()
+              let blob = await res.blob()
+              // Nếu thư mục bật watermark và là file ảnh -> đóng dấu watermark trực tiếp vào file zip
+              if (activeSetting.enable_watermark && fileItem.type === 'image') {
+                blob = await applyWatermarkToImageBlob(blob)
+              }
               zip.file(exactFileName, blob, { compression: 'STORE' })
             }
           } catch (err) {
@@ -880,6 +933,7 @@ export default function GalleryClient() {
     }
   }
 
+  // TẢI TOÀN BỘ ALBUM ZIP (TỰ ĐỘNG ĐÓNG WATERMARK NẾU BẬT)
   const handleDownloadAlbumZip = async (targetInfo?: { title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -910,14 +964,17 @@ export default function GalleryClient() {
       const total = targetFiles.length
       let completedCount = 0
 
-      const CONCURRENCY_LIMIT = 16
+      const CONCURRENCY_LIMIT = 12
       const fetchRawOriginalFile = async (fileItem: MediaItem) => {
         const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
         const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
         try {
           const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
           if (res.ok) {
-            const blob = await res.blob()
+            let blob = await res.blob()
+            if (activeSetting.enable_watermark && fileItem.type === 'image') {
+              blob = await applyWatermarkToImageBlob(blob)
+            }
             zip.file(exactFileName, blob, { compression: 'STORE' })
           }
         } catch (err) {
@@ -1008,6 +1065,7 @@ export default function GalleryClient() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
+  // TẢI LẺ 1 ẢNH/VIDEO (TỰ ĐỘNG ĐÓNG WATERMARK VÀO TỆP NẾU ĐANG BẬT)
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1027,7 +1085,13 @@ export default function GalleryClient() {
       const res = await fetch(proxyUrl)
       if (!res.ok) throw new Error('Fetch failed')
       
-      const blob = await res.blob()
+      let blob = await res.blob()
+
+      // Tự động đóng watermark lên ảnh tải về nếu bật
+      if (activeSetting.enable_watermark && item.type === 'image') {
+        blob = await applyWatermarkToImageBlob(blob)
+      }
+
       const fileObj = new File([blob], exactFileName, { type: mimeType })
 
       if (isIOS && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
@@ -1956,6 +2020,7 @@ export default function GalleryClient() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
+                {/* NÚT CÀI ĐẶT & NÚT XEM BÌNH LUẬN: CHỈ HIỆN KHI THƯ MỤC CÓ ẢNH */}
                 {!isSharedGuest && mediaFiles.length > 0 && (
                   <>
                     <button
