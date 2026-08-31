@@ -203,10 +203,10 @@ export default function GalleryClient() {
   const activeSetting: FolderSettings = folderSettingsMap[currentActiveFolderId] || {
     id: currentActiveFolderId,
     title: currentActiveFolderTitle,
-    password: '',
-    max_select: 0,
-    allow_comments: true,
-    enable_watermark: false
+    password: selectedAlbum?.password || '',
+    max_select: selectedAlbum?.max_select || 0,
+    allow_comments: selectedAlbum?.allow_comments ?? true,
+    enable_watermark: selectedAlbum?.enable_watermark ?? false
   }
 
   useEffect(() => {
@@ -663,12 +663,13 @@ export default function GalleryClient() {
     })
   }
 
+  // Chặn tuyệt đối khi chọn bằng Checkbox nếu đã đạt max_select
   const handleToggleSelectItem = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    const maxSel = activeSetting?.max_select || 0
+    const maxSel = Number(activeSetting?.max_select || 0)
     
     if (maxSel > 0 && !selectedItemIds.has(id) && selectedItemIds.size >= maxSel) {
-      alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh!`)
+      alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
       return
     }
 
@@ -678,6 +679,24 @@ export default function GalleryClient() {
       else next.add(id)
       return next
     })
+  }
+
+  // Chặn tuyệt đối khi chọn bằng cách chấm Sao (Rating) nếu đã đạt max_select
+  const handleRateImage = (imageId: string, stars: number) => {
+    const maxSel = Number(activeSetting?.max_select || 0)
+    const isCurrentlyRated = (ratings[imageId] || 0) > 0
+
+    if (stars > 0 && !isCurrentlyRated) {
+      const currentRatedCount = Object.values(ratings).filter(s => s > 0).length
+      if (maxSel > 0 && currentRatedCount >= maxSel) {
+        alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
+        return
+      }
+    }
+
+    const newRatings = { ...ratings, [imageId]: stars }
+    setRatings(newRatings)
+    localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
   }
 
   const handleBatchDownload = async () => {
@@ -1365,12 +1384,6 @@ export default function GalleryClient() {
     }
   }
 
-  const handleRateImage = (imageId: string, stars: number) => {
-    const newRatings = { ...ratings, [imageId]: stars }
-    setRatings(newRatings)
-    localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
-  }
-
   const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
 
   let separator = '\n'
@@ -1816,7 +1829,6 @@ export default function GalleryClient() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {/* NÚT CÀI ĐẶT RIÊNG CHO THƯ MỤC CÓ ẢNH */}
                 {!isSharedGuest && mediaFiles.length > 0 && (
                   <>
                     <button
@@ -2055,7 +2067,6 @@ export default function GalleryClient() {
                                       }}
                                     />
 
-                                    {/* Watermark nếu bật */}
                                     {activeSetting.enable_watermark && (
                                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-30 select-none">
                                         <span className="font-serif font-black text-white text-xs sm:text-sm tracking-widest uppercase -rotate-12 border border-white/50 px-2 py-0.5 rounded">
@@ -2151,7 +2162,7 @@ export default function GalleryClient() {
         )}
       </main>
 
-      {/* MODAL LIGHTBOX / XEM ẢNH & VIDEO PHÓNG TO THEO TỶ LỆ GỐC */}
+      {/* MODAL LIGHTBOX */}
       {previewMedia && (
         <div 
           className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-2 sm:p-4 select-none touch-pan-y"
@@ -2188,7 +2199,6 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          {/* Vùng hiển thị ảnh / video: TỰ CO GIÃN THEO ĐÚNG TỶ LỆ GỐC KHÔNG ÉP KHUNG CỐ ĐỊNH */}
           <div className="relative flex-1 flex items-center justify-center p-2 overflow-hidden w-full h-full">
             {previewMedia.type === 'video' ? (
               <div className="relative w-full max-w-5xl aspect-video flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-2xl">
@@ -2418,7 +2428,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL CÀI ĐẶT RIÊNG BIỆT CHO TỪNG THƯ MỤC / ALBUM (CÓ Ô ĐỔI TÊN & CHÉP LINK) */}
+      {/* MODAL CÀI ĐẶT RIÊNG BIỆT CHO TỪNG THƯ MỤC / ALBUM */}
       {editingFolderSetting && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
