@@ -1,36 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams
-  const fileUrl = searchParams.get('url')
-  const fileName = searchParams.get('name') || 'download-photo.jpg'
+export async function GET(req: NextRequest) {
+  const url = req.nextUrl.searchParams.get('url')
+  const name = req.nextUrl.searchParams.get('name') || 'download'
 
-  if (!fileUrl) {
-    return new NextResponse('Missing url parameter', { status: 400 })
+  if (!url) {
+    return NextResponse.json({ error: 'Missing URL' }, { status: 400 })
   }
 
   try {
-    const response = await fetch(fileUrl)
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+      }
+    })
+
     if (!response.ok) {
-      return new NextResponse('Failed to fetch media file', { status: response.status })
+      throw new Error(`Failed to fetch from source: ${response.statusText}`)
     }
 
     const contentType = response.headers.get('content-type') || 'application/octet-stream'
-    const blob = await response.blob()
+    const arrayBuffer = await response.arrayBuffer()
 
-    // Chuẩn hóa tên file an toàn cho cả ASCII và UTF-8 có dấu tiếng Việt
-    const cleanAsciiName = fileName.replace(/[^\x20-\x7E]/g, '_')
-    const encodedUtf8Name = encodeURIComponent(fileName)
+    const headers = new Headers()
+    headers.set('Content-Type', contentType)
+    headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`)
+    headers.set('Content-Length', arrayBuffer.byteLength.toString())
 
-    return new NextResponse(blob, {
+    return new NextResponse(arrayBuffer, {
       status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${cleanAsciiName}"; filename*=UTF-8''${encodedUtf8Name}`,
-        'Cache-Control': 'public, max-age=3600',
-      },
+      headers
     })
   } catch (error: any) {
-    return new NextResponse(`Error: ${error.message}`, { status: 500 })
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

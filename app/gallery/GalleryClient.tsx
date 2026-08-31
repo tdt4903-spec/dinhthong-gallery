@@ -115,7 +115,6 @@ function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }
   )
 }
 
-// HÀM ĐÓNG DẤU WATERMARK TRỰC TIẾP LÊN FILE ẢNH TRƯỚC KHI TẢI
 const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG GALLERY'): Promise<Blob> => {
   return new Promise((resolve) => {
     const img = new window.Image()
@@ -168,7 +167,6 @@ export default function GalleryClient() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
-  // LOGIC TỰ ĐỘNG ĐỔI GIAO DIỆN THEO GIỜ (6H - 18H SÁNG, 18H - 6H TỐI)
   const isTimeForDarkMode = () => {
     const currentHour = new Date().getHours()
     return currentHour < 6 || currentHour >= 18
@@ -221,7 +219,6 @@ export default function GalleryClient() {
   const [currentCommentInput, setCurrentCommentInput] = useState('')
   const [isSavingComment, setIsSavingComment] = useState(false)
 
-  // Zoom và Pan cử chỉ cho Lightbox
   const [zoomScale, setZoomScale] = useState(1)
   const [panPosition, setPanPosition] = useState({ x: 0, y: 0 })
   const lastTapRef = useRef<number>(0)
@@ -646,16 +643,54 @@ export default function GalleryClient() {
   }
 
   const handleNavigateBreadcrumb = (index: number) => {
-    if (isSharedGuest) return
     if (index === -1) {
       if (selectedAlbum) {
         setFolderHistory([])
-        fetchAlbumImages(selectedAlbum.driveUrl)
+        const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
+        if (mainPass && isSharedGuest) {
+          setIsLocked(true)
+        } else {
+          setIsLocked(false)
+          fetchAlbumImages(selectedAlbum.driveUrl)
+        }
       }
     } else {
       const target = folderHistory[index]
       setFolderHistory(prev => prev.slice(0, index + 1))
-      fetchAlbumImages(target.driveUrl)
+      const targetPass = folderSettingsMap[target.id]?.password
+      if (targetPass && isSharedGuest) {
+        setIsLocked(true)
+      } else {
+        setIsLocked(false)
+        fetchAlbumImages(target.driveUrl)
+      }
+    }
+  }
+
+  const handleBackToParentFolder = () => {
+    if (folderHistory.length > 1) {
+      const prev = folderHistory[folderHistory.length - 2]
+      setFolderHistory(p => p.slice(0, -1))
+      const prevPass = folderSettingsMap[prev.id]?.password
+      if (prevPass && isSharedGuest) {
+        setIsLocked(true)
+      } else {
+        setIsLocked(false)
+        fetchAlbumImages(prev.driveUrl)
+      }
+    } else if (folderHistory.length === 1 && selectedAlbum) {
+      setFolderHistory([])
+      const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
+      if (mainPass && isSharedGuest) {
+        setIsLocked(true)
+      } else {
+        setIsLocked(false)
+        fetchAlbumImages(selectedAlbum.driveUrl)
+      }
+    } else {
+      if (!isSharedGuest) {
+        setSelectedAlbum(null)
+      }
     }
   }
 
@@ -830,7 +865,6 @@ export default function GalleryClient() {
     localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
   }
 
-  // TẢI ZIP DANH SÁCH TICK CHỌN (TỰ ĐỘNG ĐÓNG WATERMARK NẾU BẬT)
   const handleBatchDownload = async () => {
     if (isZipping) return
     if (!selectedAlbum) {
@@ -870,7 +904,6 @@ export default function GalleryClient() {
             const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
             if (res.ok) {
               let blob = await res.blob()
-              // Nếu thư mục bật watermark và là file ảnh -> đóng dấu watermark trực tiếp vào file zip
               if (activeSetting.enable_watermark && fileItem.type === 'image') {
                 blob = await applyWatermarkToImageBlob(blob)
               }
@@ -933,7 +966,6 @@ export default function GalleryClient() {
     }
   }
 
-  // TẢI TOÀN BỘ ALBUM ZIP (TỰ ĐỘNG ĐÓNG WATERMARK NẾU BẬT)
   const handleDownloadAlbumZip = async (targetInfo?: { title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1065,7 +1097,6 @@ export default function GalleryClient() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // TẢI LẺ 1 ẢNH/VIDEO (TỰ ĐỘNG ĐÓNG WATERMARK VÀO TỆP NẾU ĐANG BẬT)
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1087,7 +1118,6 @@ export default function GalleryClient() {
       
       let blob = await res.blob()
 
-      // Tự động đóng watermark lên ảnh tải về nếu bật
       if (activeSetting.enable_watermark && item.type === 'image') {
         blob = await applyWatermarkToImageBlob(blob)
       }
@@ -1469,20 +1499,6 @@ export default function GalleryClient() {
     }
   }
 
-  const handleBackToParentFolder = () => {
-    if (isSharedGuest) return
-    if (folderHistory.length > 1) {
-      const prev = folderHistory[folderHistory.length - 2]
-      setFolderHistory(p => p.slice(0, -1))
-      fetchAlbumImages(prev.driveUrl)
-    } else if (folderHistory.length === 1 && selectedAlbum) {
-      setFolderHistory([])
-      fetchAlbumImages(selectedAlbum.driveUrl)
-    } else {
-      setSelectedAlbum(null)
-    }
-  }
-
   const handleAddAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const form = e.currentTarget
@@ -1626,7 +1642,7 @@ export default function GalleryClient() {
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
           
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
-            {selectedAlbum && !isSharedGuest && (
+            {((selectedAlbum && !isSharedGuest) || (isSharedGuest && folderHistory.length > 0)) && (
               <button 
                 onClick={handleBackToParentFolder}
                 className={`p-1.5 sm:p-2 rounded-full border transition cursor-pointer ${
@@ -1978,29 +1994,29 @@ export default function GalleryClient() {
           </div>
         ) : (
           <div>
-            {!isSharedGuest && (
-              <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3 flex-wrap">
-                <button 
-                  onClick={() => handleNavigateBreadcrumb(-1)}
-                  className="hover:text-emerald-600 font-medium transition cursor-pointer"
-                >
-                  {customNames[selectedAlbum.id] || selectedAlbum.title}
-                </button>
-                {folderHistory.map((folder, index) => (
-                  <React.Fragment key={folder.id}>
-                    <ChevronPath className="w-3.5 h-3.5 text-gray-400" />
-                    <button
-                      onClick={() => handleNavigateBreadcrumb(index)}
-                      className={`hover:text-emerald-600 transition cursor-pointer ${
-                        index === folderHistory.length - 1 ? 'text-emerald-600 font-bold' : 'font-medium'
-                      }`}
-                    >
-                      {customNames[folder.id] || folder.title}
-                    </button>
-                  </React.Fragment>
-                ))}
-              </div>
-            )}
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3 flex-wrap">
+              <button 
+                onClick={() => handleNavigateBreadcrumb(-1)}
+                className={`transition font-medium cursor-pointer ${
+                  folderHistory.length === 0 ? 'text-emerald-600 font-bold' : 'hover:text-emerald-600'
+                }`}
+              >
+                {customNames[selectedAlbum.id] || selectedAlbum.title}
+              </button>
+              {folderHistory.map((folder, index) => (
+                <React.Fragment key={folder.id}>
+                  <ChevronPath className="w-3.5 h-3.5 text-gray-400" />
+                  <button
+                    onClick={() => handleNavigateBreadcrumb(index)}
+                    className={`hover:text-emerald-600 transition cursor-pointer ${
+                      index === folderHistory.length - 1 ? 'text-emerald-600 font-bold' : 'font-medium'
+                    }`}
+                  >
+                    {customNames[folder.id] || folder.title}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-gray-200 dark:border-white/10">
               <div>
@@ -2020,7 +2036,6 @@ export default function GalleryClient() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {/* NÚT CÀI ĐẶT & NÚT XEM BÌNH LUẬN: CHỈ HIỆN KHI THƯ MỤC CÓ ẢNH */}
                 {!isSharedGuest && mediaFiles.length > 0 && (
                   <>
                     <button
@@ -3006,7 +3021,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* POPUP KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC CON MỚI */}
+      {/* MODAL KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC CON MỚI */}
       {isSyncModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
