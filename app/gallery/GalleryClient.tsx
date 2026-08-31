@@ -116,6 +116,7 @@ function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }
 }
 
 const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG GALLERY'): Promise<Blob> => {
+  if (typeof window === 'undefined') return blob
   return new Promise((resolve) => {
     const img = new window.Image()
     const objectUrl = URL.createObjectURL(blob)
@@ -896,7 +897,7 @@ export default function GalleryClient() {
         const total = selectedFiles.length
         let completedCount = 0
 
-        const CONCURRENCY_LIMIT = 12
+        const CONCURRENCY_LIMIT = 8
         const fetchFile = async (fileItem: MediaItem) => {
           const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
           const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
@@ -996,7 +997,7 @@ export default function GalleryClient() {
       const total = targetFiles.length
       let completedCount = 0
 
-      const CONCURRENCY_LIMIT = 12
+      const CONCURRENCY_LIMIT = 8
       const fetchRawOriginalFile = async (fileItem: MediaItem) => {
         const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
         const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
@@ -1097,6 +1098,7 @@ export default function GalleryClient() {
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
+  // TẢI FILE CHUẨN XÁC NGUYÊN VẸN TRỰC TIẾP
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1141,11 +1143,9 @@ export default function GalleryClient() {
         document.body.removeChild(link)
         URL.revokeObjectURL(blobUrl)
       }, 1000)
-    } catch {
-      const ext = item.type === 'video' ? 'mp4' : 'jpg'
-      const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
-      const directProxy = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
-      window.location.href = directProxy
+    } catch (err) {
+      console.error(err)
+      window.open(item.downloadUrl, '_blank')
     } finally {
       setDownloadingId(null)
     }
@@ -1499,129 +1499,6 @@ export default function GalleryClient() {
     }
   }
 
-  const handleAddAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const form = e.currentTarget
-    const titleInput = form.elements.namedItem('title') as HTMLInputElement
-    const urlInput = form.elements.namedItem('url') as HTMLInputElement
-    const coverInput = form.elements.namedItem('cover') as HTMLInputElement
-    const passInput = form.elements.namedItem('password') as HTMLInputElement
-    const maxSelectInput = form.elements.namedItem('max_select') as HTMLInputElement
-    const watermarkInput = form.elements.namedItem('enable_watermark') as HTMLInputElement
-    const commentsInput = form.elements.namedItem('allow_comments') as HTMLInputElement
-
-    const newTitle = titleInput.value
-    const newDriveUrl = urlInput.value
-    const newId = extractDriveId(newDriveUrl) || Date.now().toString()
-    const newCoverUrl = coverInput.value.trim() ? formatDriveCoverUrl(coverInput.value) : ''
-
-    const { error } = await supabase.from('albums').insert([
-      { 
-        id: newId, 
-        title: newTitle, 
-        drive_url: newDriveUrl, 
-        cover_url: newCoverUrl,
-        password: passInput.value.trim(),
-        max_select: Number(maxSelectInput.value || 0),
-        enable_watermark: watermarkInput.checked,
-        allow_comments: commentsInput.checked
-      }
-    ])
-
-    if (!error) {
-      await fetchAlbumsFromSupabase()
-      setIsModalOpen(false)
-    } else {
-      alert('Lỗi khi thêm album: ' + error.message)
-    }
-  }
-
-  const handleDeleteAlbum = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (isSharedGuest) return
-    if (confirm('Bạn có chắc muốn xóa album này không?')) {
-      const { error } = await supabase.from('albums').delete().eq('id', id)
-      if (!error) await fetchAlbumsFromSupabase()
-      else alert('Lỗi khi xóa: ' + error.message)
-    }
-  }
-
-  const handleSetAsCover = async (targetId: string, imageId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const formattedCover = `https://lh3.googleusercontent.com/d/${imageId}=w500-h500-p-k-no`
-    const isMasterAlbum = masterFoldersList.some(m => m.id === targetId) || albums.some(a => a.id === targetId && folderHistory.length === 0)
-
-    if (isMasterAlbum) {
-      const { error } = await supabase.from('albums').update({ cover_url: formattedCover }).eq('id', targetId)
-      if (!error) {
-        await fetchAlbumsFromSupabase()
-        alert('Đã cập nhật ảnh bìa Album trang chủ thành công!')
-      } else {
-        alert('Lỗi cập nhật ảnh bìa: ' + error.message)
-      }
-    } else {
-      const { error } = await supabase.from('custom_covers').upsert([
-        { id: targetId, cover_url: formattedCover }
-      ], { onConflict: 'id' })
-
-      if (!error) {
-        setAlbumCovers(prev => ({ ...prev, [targetId]: formattedCover }))
-        alert('Đã đặt ảnh bìa cho thư mục con thành công!')
-      } else {
-        alert('Lỗi lưu ảnh bìa: ' + error.message)
-      }
-    }
-  }
-
-  const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
-  const commentedImagesList = visibleItems.filter(img => img.type !== 'folder' && comments[img.id] && comments[img.id].trim() !== '')
-  const commentTextListContent = commentedImagesList.map(img => `${img.name} - ${comments[img.id]}`).join('\n')
-
-  let separator = '\n'
-  if (!useNewline) {
-    let sep = ''
-    if (useComma) sep += ','
-    if (useSpace) sep += ' '
-    if (!useComma && !useSpace) sep = ' '
-    separator = sep
-  }
-  const textFileContent = selectedImagesList.map(img => {
-    const cmt = comments[img.id] ? ` (Ghi chú: ${comments[img.id]})` : ''
-    return `${img.name}${cmt}`
-  }).join(separator)
-
-  const handleCopyText = (text: string) => {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
-  const handleCopyCommentList = (text: string) => {
-    navigator.clipboard.writeText(text)
-    setCommentCopied(true)
-    setTimeout(() => setCommentCopied(false), 2000)
-  }
-
-  const handleDownloadTxt = () => {
-    const blob = new Blob([textFileContent], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'danh-sach-tieu-de-chon.txt'
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const handleDownloadCommentTxt = () => {
-    const blob = new Blob([commentTextListContent], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'danh-sach-binh-luan-khach.txt'
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
   const filteredAlbums = (albums || []).filter(album => album && album.title && album.title.toLowerCase().includes(searchTerm.toLowerCase()))
   const currentSelectionCount = selectedAlbum ? selectedItemIds.size : selectedAlbumIds.size
 
@@ -1637,7 +1514,6 @@ export default function GalleryClient() {
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
       
-      {/* HEADER */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/95 border-white/10' : 'bg-white/95 border-gray-100'}`}>
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
           
