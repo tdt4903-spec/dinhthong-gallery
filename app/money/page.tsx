@@ -181,6 +181,30 @@ function readVietnameseNumber(number: number): string {
   return result.charAt(0).toUpperCase() + result.slice(1) + ' đồng'
 }
 
+// Hàm tải file hỗ trợ toàn diện Mobile (iOS/Android) và Desktop
+async function triggerFileDownload(blob: Blob, filename: string, mimeType: string) {
+  const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+
+  if (isIOS && navigator.canShare) {
+    try {
+      const file = new File([blob], filename, { type: mimeType })
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename })
+        return
+      }
+    } catch {}
+  }
+
+  const blobUrl = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = blobUrl
+  link.setAttribute('download', filename)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 2000)
+}
+
 interface Transaction {
   id: string
   type: 'expense' | 'income'
@@ -210,7 +234,6 @@ export default function MoneyManagerPage() {
   const [newCatName, setNewCatName] = useState('')
   const [isAddingCat, setIsAddingCat] = useState(false)
 
-  // State chỉnh sửa giao dịch
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
   const [editAmountStr, setEditAmountStr] = useState('')
   const [isSavingEdit, setIsSavingEdit] = useState(false)
@@ -498,13 +521,11 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // Bắt đầu chỉnh sửa
   const handleOpenEdit = (t: Transaction) => {
     setEditingTransaction({ ...t })
     setEditAmountStr(String(t.amount || ''))
   }
 
-  // Lưu chỉnh sửa
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!supabase || !editingTransaction) return
@@ -579,6 +600,7 @@ export default function MoneyManagerPage() {
     }
   }
 
+  // HÀM NHẬP FILE THÔNG MINH (CSV / EXCEL / TXT)
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!supabase) return
     const file = e.target.files?.[0]
@@ -623,7 +645,8 @@ export default function MoneyManagerPage() {
           const isHeaderRow = lowerHeaders.some(h => 
             h.includes('date') || h.includes('ngày') || h.includes('amount') || 
             h.includes('tiền') || h.includes('memo') || h.includes('ghi chú') ||
-            h.includes('category') || h.includes('danh mục') || h.includes('#daily_datas')
+            h.includes('category') || h.includes('danh mục') || h.includes('#daily_datas') ||
+            h === 'stt'
           )
 
           if (isHeaderRow) {
@@ -734,7 +757,8 @@ export default function MoneyManagerPage() {
     reader.readAsBinaryString(file)
   }
 
-  const handleExportExcel = () => {
+  // XUẤT EXCEL (.xlsx) HỖ TRỢ CẢ MOBILE VÀ PC
+  const handleExportExcel = async () => {
     setShowExportMenu(false)
     if (!transactions || transactions.length === 0) {
       alert('Chưa có dữ liệu nào trong sổ để xuất!')
@@ -757,22 +781,14 @@ export default function MoneyManagerPage() {
 
       const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
       const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `Bao_Cao_Thu_Chi_${currentDateStr}.xlsx`
-      document.body.appendChild(link)
-      link.click()
-      setTimeout(() => {
-        document.body.removeChild(link)
-        URL.revokeObjectURL(url)
-      }, 500)
+      await triggerFileDownload(blob, `Bao_Cao_Thu_Chi_${currentDateStr}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     } catch (err: any) {
       alert('Lỗi xuất file Excel: ' + err.message)
     }
   }
 
-  const handleExportCSV = () => {
+  // XUẤT CSV (.csv) HỖ TRỢ CẢ MOBILE VÀ PC (Chuẩn UTF-8 có BOM chống lỗi font tiếng Việt)
+  const handleExportCSV = async () => {
     setShowExportMenu(false)
     if (!transactions || transactions.length === 0) {
       alert('Chưa có dữ liệu nào trong sổ để xuất!')
@@ -793,16 +809,7 @@ export default function MoneyManagerPage() {
 
       const csvContent = '\uFEFF' + headerBlock + rows
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `Du_Lieu_Thu_Chi_${currentDateStr}.csv`
-      document.body.appendChild(link)
-      link.click()
-      setTimeout(() => {
-        document.body.removeChild(link)
-        URL.revokeObjectURL(url)
-      }, 500)
+      await triggerFileDownload(blob, `Du_Lieu_Thu_Chi_${currentDateStr}.csv`, 'text/csv')
     } catch (err: any) {
       alert('Lỗi xuất file CSV: ' + err.message)
     }
@@ -994,6 +1001,7 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
+            {/* Nút Nhập File (Hoạt động cả trên Mobile và Desktop) */}
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isImporting}
@@ -1004,6 +1012,7 @@ export default function MoneyManagerPage() {
               <span className="hidden xs:inline">{isImporting ? 'Đang nạp...' : 'Nhập File'}</span>
             </button>
 
+            {/* Dropdown Xuất File (PC) */}
             <div className="relative hidden sm:block flex-shrink-0" ref={exportMenuRef}>
               <button
                 type="button"
@@ -1653,7 +1662,6 @@ export default function MoneyManagerPage() {
                                 {t.type === 'expense' ? '-' : '+'}{formatDisplayCurrencyOrHidden(Number(t.amount || 0))}
                               </span>
                               
-                              {/* Nút sửa */}
                               <button
                                 onClick={() => handleOpenEdit(t)}
                                 className="p-1.5 rounded-lg bg-slate-100 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 transition cursor-pointer"
@@ -1662,7 +1670,6 @@ export default function MoneyManagerPage() {
                                 <Edit3 className="w-3.5 h-3.5" />
                               </button>
 
-                              {/* Nút xóa */}
                               <button
                                 onClick={() => handleDelete(t.id)}
                                 className="p-1.5 rounded-lg bg-slate-100 text-slate-400 hover:text-red-500 hover:bg-red-50 transition cursor-pointer"
@@ -1686,7 +1693,7 @@ export default function MoneyManagerPage() {
         </div>
       </main>
 
-      {/* POPUP / MODAL CHỈNH SỬA GIAO DỊCH */}
+      {/* POPUP SỬA GIAO DỊCH */}
       {editingTransaction && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
           <div className="w-full max-w-lg bg-white rounded-3xl p-5 sm:p-7 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
@@ -1707,7 +1714,6 @@ export default function MoneyManagerPage() {
 
             <form onSubmit={handleSaveEdit} className="mt-4 space-y-4 text-xs">
               
-              {/* 1. Chọn loại Thu / Chi */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Loại giao dịch:</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -1736,7 +1742,6 @@ export default function MoneyManagerPage() {
                 </div>
               </div>
 
-              {/* 2. Ngày giao dịch */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Ngày thực hiện:</label>
                 <input 
@@ -1748,7 +1753,6 @@ export default function MoneyManagerPage() {
                 />
               </div>
 
-              {/* 3. Số tiền */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Số tiền (VNĐ):</label>
                 <input 
@@ -1761,7 +1765,6 @@ export default function MoneyManagerPage() {
                 />
               </div>
 
-              {/* 4. Ghi chú */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Ghi chú:</label>
                 <input 
@@ -1773,7 +1776,6 @@ export default function MoneyManagerPage() {
                 />
               </div>
 
-              {/* 5. Phân loại danh mục */}
               <div>
                 <label className="block font-bold text-slate-700 mb-1.5">Phân loại danh mục:</label>
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-40 overflow-y-auto p-1 border border-slate-100 rounded-2xl bg-slate-50">
@@ -1798,7 +1800,6 @@ export default function MoneyManagerPage() {
                 </div>
               </div>
 
-              {/* Nút thao tác */}
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -1822,7 +1823,7 @@ export default function MoneyManagerPage() {
         </div>
       )}
 
-      {/* THANH ĐIỀU HƯỚNG DƯỚI CÙNG CHO MOBILE */}
+      {/* THANH ĐIỀU HƯỚNG DƯỚI CÙNG CHO MOBILE (Có đủ nút Nhập & Xuất File) */}
       <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 z-40 flex items-center justify-around shadow-lg">
         <button
           type="button"
@@ -1863,6 +1864,7 @@ export default function MoneyManagerPage() {
           <span>Lịch sử</span>
         </button>
 
+        {/* Nút Nhập File trên Mobile */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -1875,6 +1877,7 @@ export default function MoneyManagerPage() {
           <span>{isImporting ? 'Đang nạp...' : 'Nhập File'}</span>
         </button>
 
+        {/* Nút Xuất Excel trên Mobile */}
         <button
           type="button"
           onClick={handleExportExcel}
@@ -1883,7 +1886,19 @@ export default function MoneyManagerPage() {
           <div className="p-1.5 rounded-xl">
             <FileSpreadsheet className="w-4 h-4" />
           </div>
-          <span>Xuất File</span>
+          <span>Xuất Excel</span>
+        </button>
+
+        {/* Nút Xuất CSV trên Mobile */}
+        <button
+          type="button"
+          onClick={handleExportCSV}
+          className="flex flex-col items-center gap-0.5 text-[10px] font-bold text-slate-400 hover:text-blue-600 cursor-pointer transition"
+        >
+          <div className="p-1.5 rounded-xl">
+            <FileText className="w-4 h-4" />
+          </div>
+          <span>Xuất CSV</span>
         </button>
       </div>
 
