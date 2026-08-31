@@ -181,7 +181,6 @@ function readVietnameseNumber(number: number): string {
   return result.charAt(0).toUpperCase() + result.slice(1) + ' đồng'
 }
 
-// Hàm tải file hỗ trợ toàn diện Mobile (iOS/Android) và Desktop
 async function triggerFileDownload(blob: Blob, filename: string, mimeType: string) {
   const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
 
@@ -199,10 +198,13 @@ async function triggerFileDownload(blob: Blob, filename: string, mimeType: strin
   const link = document.createElement('a')
   link.href = blobUrl
   link.setAttribute('download', filename)
+  link.style.display = 'none'
   document.body.appendChild(link)
   link.click()
-  document.body.removeChild(link)
-  setTimeout(() => URL.revokeObjectURL(blobUrl), 2000)
+  setTimeout(() => {
+    document.body.removeChild(link)
+    URL.revokeObjectURL(blobUrl)
+  }, 1000)
 }
 
 interface Transaction {
@@ -600,7 +602,7 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // HÀM NHẬP FILE THÔNG MINH (CSV / EXCEL / TXT)
+  // ĐỌC FILE ARRAYBUFFER ĐA NĂNG CHUẨN XÁC 100%
   const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!supabase) return
     const file = e.target.files?.[0]
@@ -618,7 +620,8 @@ export default function MoneyManagerPage() {
           return
         }
 
-        const workbook = XLSX.read(buffer, { type: 'binary', cellDates: true })
+        const data = new Uint8Array(buffer as ArrayBuffer)
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true })
         const firstSheetName = workbook.SheetNames[0]
         const worksheet = workbook.Sheets[firstSheetName]
         
@@ -754,10 +757,9 @@ export default function MoneyManagerPage() {
       }
     }
 
-    reader.readAsBinaryString(file)
+    reader.readAsArrayBuffer(file)
   }
 
-  // XUẤT EXCEL (.xlsx) HỖ TRỢ CẢ MOBILE VÀ PC
   const handleExportExcel = async () => {
     setShowExportMenu(false)
     if (!transactions || transactions.length === 0) {
@@ -787,7 +789,6 @@ export default function MoneyManagerPage() {
     }
   }
 
-  // XUẤT CSV (.csv) HỖ TRỢ CẢ MOBILE VÀ PC (Chuẩn UTF-8 có BOM chống lỗi font tiếng Việt)
   const handleExportCSV = async () => {
     setShowExportMenu(false)
     if (!transactions || transactions.length === 0) {
@@ -928,7 +929,6 @@ export default function MoneyManagerPage() {
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 pb-28 sm:pb-12">
       
-      {/* HEADER */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-2xs">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
           
@@ -1001,7 +1001,6 @@ export default function MoneyManagerPage() {
               )}
             </div>
 
-            {/* Nút Nhập File (Hoạt động cả trên Mobile và Desktop) */}
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isImporting}
@@ -1012,7 +1011,6 @@ export default function MoneyManagerPage() {
               <span className="hidden xs:inline">{isImporting ? 'Đang nạp...' : 'Nhập File'}</span>
             </button>
 
-            {/* Dropdown Xuất File (PC) */}
             <div className="relative hidden sm:block flex-shrink-0" ref={exportMenuRef}>
               <button
                 type="button"
@@ -1091,7 +1089,6 @@ export default function MoneyManagerPage() {
       <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6">
           
-          {/* CỘT TRÁI: FORM NHẬP KHOẢN MỚI */}
           <div className={`lg:col-span-5 bg-white p-4 sm:p-7 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between ${mobileTab !== 'input' ? 'hidden lg:flex' : 'flex'}`}>
             <div>
               <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 mb-4 sm:mb-5">
@@ -1371,7 +1368,6 @@ export default function MoneyManagerPage() {
             </div>
           </div>
 
-          {/* CỘT PHẢI: BIỂU ĐỒ & LỊCH SỬ GIAO DỊCH */}
           <div className={`lg:col-span-7 space-y-5 sm:space-y-6 ${mobileTab === 'input' ? 'hidden lg:block' : 'block'}`}>
             
             <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm transition-all ${mobileTab === 'history' ? 'hidden lg:block' : 'block'}`}>
@@ -1823,7 +1819,7 @@ export default function MoneyManagerPage() {
         </div>
       )}
 
-      {/* THANH ĐIỀU HƯỚNG DƯỚI CÙNG CHO MOBILE (Có đủ nút Nhập & Xuất File) */}
+      {/* THANH ĐIỀU HƯỚNG DƯỚI CÙNG CHO MOBILE */}
       <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 z-40 flex items-center justify-around shadow-lg">
         <button
           type="button"
@@ -1864,7 +1860,6 @@ export default function MoneyManagerPage() {
           <span>Lịch sử</span>
         </button>
 
-        {/* Nút Nhập File trên Mobile */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
@@ -1877,7 +1872,6 @@ export default function MoneyManagerPage() {
           <span>{isImporting ? 'Đang nạp...' : 'Nhập File'}</span>
         </button>
 
-        {/* Nút Xuất Excel trên Mobile */}
         <button
           type="button"
           onClick={handleExportExcel}
@@ -1889,7 +1883,6 @@ export default function MoneyManagerPage() {
           <span>Xuất Excel</span>
         </button>
 
-        {/* Nút Xuất CSV trên Mobile */}
         <button
           type="button"
           onClick={handleExportCSV}
