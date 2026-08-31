@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet, MoreVertical, LayoutGrid, ChevronDown, Lock, Unlock, MessageSquare, ShieldAlert, Sparkles
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet, MoreVertical, LayoutGrid, ChevronDown, Lock, Unlock, MessageSquare, ShieldAlert, Sparkles, Link2
 } from 'lucide-react'
 
 interface MediaItem {
@@ -141,7 +141,7 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  // Khóa mật khẩu bảo vệ
+  // Khóa mật khẩu
   const [isLocked, setIsLocked] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
   const [passwordError, setPasswordError] = useState(false)
@@ -864,8 +864,8 @@ export default function GalleryClient() {
     }
   }
 
-  const handleShareAlbum = (album: Album, e: React.MouseEvent) => {
-    e.stopPropagation()
+  const handleShareAlbum = (album: Album, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
     const numericCode = toNumericCode(album.id)
     const shareUrl = `${window.location.origin}/s/${numericCode}`
     navigator.clipboard.writeText(shareUrl)
@@ -952,7 +952,7 @@ export default function GalleryClient() {
     const newMap = { ...comments, [itemId]: text }
     setComments(newMap)
     await supabase.from('item_comments').upsert({ id: itemId, comment: text })
-    alert('Đã lưu bình luận!')
+    alert('Đã lưu bình luận thành công!')
   }
 
   const durationOptions = [
@@ -1261,7 +1261,11 @@ export default function GalleryClient() {
 
     if (!error) {
       await fetchAlbumsFromSupabase()
+      if (selectedAlbum && selectedAlbum.id === editingAlbum.id) {
+        setSelectedAlbum({ ...editingAlbum, coverUrl: formattedCover })
+      }
       setEditingAlbum(null)
+      alert('Đã lưu cấu hình và quyền hạn album thành công!')
     } else {
       alert('Lỗi cập nhật: ' + error.message)
     }
@@ -1657,18 +1661,9 @@ export default function GalleryClient() {
                           <button
                             onClick={(e) => { e.stopPropagation(); setEditingAlbum(album); }}
                             className="absolute top-3 right-12 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-emerald-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                            title="Tùy chỉnh & Bảo mật Album"
+                            title="Cài đặt & Chia sẻ Album"
                           >
                             <Settings className="w-4 h-4" />
-                          </button>
-
-                          <button
-                            onClick={(e) => handleShareAlbum(album, e)}
-                            className="absolute top-3 left-3 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-xs font-semibold hover:bg-black/80 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                            title="Tạo link chia sẻ web"
-                          >
-                            <Share2 className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>{shareCopiedId === album.id ? 'Đã copy!' : 'Chia sẻ'}</span>
                           </button>
                         </>
                       )}
@@ -1788,7 +1783,7 @@ export default function GalleryClient() {
                     <button
                       onClick={() => setEditingAlbum(selectedAlbum)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition cursor-pointer shadow-2xs"
-                      title="Cài đặt mật khẩu, watermark, giới hạn chọn ảnh"
+                      title="Cài đặt mật khẩu, watermark, giới hạn chọn ảnh và lấy link chia sẻ"
                     >
                       <Settings className="w-3.5 h-3.5" />
                       <span>Cài đặt Album</span>
@@ -2220,10 +2215,10 @@ export default function GalleryClient() {
             </button>
           </div>
 
-          {/* Thanh công cụ đánh giá, Bình luận & Đặt ảnh bìa ở dưới cùng */}
+          {/* Thanh công cụ đánh giá & Bình luận (Kế thừa quyền allow_comments từ Admin) */}
           <div className="flex flex-col items-center gap-2 pb-2 z-20 max-w-xl mx-auto w-full px-2">
             
-            {/* Ô Bình Luận Cho Từng Ảnh */}
+            {/* Khung bình luận: Chỉ mở khi Admin bật allow_comments */}
             {selectedAlbum?.allow_comments && (
               <div className="w-full flex items-center gap-1.5 bg-black/70 px-3 py-1.5 rounded-2xl backdrop-blur-md border border-white/10">
                 <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
@@ -2470,7 +2465,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL TÙY CHỈNH & BẢO MẬT ALBUM */}
+      {/* MODAL TÙY CHỈNH & CHIA SẺ LINK ALBUM (ADMIN SET) */}
       {editingAlbum && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
@@ -2479,12 +2474,31 @@ export default function GalleryClient() {
             <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
               <div className="flex items-center gap-2">
                 <Settings className="w-5 h-5 text-emerald-500" />
-                <h3 className="font-serif font-bold text-base">Tùy Chỉnh Album</h3>
+                <h3 className="font-serif font-bold text-base">Cài Đặt & Chia Sẻ Album</h3>
               </div>
               <button onClick={() => setEditingAlbum(null)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* MỤC CHIA SẺ LINK NGAY TRONG BẢNG CÀI ĐẶT */}
+            <div className="mt-4 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between gap-3">
+              <div className="truncate">
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 block">Link xem trực tiếp cho Khách:</span>
+                <span className="text-[10px] text-gray-400 truncate block font-mono">
+                  {typeof window !== 'undefined' ? `${window.location.origin}/s/${toNumericCode(editingAlbum.id)}` : ''}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleShareAlbum(editingAlbum)}
+                className="flex items-center gap-1 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition flex-shrink-0 cursor-pointer"
+              >
+                {shareCopiedId === editingAlbum.id ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{shareCopiedId === editingAlbum.id ? 'Đã chép!' : 'Chép link'}</span>
+              </button>
+            </div>
+
             <form onSubmit={handleUpdateAlbum} className="mt-4 space-y-3.5 text-xs">
               <div>
                 <label className="block font-medium mb-1">Tên album:</label>
