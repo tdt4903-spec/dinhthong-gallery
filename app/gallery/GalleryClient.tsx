@@ -32,6 +32,15 @@ interface Album {
   enable_watermark?: boolean
 }
 
+interface FolderSettings {
+  id: string
+  title: string
+  password?: string
+  max_select?: number
+  allow_comments?: boolean
+  enable_watermark?: boolean
+}
+
 interface MasterFolderItem {
   id: string
   name: string
@@ -121,6 +130,9 @@ export default function GalleryClient() {
   const [hiddenItemIds, setHiddenItemIds] = useState<Set<string>>(new Set())
   const [knownFolderIds, setKnownFolderIds] = useState<Set<string>>(new Set())
 
+  // Cấu hình riêng biệt cho từng Folder ID
+  const [folderSettingsMap, setFolderSettingsMap] = useState<Record<string, FolderSettings>>({})
+
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -130,6 +142,7 @@ export default function GalleryClient() {
 
   const [albumCovers, setAlbumCovers] = useState<Record<string, string>>({})
   const [editingAlbum, setEditingAlbum] = useState<Album | null>(null)
+  const [editingFolderSetting, setEditingFolderSetting] = useState<FolderSettings | null>(null)
   const [editingSubFolder, setEditingSubFolder] = useState<{ id: string; name: string } | null>(null)
 
   const [ratings, setRatings] = useState<Record<string, number>>({})
@@ -141,7 +154,7 @@ export default function GalleryClient() {
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
 
-  // Khóa mật khẩu
+  // Khóa mật khẩu bảo vệ
   const [isLocked, setIsLocked] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
   const [passwordError, setPasswordError] = useState(false)
@@ -188,6 +201,20 @@ export default function GalleryClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
+  // Lấy ID và tiêu đề của thư mục hiện hành
+  const currentActiveFolderId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
+  const currentActiveFolderTitle = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : (selectedAlbum?.title || '')
+
+  // Lấy cấu hình độc lập của thư mục hiện tại (nếu chưa có thì dùng mặc định)
+  const activeSetting: FolderSettings = folderSettingsMap[currentActiveFolderId] || {
+    id: currentActiveFolderId,
+    title: currentActiveFolderTitle,
+    password: selectedAlbum?.password || '',
+    max_select: selectedAlbum?.max_select || 0,
+    allow_comments: selectedAlbum?.allow_comments ?? true,
+    enable_watermark: selectedAlbum?.enable_watermark ?? false
+  }
+
   useEffect(() => {
     if (previewMedia) {
       const fileName = customNames[previewMedia.id] || previewMedia.name
@@ -228,6 +255,28 @@ export default function GalleryClient() {
         setComments(commentMap)
       }
     } catch {}
+  }
+
+  const fetchFolderSettings = async () => {
+    try {
+      const { data } = await supabase.from('folder_settings').select('*')
+      if (data) {
+        const map: Record<string, FolderSettings> = {}
+        data.forEach((f: any) => {
+          map[f.id] = {
+            id: f.id,
+            title: '',
+            password: f.password || '',
+            max_select: Number(f.max_select || 0),
+            allow_comments: f.allow_comments ?? true,
+            enable_watermark: f.enable_watermark ?? false
+          }
+        })
+        setFolderSettingsMap(map)
+        return map
+      }
+    } catch {}
+    return {}
   }
 
   const fetchKnownFolderIds = async () => {
@@ -500,7 +549,14 @@ export default function GalleryClient() {
     const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
     const displayName = customNames[folderItem.id] || folderItem.name
     setFolderHistory(prev => [...prev, { id: folderItem.id, title: displayName, driveUrl: folderDriveUrl }])
-    fetchAlbumImages(folderDriveUrl)
+
+    const fSetting = folderSettingsMap[folderItem.id]
+    if (fSetting?.password && isSharedGuest) {
+      setIsLocked(true)
+    } else {
+      setIsLocked(false)
+      fetchAlbumImages(folderDriveUrl)
+    }
   }
 
   const handleNavigateBreadcrumb = (index: number) => {
@@ -615,7 +671,7 @@ export default function GalleryClient() {
 
   const handleToggleSelectItem = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    const maxSel = selectedAlbum?.max_select || 0
+    const maxSel = activeSetting?.max_select || 0
     
     if (maxSel > 0 && !selectedItemIds.has(id) && selectedItemIds.size >= maxSel) {
       alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh!`)
@@ -686,7 +742,7 @@ export default function GalleryClient() {
 
         setZipProgress('Tạo file ZIP...')
         const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
-        saveAs(zipContent, `${selectedAlbum.title}_da_chon.zip`)
+        saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
         setSelectedItemIds(new Set())
       } catch (e: any) {
         alert('Lỗi tải tệp: ' + e.message)
@@ -864,21 +920,12 @@ export default function GalleryClient() {
     }
   }
 
-  const handleShareAlbum = (album: Album, e?: React.MouseEvent) => {
+  const handleShareFolder = (folderId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
-    const numericCode = toNumericCode(album.id)
+    const numericCode = toNumericCode(folderId)
     const shareUrl = `${window.location.origin}/s/${numericCode}`
     navigator.clipboard.writeText(shareUrl)
-    setShareCopiedId(album.id)
-    setTimeout(() => setShareCopiedId(null), 2500)
-  }
-
-  const handleShareSubFolder = (folder: MediaItem, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const numericCode = toNumericCode(folder.id)
-    const shareUrl = `${window.location.origin}/s/${numericCode}`
-    navigator.clipboard.writeText(shareUrl)
-    setShareCopiedId(folder.id)
+    setShareCopiedId(folderId)
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
@@ -1031,13 +1078,58 @@ export default function GalleryClient() {
 
   const handleCheckPassword = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedAlbum) return
-    if (passwordInput.trim() === selectedAlbum.password?.trim()) {
+    if (passwordInput.trim() === activeSetting.password?.trim()) {
       setIsLocked(false)
       setPasswordError(false)
-      fetchAlbumImages(selectedAlbum.driveUrl)
+      const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
+      if (targetUrl) fetchAlbumImages(targetUrl)
     } else {
       setPasswordError(true)
+    }
+  }
+
+  // Mở modal cấu hình cho thư mục / album hiện tại
+  const handleOpenCurrentFolderSetting = () => {
+    setEditingFolderSetting({
+      id: currentActiveFolderId,
+      title: currentActiveFolderTitle,
+      password: activeSetting.password || '',
+      max_select: activeSetting.max_select || 0,
+      allow_comments: activeSetting.allow_comments ?? true,
+      enable_watermark: activeSetting.enable_watermark ?? false
+    })
+  }
+
+  // Lưu cấu hình riêng biệt cho từng Album / Thư mục con
+  const handleSaveCurrentFolderSetting = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingFolderSetting) return
+
+    try {
+      const payload = {
+        id: editingFolderSetting.id,
+        password: editingFolderSetting.password?.trim() || '',
+        max_select: Number(editingFolderSetting.max_select || 0),
+        allow_comments: editingFolderSetting.allow_comments ?? true,
+        enable_watermark: editingFolderSetting.enable_watermark ?? false
+      }
+
+      await supabase.from('folder_settings').upsert(payload, { onConflict: 'id' })
+
+      // Nếu là Album chính ở trang chủ thì cập nhật cả bảng albums
+      if (folderHistory.length === 0 && selectedAlbum?.id === editingFolderSetting.id) {
+        await supabase.from('albums').update(payload).eq('id', editingFolderSetting.id)
+      }
+
+      setFolderSettingsMap(prev => ({
+        ...prev,
+        [editingFolderSetting.id]: editingFolderSetting
+      }))
+
+      setEditingFolderSetting(null)
+      alert(`Đã lưu cài đặt riêng cho "${editingFolderSetting.title}" thành công!`)
+    } catch (err: any) {
+      alert('Lỗi lưu cài đặt: ' + err.message)
     }
   }
 
@@ -1053,66 +1145,74 @@ export default function GalleryClient() {
       fetchCustomNames()
       fetchCustomCovers()
       fetchComments()
+      fetchFolderSettings().then(fSettingsMap => {
+        supabase
+          .from('albums')
+          .select('*')
+          .then(async ({ data: allAlbums }) => {
+            const matchedAlbum = allAlbums?.find(a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.drive_url) === sharedId)
 
-      supabase
-        .from('albums')
-        .select('*')
-        .then(async ({ data: allAlbums }) => {
-          const matchedAlbum = allAlbums?.find(a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.drive_url) === sharedId)
+            if (matchedAlbum) {
+              const sharedAlbumObj: Album = {
+                id: matchedAlbum.id,
+                title: matchedAlbum.title,
+                coverUrl: matchedAlbum.cover_url || '',
+                driveUrl: matchedAlbum.drive_url,
+                password: matchedAlbum.password || '',
+                max_select: Number(matchedAlbum.max_select || 0),
+                allow_comments: matchedAlbum.allow_comments ?? true,
+                enable_watermark: matchedAlbum.enable_watermark ?? false
+              }
+              setSelectedAlbum(sharedAlbumObj)
+              setFolderHistory([])
 
-          if (matchedAlbum) {
-            const sharedAlbumObj: Album = {
-              id: matchedAlbum.id,
-              title: matchedAlbum.title,
-              coverUrl: matchedAlbum.cover_url || '',
-              driveUrl: matchedAlbum.drive_url,
-              password: matchedAlbum.password || '',
-              max_select: Number(matchedAlbum.max_select || 0),
-              allow_comments: matchedAlbum.allow_comments ?? true,
-              enable_watermark: matchedAlbum.enable_watermark ?? false
+              const currentPass = fSettingsMap[sharedAlbumObj.id]?.password || sharedAlbumObj.password
+              if (currentPass) {
+                setIsLocked(true)
+              } else {
+                await fetchAlbumImages(sharedAlbumObj.driveUrl)
+              }
+              setLoading(false)
+              return
             }
-            setSelectedAlbum(sharedAlbumObj)
-            setFolderHistory([])
 
-            if (sharedAlbumObj.password) {
+            let realFolderId = sharedId
+            let adminSetTitle = ''
+
+            const { data: allCustom } = await supabase.from('custom_item_names').select('id, custom_name')
+            const matchedCustom = allCustom?.find(c => c.id === sharedId || toNumericCode(c.id) === sharedId)
+
+            if (matchedCustom) {
+              realFolderId = matchedCustom.id
+              adminSetTitle = matchedCustom.custom_name
+            } else {
+              const { data: allKnown } = await supabase.from('known_drive_folders').select('id, name')
+              const matchedKnown = allKnown?.find(k => k.id === sharedId || toNumericCode(k.id) === sharedId)
+              if (matchedKnown) {
+                realFolderId = matchedKnown.id
+                adminSetTitle = matchedKnown.name
+              }
+            }
+
+            const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
+            const fallbackAlbum: Album = {
+              id: realFolderId,
+              title: adminSetTitle || 'DinhThong Album',
+              coverUrl: '',
+              driveUrl: folderDriveUrl
+            }
+
+            setSelectedAlbum(fallbackAlbum)
+
+            const subPass = fSettingsMap[realFolderId]?.password
+            if (subPass) {
               setIsLocked(true)
             } else {
-              await fetchAlbumImages(sharedAlbumObj.driveUrl)
+              await fetchAlbumImages(folderDriveUrl)
             }
             setLoading(false)
-            return
-          }
-
-          let realFolderId = sharedId
-          let adminSetTitle = ''
-
-          const { data: allCustom } = await supabase.from('custom_item_names').select('id, custom_name')
-          const matchedCustom = allCustom?.find(c => c.id === sharedId || toNumericCode(c.id) === sharedId)
-
-          if (matchedCustom) {
-            realFolderId = matchedCustom.id
-            adminSetTitle = matchedCustom.custom_name
-          } else {
-            const { data: allKnown } = await supabase.from('known_drive_folders').select('id, name')
-            const matchedKnown = allKnown?.find(k => k.id === sharedId || toNumericCode(k.id) === sharedId)
-            if (matchedKnown) {
-              realFolderId = matchedKnown.id
-              adminSetTitle = matchedKnown.name
-            }
-          }
-
-          const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
-          const fallbackAlbum: Album = {
-            id: realFolderId,
-            title: adminSetTitle || 'DinhThong Album',
-            coverUrl: '',
-            driveUrl: folderDriveUrl
-          }
-
-          setSelectedAlbum(fallbackAlbum)
-          await fetchAlbumImages(folderDriveUrl)
-          setLoading(false)
-        })
+          })
+      })
       
       const savedRatings = localStorage.getItem('dinhthong_image_ratings')
       if (savedRatings) {
@@ -1147,6 +1247,7 @@ export default function GalleryClient() {
         await fetchCustomNames()
         await fetchCustomCovers()
         await fetchComments()
+        await fetchFolderSettings()
         await fetchAlbumsFromSupabase()
         const masterFolders = await fetchMasterFoldersList()
 
@@ -1185,7 +1286,9 @@ export default function GalleryClient() {
   const handleOpenAlbum = (album: Album) => {
     setSelectedAlbum(album)
     setFolderHistory([])
-    if (album.password && isSharedGuest) {
+    const fSetting = folderSettingsMap[album.id]
+    const currentPass = fSetting?.password || album.password
+    if (currentPass && isSharedGuest) {
       setIsLocked(true)
     } else {
       setIsLocked(false)
@@ -1241,33 +1344,6 @@ export default function GalleryClient() {
       setIsModalOpen(false)
     } else {
       alert('Lỗi khi thêm album: ' + error.message)
-    }
-  }
-
-  const handleUpdateAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!editingAlbum) return
-    const formattedCover = editingAlbum.coverUrl.trim() ? formatDriveCoverUrl(editingAlbum.coverUrl) : ''
-
-    const { error } = await supabase.from('albums').update({
-      title: editingAlbum.title,
-      drive_url: editingAlbum.driveUrl,
-      cover_url: formattedCover,
-      password: editingAlbum.password || '',
-      max_select: Number(editingAlbum.max_select || 0),
-      allow_comments: editingAlbum.allow_comments ?? true,
-      enable_watermark: editingAlbum.enable_watermark ?? false
-    }).eq('id', editingAlbum.id)
-
-    if (!error) {
-      await fetchAlbumsFromSupabase()
-      if (selectedAlbum && selectedAlbum.id === editingAlbum.id) {
-        setSelectedAlbum({ ...editingAlbum, coverUrl: formattedCover })
-      }
-      setEditingAlbum(null)
-      alert('Đã lưu cấu hình và quyền hạn album thành công!')
-    } else {
-      alert('Lỗi cập nhật: ' + error.message)
     }
   }
 
@@ -1600,6 +1676,7 @@ export default function GalleryClient() {
                 const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
                 const hasImageCover = Boolean(coverImage)
                 const isChecked = selectedAlbumIds.has(album.id)
+                const albumSetting = folderSettingsMap[album.id] || album
 
                 return (
                   <div 
@@ -1633,7 +1710,7 @@ export default function GalleryClient() {
                       
                       <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
-                      {album.password && (
+                      {albumSetting.password && (
                         <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-bold flex items-center gap-1 z-20">
                           <Lock className="w-3 h-3 text-amber-400" />
                           <span>Khóa PIN</span>
@@ -1649,23 +1726,13 @@ export default function GalleryClient() {
                       </button>
 
                       {!isSharedGuest && (
-                        <>
-                          <button
-                            onClick={(e) => handleDeleteAlbum(album.id, e)}
-                            className="absolute top-3 right-3 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                            title="Xóa album"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setEditingAlbum(album); }}
-                            className="absolute top-3 right-12 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-emerald-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                            title="Cài đặt & Chia sẻ Album"
-                          >
-                            <Settings className="w-4 h-4" />
-                          </button>
-                        </>
+                        <button
+                          onClick={(e) => handleDeleteAlbum(album.id, e)}
+                          className="absolute top-3 right-3 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                          title="Xóa album"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       )}
                     </div>
 
@@ -1692,7 +1759,7 @@ export default function GalleryClient() {
             </div>
           </div>
         ) : isLocked ? (
-          /* MÀN HÌNH NHẬP MẬT KHẨU CHO ALBUM */
+          /* MÀN HÌNH NHẬP MẬT KHẨU CHO ALBUM ĐỘC LẬP */
           <div className="min-h-[60vh] flex items-center justify-center p-4">
             <div className={`w-full max-w-sm rounded-3xl p-6 sm:p-8 text-center border shadow-2xl transition-all ${
               isDarkMode ? 'bg-[#181a20] border-white/10' : 'bg-white border-gray-100'
@@ -1700,9 +1767,9 @@ export default function GalleryClient() {
               <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4">
                 <Lock className="w-7 h-7" />
               </div>
-              <h3 className="font-bold font-serif text-lg text-gray-900 dark:text-white">Album Đã Được Bảo Vệ</h3>
+              <h3 className="font-bold font-serif text-lg text-gray-900 dark:text-white">Thư Mục Đã Được Bảo Vệ</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-6">
-                Vui lòng nhập mật khẩu do Admin cung cấp để xem Album này.
+                Vui lòng nhập mật khẩu do Admin cài đặt riêng cho thư mục &quot;{currentActiveFolderTitle}&quot; để tiếp tục xem.
               </p>
 
               <form onSubmit={handleCheckPassword} className="space-y-4">
@@ -1762,28 +1829,28 @@ export default function GalleryClient() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-gray-200 dark:border-white/10">
               <div>
                 <h2 className="text-xl sm:text-2xl font-bold font-serif">
-                  {folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : selectedAlbum.title}
+                  {currentActiveFolderTitle}
                 </h2>
                 <div className="flex items-center gap-2 mt-1">
                   <p className="text-xs text-gray-400">
                     {loadingImages ? 'Vui lòng đợi' : `${subFolders.length} thư mục, ${mediaFiles.length} hình ảnh`}
                   </p>
-                  {selectedAlbum.max_select ? (
+                  {activeSetting.max_select ? (
                     <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                      Chọn tối đa: {selectedAlbum.max_select} ảnh
+                      Chọn tối đa: {activeSetting.max_select} ảnh
                     </span>
                   ) : null}
                 </div>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {/* NÚT QUẢN TRỊ CHO ADMIN (Chỉ xuất hiện khi thư mục hiện tại có ảnh) */}
-                {!isSharedGuest && mediaFiles.length > 0 && selectedAlbum && (
+                {/* NÚT CÀI ĐẶT RIÊNG CHO THƯ MỤC CÓ ẢNH */}
+                {!isSharedGuest && mediaFiles.length > 0 && (
                   <>
                     <button
-                      onClick={() => setEditingAlbum(selectedAlbum)}
+                      onClick={handleOpenCurrentFolderSetting}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition cursor-pointer shadow-2xs"
-                      title="Cài đặt mật khẩu, watermark, giới hạn chọn ảnh và lấy link chia sẻ"
+                      title={`Cài đặt riêng cho thư mục: ${currentActiveFolderTitle}`}
                     >
                       <Settings className="w-3.5 h-3.5" />
                       <span>Cài đặt Album</span>
@@ -1869,6 +1936,7 @@ export default function GalleryClient() {
                           const displayName = customNames[folder.id] || folder.name
                           const isChecked = selectedItemIds.has(folder.id)
                           const currentCover = albumCovers[folder.id] || folder.coverUrl
+                          const folderSubSetting = folderSettingsMap[folder.id]
 
                           return (
                             <div
@@ -1904,6 +1972,13 @@ export default function GalleryClient() {
 
                                 <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
+                                {folderSubSetting?.password && (
+                                  <div className="absolute top-2.5 left-2.5 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded-full text-white text-[9px] font-bold flex items-center gap-1 z-20">
+                                    <Lock className="w-2.5 h-2.5 text-amber-400" />
+                                    <span>Khóa PIN</span>
+                                  </div>
+                                )}
+
                                 <button
                                   onClick={(e) => handleToggleSelectItem(folder.id, e)}
                                   className="absolute bottom-2.5 left-2.5 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
@@ -1931,15 +2006,6 @@ export default function GalleryClient() {
                                       title="Đổi tên hiển thị thư mục"
                                     >
                                       <Edit3 className="w-3.5 h-3.5" />
-                                    </button>
-
-                                    <button
-                                      onClick={(e) => handleShareSubFolder(folder, e)}
-                                      className="absolute top-2.5 left-2.5 flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white text-[11px] font-semibold hover:bg-black/80 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                                      title="Sao chép link thư mục"
-                                    >
-                                      <Share2 className="w-3 h-3 text-emerald-400" />
-                                      <span>{shareCopiedId === folder.id ? 'Đã chép!' : 'Chia sẻ'}</span>
                                     </button>
                                   </>
                                 )}
@@ -2038,8 +2104,8 @@ export default function GalleryClient() {
                                       }}
                                     />
 
-                                    {/* Lớp phủ Watermark nếu bật */}
-                                    {selectedAlbum.enable_watermark && (
+                                    {/* Watermark nếu thư mục hiện tại bật */}
+                                    {activeSetting.enable_watermark && (
                                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-30 select-none">
                                         <span className="font-serif font-black text-white text-xs sm:text-sm tracking-widest uppercase -rotate-12 border border-white/50 px-2 py-0.5 rounded">
                                           DINHTHONG GALLERY
@@ -2134,7 +2200,7 @@ export default function GalleryClient() {
         )}
       </main>
 
-      {/* MODAL LIGHTBOX / XEM ẢNH & VIDEO PHÓNG TO TOÀN MÀN HÌNH */}
+      {/* MODAL LIGHTBOX / XEM ẢNH & VIDEO */}
       {previewMedia && (
         <div 
           className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-2 sm:p-4 select-none touch-pan-y"
@@ -2142,7 +2208,6 @@ export default function GalleryClient() {
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          {/* Header Lightbox */}
           <div className="flex items-center justify-between px-3 py-2 text-white/90 z-20">
             <div className="truncate max-w-[60vw]">
               <h4 className="text-xs sm:text-sm font-medium truncate">
@@ -2172,7 +2237,6 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          {/* Vùng hiển thị ảnh / video chính */}
           <div className="relative flex-1 flex items-center justify-center p-2 overflow-hidden">
             {previewMedia.type === 'video' ? (
               <div className="relative w-full max-w-4xl h-[70vh] flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-2xl">
@@ -2191,7 +2255,7 @@ export default function GalleryClient() {
                   className="max-h-full max-w-full object-contain rounded-lg shadow-2xl transition-all duration-150"
                 />
 
-                {selectedAlbum?.enable_watermark && (
+                {activeSetting.enable_watermark && (
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-35 select-none">
                     <span className="font-serif font-black text-white text-2xl sm:text-4xl tracking-widest uppercase -rotate-12 border-2 border-white/60 px-6 py-2 rounded-2xl shadow-2xl">
                       DINHTHONG GALLERY
@@ -2215,11 +2279,10 @@ export default function GalleryClient() {
             </button>
           </div>
 
-          {/* Thanh công cụ đánh giá & Bình luận (Kế thừa quyền allow_comments từ Admin) */}
           <div className="flex flex-col items-center gap-2 pb-2 z-20 max-w-xl mx-auto w-full px-2">
             
-            {/* Khung bình luận: Chỉ mở khi Admin bật allow_comments */}
-            {selectedAlbum?.allow_comments && (
+            {/* Khung bình luận theo quyền riêng biệt của thư mục */}
+            {activeSetting.allow_comments && (
               <div className="w-full flex items-center gap-1.5 bg-black/70 px-3 py-1.5 rounded-2xl backdrop-blur-md border border-white/10">
                 <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                 <input 
@@ -2256,10 +2319,7 @@ export default function GalleryClient() {
                 <>
                   <div className="h-4 w-[1px] bg-white/20 mx-1" />
                   <button
-                    onClick={(e) => {
-                      const currentFolderId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : selectedAlbum.id
-                      handleSetAsCover(currentFolderId, previewMedia.id, e)
-                    }}
+                    onClick={(e) => handleSetAsCover(currentActiveFolderId, previewMedia.id, e)}
                     className="text-[10px] sm:text-xs text-emerald-400 hover:text-emerald-300 font-medium px-2 py-0.5 rounded-full hover:bg-white/10 transition"
                   >
                     Đặt làm bìa
@@ -2298,7 +2358,7 @@ export default function GalleryClient() {
           <div className="flex items-center gap-2.5 sm:gap-4 px-4 sm:px-6 py-3 rounded-2xl bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white shadow-2xl border border-white/15">
             <span className="text-xs font-medium text-emerald-400">
               Đã chọn: <strong className="text-white">{currentSelectionCount}</strong>
-              {selectedAlbum?.max_select ? ` / ${selectedAlbum.max_select}` : ''} mục
+              {activeSetting.max_select ? ` / ${activeSetting.max_select}` : ''} mục
             </span>
 
             <div className="h-4 w-[1px] bg-white/20" />
@@ -2408,6 +2468,97 @@ export default function GalleryClient() {
         </div>
       )}
 
+      {/* MODAL CÀI ĐẶT RIÊNG BIỆT CHO TỪNG THƯ MỤC / ALBUM */}
+      {editingFolderSetting && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <Settings className="w-5 h-5 text-emerald-500" />
+                <div>
+                  <h3 className="font-serif font-bold text-base">Cài Đặt Riêng Thư Mục</h3>
+                  <p className="text-[11px] text-gray-400 truncate max-w-[240px]">{editingFolderSetting.title}</p>
+                </div>
+              </div>
+              <button onClick={() => setEditingFolderSetting(null)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Link chia sẻ riêng của thư mục này */}
+            <div className="mt-4 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between gap-3">
+              <div className="truncate">
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 block">Link xem riêng thư mục này:</span>
+                <span className="text-[10px] text-gray-400 truncate block font-mono">
+                  {typeof window !== 'undefined' ? `${window.location.origin}/s/${toNumericCode(editingFolderSetting.id)}` : ''}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleShareFolder(editingFolderSetting.id)}
+                className="flex items-center gap-1 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition flex-shrink-0 cursor-pointer"
+              >
+                {shareCopiedId === editingFolderSetting.id ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{shareCopiedId === editingFolderSetting.id ? 'Đã chép!' : 'Chép link'}</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCurrentFolderSetting} className="mt-4 space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium mb-1">Mật khẩu PIN:</label>
+                  <input 
+                    type="text" 
+                    value={editingFolderSetting.password || ''} 
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, password: e.target.value })} 
+                    placeholder="Để trống nếu không khóa" 
+                    className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Giới hạn chọn ảnh:</label>
+                  <input 
+                    type="number" 
+                    value={editingFolderSetting.max_select || 0} 
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, max_select: Number(e.target.value) })} 
+                    placeholder="0 = Vô hạn" 
+                    className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={editingFolderSetting.enable_watermark ?? false} 
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, enable_watermark: e.target.checked })} 
+                    className="rounded text-emerald-600" 
+                  />
+                  <span>Bật Watermark</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={editingFolderSetting.allow_comments ?? true} 
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, allow_comments: e.target.checked })} 
+                    className="rounded text-emerald-600" 
+                  />
+                  <span>Cho phép bình luận</span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
+                <button type="button" onClick={() => setEditingFolderSetting(null)} className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">Hủy</button>
+                <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Lưu Cài Đặt Riêng</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* MODAL THÊM ALBUM MỚI */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -2459,85 +2610,6 @@ export default function GalleryClient() {
               <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">Hủy</button>
                 <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Thêm Album</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL TÙY CHỈNH & CHIA SẺ LINK ALBUM (ADMIN SET) */}
-      {editingAlbum && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
-            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
-          }`}>
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
-              <div className="flex items-center gap-2">
-                <Settings className="w-5 h-5 text-emerald-500" />
-                <h3 className="font-serif font-bold text-base">Cài Đặt & Chia Sẻ Album</h3>
-              </div>
-              <button onClick={() => setEditingAlbum(null)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* MỤC CHIA SẺ LINK NGAY TRONG BẢNG CÀI ĐẶT */}
-            <div className="mt-4 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between gap-3">
-              <div className="truncate">
-                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 block">Link xem trực tiếp cho Khách:</span>
-                <span className="text-[10px] text-gray-400 truncate block font-mono">
-                  {typeof window !== 'undefined' ? `${window.location.origin}/s/${toNumericCode(editingAlbum.id)}` : ''}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => handleShareAlbum(editingAlbum)}
-                className="flex items-center gap-1 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition flex-shrink-0 cursor-pointer"
-              >
-                {shareCopiedId === editingAlbum.id ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{shareCopiedId === editingAlbum.id ? 'Đã chép!' : 'Chép link'}</span>
-              </button>
-            </div>
-
-            <form onSubmit={handleUpdateAlbum} className="mt-4 space-y-3.5 text-xs">
-              <div>
-                <label className="block font-medium mb-1">Tên album:</label>
-                <input type="text" value={editingAlbum.title} onChange={(e) => setEditingAlbum({ ...editingAlbum, title: e.target.value })} required className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
-              </div>
-              <div>
-                <label className="block font-medium mb-1">Link Google Drive:</label>
-                <input type="text" value={editingAlbum.driveUrl} onChange={(e) => setEditingAlbum({ ...editingAlbum, driveUrl: e.target.value })} required className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
-              </div>
-              <div>
-                <label className="block font-medium mb-1">Link ảnh bìa:</label>
-                <input type="text" value={editingAlbum.coverUrl} onChange={(e) => setEditingAlbum({ ...editingAlbum, coverUrl: e.target.value })} placeholder="Link ảnh bìa" className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <div>
-                  <label className="block font-medium mb-1">Mật khẩu PIN:</label>
-                  <input type="text" value={editingAlbum.password || ''} onChange={(e) => setEditingAlbum({ ...editingAlbum, password: e.target.value })} placeholder="Để trống nếu không khóa" className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
-                </div>
-                <div>
-                  <label className="block font-medium mb-1">Giới hạn chọn ảnh:</label>
-                  <input type="number" value={editingAlbum.max_select || 0} onChange={(e) => setEditingAlbum({ ...editingAlbum, max_select: Number(e.target.value) })} placeholder="0 = Vô hạn" className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={editingAlbum.enable_watermark ?? false} onChange={(e) => setEditingAlbum({ ...editingAlbum, enable_watermark: e.target.checked })} className="rounded text-emerald-600" />
-                  <span>Bật Watermark</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={editingAlbum.allow_comments ?? true} onChange={(e) => setEditingAlbum({ ...editingAlbum, allow_comments: e.target.checked })} className="rounded text-emerald-600" />
-                  <span>Cho phép bình luận</span>
-                </label>
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
-                <button type="button" onClick={() => setEditingAlbum(null)} className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">Hủy</button>
-                <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Lưu Tùy Chỉnh</button>
               </div>
             </form>
           </div>
