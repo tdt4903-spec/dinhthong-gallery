@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet, MoreVertical, LayoutGrid, ChevronDown, Lock, Unlock, MessageSquare, ShieldAlert, Sparkles, Link2
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet, MoreVertical, LayoutGrid, ChevronDown, Lock, Unlock, MessageSquare, ShieldAlert, Sparkles, Link2, ZoomIn, ZoomOut, RotateCcw, Send
 } from 'lucide-react'
 
 interface MediaItem {
@@ -147,6 +147,13 @@ export default function GalleryClient() {
   const [currentCommentInput, setCurrentCommentInput] = useState('')
   const [isSavingComment, setIsSavingComment] = useState(false)
 
+  // Zoom và Pan cử chỉ cho Lightbox
+  const [zoomScale, setZoomScale] = useState(1)
+  const [panPosition, setPanPosition] = useState({ x: 0, y: 0 })
+  const isDragging = useRef(false)
+  const dragStart = useRef({ x: 0, y: 0 })
+  const lastTapRef = useRef<number>(0)
+
   const [starFilter, setStarFilter] = useState<number | 'all'>('all')
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
   const [isCommentModalOpen, setIsCommentModalOpen] = useState(false)
@@ -218,6 +225,8 @@ export default function GalleryClient() {
       const fileName = customNames[previewMedia.id] || previewMedia.name
       document.title = `${fileName} - Dinh Thong Gallery`
       setCurrentCommentInput(comments[previewMedia.id] || '')
+      setZoomScale(1)
+      setPanPosition({ x: 0, y: 0 })
     } else if (folderHistory.length > 0) {
       const currentFolder = folderHistory[folderHistory.length - 1]
       document.title = `${currentFolder.title} - Dinh Thong Gallery`
@@ -653,15 +662,57 @@ export default function GalleryClient() {
     else setPreviewMedia(previewSourceList[0])
   }, [currentIndex, previewSourceList])
 
-  const handleTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.targetTouches[0].clientX }
-  const handleTouchMove = (e: React.TouchEvent) => { touchEndX.current = e.targetTouches[0].clientX }
+  const handleTouchStart = (e: React.TouchEvent) => { 
+    if (e.touches.length === 1) {
+      touchStartX.current = e.targetTouches[0].clientX 
+    }
+  }
+  const handleTouchMove = (e: React.TouchEvent) => { 
+    if (e.touches.length === 1) {
+      touchEndX.current = e.targetTouches[0].clientX 
+    }
+  }
   const handleTouchEnd = () => {
+    if (zoomScale > 1) return // Nếu đang zoom thì vô hiệu hóa lướt chuyển bài
     if (!touchStartX.current || !touchEndX.current) return
     const distance = touchStartX.current - touchEndX.current
     if (distance > 45) handleNextImage()
     if (distance < -45) handlePrevImage()
     touchStartX.current = null
     touchEndX.current = null
+  }
+
+  // Chức năng Zoom In / Zoom Out
+  const handleZoomIn = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setZoomScale(prev => Math.min(prev + 0.4, 4))
+  }
+
+  const handleZoomOut = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setZoomScale(prev => {
+      const next = Math.max(prev - 0.4, 1)
+      if (next === 1) setPanPosition({ x: 0, y: 0 })
+      return next
+    })
+  }
+
+  const handleResetZoom = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setZoomScale(1)
+    setPanPosition({ x: 0, y: 0 })
+  }
+
+  const handleDoubleTap = (e: React.TouchEvent | React.MouseEvent) => {
+    const now = Date.now()
+    if (now - lastTapRef.current < 300) {
+      if (zoomScale > 1) {
+        handleResetZoom()
+      } else {
+        setZoomScale(2.2)
+      }
+    }
+    lastTapRef.current = now
   }
 
   const handleToggleSelectAlbum = (id: string, e: React.MouseEvent) => {
@@ -990,6 +1041,8 @@ export default function GalleryClient() {
     }
     setDownloadingId(null)
     setPreviewMedia(null)
+    setZoomScale(1)
+    setPanPosition({ x: 0, y: 0 })
   }
 
   const handleClearAllSelections = () => {
@@ -1305,10 +1358,13 @@ export default function GalleryClient() {
       if (e.key === 'ArrowLeft') handlePrevImage()
       if (e.key === 'ArrowRight') handleNextImage()
       if (e.key === 'Escape') handleClosePreview()
+      if (e.key === '+' || e.key === '=') handleZoomIn()
+      if (e.key === '-' || e.key === '_') handleZoomOut()
+      if (e.key === '0') handleResetZoom()
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [previewMedia, handlePrevImage, handleNextImage])
+  }, [previewMedia, handlePrevImage, handleNextImage, zoomScale])
 
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -1417,11 +1473,7 @@ export default function GalleryClient() {
   }
 
   const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
-
-  // Danh sách các ảnh có bình luận của khách trong thư mục hiện tại
   const commentedImagesList = visibleItems.filter(img => img.type !== 'folder' && comments[img.id] && comments[img.id].trim() !== '')
-
-  // Chuỗi danh sách chuẩn cú pháp: Số/Tên ảnh - Khách bình luận gì
   const commentTextListContent = commentedImagesList.map(img => `${img.name} - ${comments[img.id]}`).join('\n')
 
   let separator = '\n'
@@ -1883,7 +1935,6 @@ export default function GalleryClient() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {/* NÚT CÀI ĐẶT & NÚT XEM BÌNH LUẬN: CHỈ HIỆN KHI THƯ MỤC CÓ ẢNH */}
                 {!isSharedGuest && mediaFiles.length > 0 && (
                   <>
                     <button
@@ -2179,7 +2230,7 @@ export default function GalleryClient() {
                                     {displayName}
                                   </span>
                                   {comments[item.id] && (
-                                    <span className="text-[10px] text-amber-500 flex items-center gap-1 truncate mt-0.5">
+                                    <span className="text-[10px] text-amber-500 flex items-center gap-1 truncate mt-0.5 font-medium">
                                       <MessageSquare className="w-2.5 h-2.5 flex-shrink-0" /> {comments[item.id]}
                                     </span>
                                   )}
@@ -2232,7 +2283,7 @@ export default function GalleryClient() {
         )}
       </main>
 
-      {/* MODAL LIGHTBOX */}
+      {/* MODAL LIGHTBOX / XEM ẢNH & VIDEO (HỖ TRỢ ZOOM IN/OUT & GHI CHÚ MOBILE) */}
       {previewMedia && (
         <div 
           className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-2 sm:p-4 select-none touch-pan-y"
@@ -2240,8 +2291,9 @@ export default function GalleryClient() {
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="flex items-center justify-between px-3 py-2 text-white/90 z-20">
-            <div className="truncate max-w-[60vw]">
+          {/* Header Lightbox */}
+          <div className="flex items-center justify-between px-3 py-2 text-white/90 z-30">
+            <div className="truncate max-w-[50vw]">
               <h4 className="text-xs sm:text-sm font-medium truncate">
                 {customNames[previewMedia.id] || previewMedia.name}
               </h4>
@@ -2250,7 +2302,36 @@ export default function GalleryClient() {
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {/* CỤM NÚT ZOOM IN / ZOOM OUT TRỰC QUAN */}
+              {previewMedia.type !== 'video' && (
+                <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md px-1.5 py-1 rounded-full border border-white/10 mr-1">
+                  <button
+                    onClick={handleZoomIn}
+                    className="p-1 text-white/80 hover:text-white transition cursor-pointer"
+                    title="Phóng to (+)"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={handleZoomOut}
+                    className="p-1 text-white/80 hover:text-white transition cursor-pointer"
+                    title="Thu nhỏ (-)"
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </button>
+                  {zoomScale > 1 && (
+                    <button
+                      onClick={handleResetZoom}
+                      className="p-1 text-emerald-400 hover:text-emerald-300 transition cursor-pointer"
+                      title="Trở về kích thước gốc (1:1)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+
               <button
                 onClick={(e) => handleDownloadMedia(previewMedia, e)}
                 disabled={downloadingId === previewMedia.id}
@@ -2269,7 +2350,11 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          <div className="relative flex-1 flex items-center justify-center p-2 overflow-hidden w-full h-full">
+          {/* Vùng hiển thị ảnh / video: TỰ CO GIÃN THEO TỶ LỆ THỰC VÀ HỖ TRỢ ZOOM ĐA ĐIỂM */}
+          <div 
+            className="relative flex-1 flex items-center justify-center p-2 overflow-hidden w-full h-full cursor-grab active:cursor-grabbing"
+            onClick={handleDoubleTap}
+          >
             {previewMedia.type === 'video' ? (
               <div className="relative w-full max-w-5xl aspect-video flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-2xl">
                 <iframe
@@ -2280,11 +2365,16 @@ export default function GalleryClient() {
                 />
               </div>
             ) : (
-              <div className="relative max-h-full max-w-full flex items-center justify-center">
+              <div 
+                className="relative max-h-full max-w-full flex items-center justify-center transition-transform duration-100 ease-out"
+                style={{
+                  transform: `scale(${zoomScale}) translate(${panPosition.x}px, ${panPosition.y}px)`
+                }}
+              >
                 <img 
                   src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
                   alt={previewMedia.name}
-                  className="max-h-[82vh] max-w-[95vw] object-contain rounded-lg shadow-2xl transition-all duration-150"
+                  className="max-h-[78vh] max-w-[95vw] object-contain rounded-lg shadow-2xl transition-all duration-150 pointer-events-none"
                 />
 
                 {activeSetting.enable_watermark && (
@@ -2297,38 +2387,45 @@ export default function GalleryClient() {
               </div>
             )}
 
-            <button
-              onClick={(e) => { e.stopPropagation(); handlePrevImage(); }}
-              className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block"
-            >
-              <ChevronLeft className="w-6 h-6" />
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); handleNextImage(); }}
-              className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block"
-            >
-              <ChevronRight className="w-6 h-6" />
-            </button>
+            {zoomScale === 1 && (
+              <>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handlePrevImage(); }}
+                  className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block z-20"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleNextImage(); }}
+                  className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block z-20"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              </>
+            )}
           </div>
 
-          <div className="flex flex-col items-center gap-2 pb-2 z-20 max-w-xl mx-auto w-full px-2">
-            {/* Phía khách: chỉ thấy ô nhập ghi chú & nút Lưu */}
+          {/* Thanh công cụ bình luận & Đánh giá (Tối ưu cho cả điện thoại và máy tính) */}
+          <div className="flex flex-col items-center gap-2 pb-2 z-30 max-w-xl mx-auto w-full px-2">
+            
+            {/* Khung bình luận tối ưu mobile: Cỡ chữ 16px chống tự zoom + nút Send trực quan */}
             {activeSetting.allow_comments && (
-              <div className="w-full flex items-center gap-1.5 bg-black/70 px-3 py-1.5 rounded-2xl backdrop-blur-md border border-white/10">
+              <div className="w-full flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl backdrop-blur-md border border-white/15 shadow-xl">
                 <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
                 <input 
                   type="text"
                   value={currentCommentInput}
                   onChange={(e) => setCurrentCommentInput(e.target.value)}
-                  placeholder="Ghi chú yêu cầu sửa ảnh (ví dụ: bóp eo, làm mịn da...)"
-                  className="bg-transparent border-0 outline-none text-xs text-white placeholder:text-white/40 flex-1 px-1"
+                  placeholder="Ghi chú yêu cầu sửa ảnh..."
+                  className="bg-transparent border-0 outline-none text-base sm:text-xs text-white placeholder:text-white/40 flex-1 px-1 min-w-0"
                 />
                 <button
                   onClick={() => handleSaveComment(previewMedia.id)}
                   disabled={isSavingComment}
-                  className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition flex-shrink-0 cursor-pointer disabled:opacity-50"
+                  className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex-shrink-0 cursor-pointer disabled:opacity-50"
                 >
-                  {isSavingComment ? 'Đang lưu...' : 'Lưu'}
+                  {isSavingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  <span className="hidden xs:inline">Lưu</span>
                 </button>
               </div>
             )}
