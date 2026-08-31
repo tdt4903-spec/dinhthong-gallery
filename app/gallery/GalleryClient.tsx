@@ -1782,15 +1782,27 @@ export default function GalleryClient() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {!isSharedGuest && (
-                  <button
-                    onClick={handleOpenVisibilityManager}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition cursor-pointer"
-                    title="Xem danh sách tick chọn các mục ẩn / hiện trong album này"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Ẩn / Hiện mục</span>
-                  </button>
+                {/* NÚT QUẢN TRỊ CHO ADMIN (Chỉ xuất hiện khi thư mục hiện tại có ảnh) */}
+                {!isSharedGuest && mediaFiles.length > 0 && selectedAlbum && (
+                  <>
+                    <button
+                      onClick={() => setEditingAlbum(selectedAlbum)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition cursor-pointer shadow-2xs"
+                      title="Cài đặt mật khẩu, watermark, giới hạn chọn ảnh"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      <span>Cài đặt Album</span>
+                    </button>
+
+                    <button
+                      onClick={handleOpenVisibilityManager}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition cursor-pointer shadow-2xs"
+                      title="Xem danh sách tick chọn các mục ẩn / hiện trong album này"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Ẩn / Hiện mục</span>
+                    </button>
+                  </>
                 )}
 
                 {mediaFiles.length > 0 && (
