@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet, MoreVertical, LayoutGrid, ChevronDown
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, FileText, Share2, Edit3, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, Folder as FolderIcon, RefreshCw, CheckSquare, Square, Eye, EyeOff, Wallet, MoreVertical, LayoutGrid, ChevronDown, Lock, Unlock, MessageSquare, ShieldAlert, Sparkles
 } from 'lucide-react'
 
 interface MediaItem {
@@ -26,6 +26,10 @@ interface Album {
   title: string
   coverUrl: string
   driveUrl: string
+  password?: string
+  max_select?: number
+  allow_comments?: boolean
+  enable_watermark?: boolean
 }
 
 interface MasterFolderItem {
@@ -129,11 +133,18 @@ export default function GalleryClient() {
   const [editingSubFolder, setEditingSubFolder] = useState<{ id: string; name: string } | null>(null)
 
   const [ratings, setRatings] = useState<Record<string, number>>({})
+  const [comments, setComments] = useState<Record<string, string>>({})
+  const [currentCommentInput, setCurrentCommentInput] = useState('')
   const [starFilter, setStarFilter] = useState<number | 'all'>('all')
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
+
+  // Khóa mật khẩu bảo vệ
+  const [isLocked, setIsLocked] = useState(false)
+  const [passwordInput, setPasswordInput] = useState('')
+  const [passwordError, setPasswordError] = useState(false)
 
   const [masterFoldersList, setMasterFoldersList] = useState<MasterFolderItem[]>([])
   const [isMasterModalOpen, setIsMasterModalOpen] = useState(false)
@@ -181,6 +192,7 @@ export default function GalleryClient() {
     if (previewMedia) {
       const fileName = customNames[previewMedia.id] || previewMedia.name
       document.title = `${fileName} - Dinh Thong Gallery`
+      setCurrentCommentInput(comments[previewMedia.id] || '')
     } else if (folderHistory.length > 0) {
       const currentFolder = folderHistory[folderHistory.length - 1]
       document.title = `${currentFolder.title} - Dinh Thong Gallery`
@@ -189,7 +201,7 @@ export default function GalleryClient() {
     } else {
       document.title = 'Dinh Thong Gallery'
     }
-  }, [previewMedia, folderHistory, selectedAlbum, customNames])
+  }, [previewMedia, folderHistory, selectedAlbum, customNames, comments])
 
   const formatDriveCoverUrl = (url: string) => {
     if (!url) return ''
@@ -204,6 +216,17 @@ export default function GalleryClient() {
     try {
       const { data } = await supabase.from('hidden_items').select('id')
       if (data) setHiddenItemIds(new Set(data.map((item: any) => item.id)))
+    } catch {}
+  }
+
+  const fetchComments = async () => {
+    try {
+      const { data } = await supabase.from('item_comments').select('id, comment')
+      if (data) {
+        const commentMap: Record<string, string> = {}
+        data.forEach((c: any) => { commentMap[c.id] = c.comment })
+        setComments(commentMap)
+      }
     } catch {}
   }
 
@@ -251,7 +274,11 @@ export default function GalleryClient() {
           id: item.id,
           title: item.title,
           driveUrl: item.drive_url,
-          coverUrl: item.cover_url || ''
+          coverUrl: item.cover_url || '',
+          password: item.password || '',
+          max_select: Number(item.max_select || 0),
+          allow_comments: item.allow_comments ?? true,
+          enable_watermark: item.enable_watermark ?? false
         }))
         setAlbums(formatted)
         return formatted
@@ -588,6 +615,13 @@ export default function GalleryClient() {
 
   const handleToggleSelectItem = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
+    const maxSel = selectedAlbum?.max_select || 0
+    
+    if (maxSel > 0 && !selectedItemIds.has(id) && selectedItemIds.size >= maxSel) {
+      alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh!`)
+      return
+    }
+
     setSelectedItemIds(prev => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -880,22 +914,18 @@ export default function GalleryClient() {
       const link = document.createElement('a')
       link.href = blobUrl
       link.setAttribute('download', exactFileName)
+      link.style.display = 'none'
       document.body.appendChild(link)
       link.click()
-      document.body.removeChild(link)
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000)
-    } catch (err: any) {
-      if (err?.name !== 'AbortError') {
-        const ext = item.type === 'video' ? 'mp4' : 'jpg'
-        const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
-        const directProxy = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
-        const fallbackLink = document.createElement('a')
-        fallbackLink.href = directProxy
-        fallbackLink.setAttribute('download', exactFileName)
-        document.body.appendChild(fallbackLink)
-        fallbackLink.click()
-        document.body.removeChild(fallbackLink)
-      }
+      setTimeout(() => {
+        document.body.removeChild(link)
+        URL.revokeObjectURL(blobUrl)
+      }, 1000)
+    } catch {
+      const ext = item.type === 'video' ? 'mp4' : 'jpg'
+      const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
+      const directProxy = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
+      window.location.href = directProxy
     } finally {
       setDownloadingId(null)
     }
@@ -915,6 +945,14 @@ export default function GalleryClient() {
       setRatings({})
       localStorage.removeItem('dinhthong_image_ratings')
     }
+  }
+
+  const handleSaveComment = async (itemId: string) => {
+    const text = currentCommentInput.trim()
+    const newMap = { ...comments, [itemId]: text }
+    setComments(newMap)
+    await supabase.from('item_comments').upsert({ id: itemId, comment: text })
+    alert('Đã lưu bình luận!')
   }
 
   const durationOptions = [
@@ -991,6 +1029,18 @@ export default function GalleryClient() {
     }
   }
 
+  const handleCheckPassword = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedAlbum) return
+    if (passwordInput.trim() === selectedAlbum.password?.trim()) {
+      setIsLocked(false)
+      setPasswordError(false)
+      fetchAlbumImages(selectedAlbum.driveUrl)
+    } else {
+      setPasswordError(true)
+    }
+  }
+
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
@@ -1002,6 +1052,7 @@ export default function GalleryClient() {
       fetchHiddenItemIds()
       fetchCustomNames()
       fetchCustomCovers()
+      fetchComments()
 
       supabase
         .from('albums')
@@ -1014,11 +1065,20 @@ export default function GalleryClient() {
               id: matchedAlbum.id,
               title: matchedAlbum.title,
               coverUrl: matchedAlbum.cover_url || '',
-              driveUrl: matchedAlbum.drive_url
+              driveUrl: matchedAlbum.drive_url,
+              password: matchedAlbum.password || '',
+              max_select: Number(matchedAlbum.max_select || 0),
+              allow_comments: matchedAlbum.allow_comments ?? true,
+              enable_watermark: matchedAlbum.enable_watermark ?? false
             }
             setSelectedAlbum(sharedAlbumObj)
             setFolderHistory([])
-            await fetchAlbumImages(sharedAlbumObj.driveUrl)
+
+            if (sharedAlbumObj.password) {
+              setIsLocked(true)
+            } else {
+              await fetchAlbumImages(sharedAlbumObj.driveUrl)
+            }
             setLoading(false)
             return
           }
@@ -1086,6 +1146,7 @@ export default function GalleryClient() {
         const knownSet = await fetchKnownFolderIds()
         await fetchCustomNames()
         await fetchCustomCovers()
+        await fetchComments()
         await fetchAlbumsFromSupabase()
         const masterFolders = await fetchMasterFoldersList()
 
@@ -1124,7 +1185,12 @@ export default function GalleryClient() {
   const handleOpenAlbum = (album: Album) => {
     setSelectedAlbum(album)
     setFolderHistory([])
-    fetchAlbumImages(album.driveUrl)
+    if (album.password && isSharedGuest) {
+      setIsLocked(true)
+    } else {
+      setIsLocked(false)
+      fetchAlbumImages(album.driveUrl)
+    }
   }
 
   const handleBackToParentFolder = () => {
@@ -1147,6 +1213,10 @@ export default function GalleryClient() {
     const titleInput = form.elements.namedItem('title') as HTMLInputElement
     const urlInput = form.elements.namedItem('url') as HTMLInputElement
     const coverInput = form.elements.namedItem('cover') as HTMLInputElement
+    const passInput = form.elements.namedItem('password') as HTMLInputElement
+    const maxSelectInput = form.elements.namedItem('max_select') as HTMLInputElement
+    const watermarkInput = form.elements.namedItem('enable_watermark') as HTMLInputElement
+    const commentsInput = form.elements.namedItem('allow_comments') as HTMLInputElement
 
     const newTitle = titleInput.value
     const newDriveUrl = urlInput.value
@@ -1154,7 +1224,16 @@ export default function GalleryClient() {
     const newCoverUrl = coverInput.value.trim() ? formatDriveCoverUrl(coverInput.value) : ''
 
     const { error } = await supabase.from('albums').insert([
-      { id: newId, title: newTitle, drive_url: newDriveUrl, cover_url: newCoverUrl }
+      { 
+        id: newId, 
+        title: newTitle, 
+        drive_url: newDriveUrl, 
+        cover_url: newCoverUrl,
+        password: passInput.value.trim(),
+        max_select: Number(maxSelectInput.value || 0),
+        enable_watermark: watermarkInput.checked,
+        allow_comments: commentsInput.checked
+      }
     ])
 
     if (!error) {
@@ -1173,7 +1252,11 @@ export default function GalleryClient() {
     const { error } = await supabase.from('albums').update({
       title: editingAlbum.title,
       drive_url: editingAlbum.driveUrl,
-      cover_url: formattedCover
+      cover_url: formattedCover,
+      password: editingAlbum.password || '',
+      max_select: Number(editingAlbum.max_select || 0),
+      allow_comments: editingAlbum.allow_comments ?? true,
+      enable_watermark: editingAlbum.enable_watermark ?? false
     }).eq('id', editingAlbum.id)
 
     if (!error) {
@@ -1237,7 +1320,10 @@ export default function GalleryClient() {
     if (!useComma && !useSpace) sep = ' '
     separator = sep
   }
-  const textFileContent = selectedImagesList.map(img => img.name).join(separator)
+  const textFileContent = selectedImagesList.map(img => {
+    const cmt = comments[img.id] ? ` (Ghi chú: ${comments[img.id]})` : ''
+    return `${img.name}${cmt}`
+  }).join(separator)
 
   const handleCopyText = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -1294,7 +1380,7 @@ export default function GalleryClient() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
-            {selectedAlbum ? (
+            {selectedAlbum && !isLocked ? (
               <>
                 <div className="relative w-28 sm:w-52 flex-shrink-0">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
@@ -1543,6 +1629,13 @@ export default function GalleryClient() {
                       
                       <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
 
+                      {album.password && (
+                        <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-full text-white text-[10px] font-bold flex items-center gap-1 z-20">
+                          <Lock className="w-3 h-3 text-amber-400" />
+                          <span>Khóa PIN</span>
+                        </div>
+                      )}
+
                       <button
                         onClick={(e) => handleToggleSelectAlbum(album.id, e)}
                         className="absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
@@ -1564,9 +1657,9 @@ export default function GalleryClient() {
                           <button
                             onClick={(e) => { e.stopPropagation(); setEditingAlbum(album); }}
                             className="absolute top-3 right-12 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-emerald-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                            title="Chỉnh sửa thông tin album"
+                            title="Tùy chỉnh & Bảo mật Album"
                           >
-                            <Edit3 className="w-4 h-4" />
+                            <Settings className="w-4 h-4" />
                           </button>
 
                           <button
@@ -1603,6 +1696,48 @@ export default function GalleryClient() {
               })}
             </div>
           </div>
+        ) : isLocked ? (
+          /* MÀN HÌNH NHẬP MẬT KHẨU CHO ALBUM */
+          <div className="min-h-[60vh] flex items-center justify-center p-4">
+            <div className={`w-full max-w-sm rounded-3xl p-6 sm:p-8 text-center border shadow-2xl transition-all ${
+              isDarkMode ? 'bg-[#181a20] border-white/10' : 'bg-white border-gray-100'
+            }`}>
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4">
+                <Lock className="w-7 h-7" />
+              </div>
+              <h3 className="font-bold font-serif text-lg text-gray-900 dark:text-white">Album Đã Được Bảo Vệ</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-6">
+                Vui lòng nhập mật khẩu do Admin cung cấp để xem Album này.
+              </p>
+
+              <form onSubmit={handleCheckPassword} className="space-y-4">
+                <input 
+                  type="password"
+                  value={passwordInput}
+                  onChange={(e) => { setPasswordInput(e.target.value); setPasswordError(false); }}
+                  placeholder="Nhập mật khẩu..."
+                  required
+                  autoFocus
+                  className={`w-full px-4 py-3 rounded-2xl text-center text-sm font-bold border outline-none transition ${
+                    passwordError 
+                      ? 'border-red-500 bg-red-50 dark:bg-red-950/20 text-red-500' 
+                      : isDarkMode ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' : 'bg-gray-50 border-gray-200 text-gray-900 focus:border-emerald-500'
+                  }`}
+                />
+
+                {passwordError && (
+                  <p className="text-xs text-red-500 font-semibold">Mật khẩu chưa chính xác!</p>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md transition cursor-pointer"
+                >
+                  Mở Khóa Album
+                </button>
+              </form>
+            </div>
+          </div>
         ) : (
           <div>
             {!isSharedGuest && (
@@ -1634,9 +1769,16 @@ export default function GalleryClient() {
                 <h2 className="text-xl sm:text-2xl font-bold font-serif">
                   {folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : selectedAlbum.title}
                 </h2>
-                <p className="text-xs text-gray-400 mt-1">
-                  {loadingImages ? 'Vui lòng đợi' : `${subFolders.length} thư mục, ${mediaFiles.length} hình ảnh`}
-                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <p className="text-xs text-gray-400">
+                    {loadingImages ? 'Vui lòng đợi' : `${subFolders.length} thư mục, ${mediaFiles.length} hình ảnh`}
+                  </p>
+                  {selectedAlbum.max_select ? (
+                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                      Chọn tối đa: {selectedAlbum.max_select} ảnh
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
@@ -1877,16 +2019,27 @@ export default function GalleryClient() {
                                     </span>
                                   </div>
                                 ) : (
-                                  <img 
-                                    src={fastDisplayUrl} 
-                                    alt={displayName} 
-                                    loading="lazy"
-                                    decoding="async"
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200 pointer-events-none"
-                                    onError={(e) => {
-                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}=w360`
-                                    }}
-                                  />
+                                  <>
+                                    <img 
+                                      src={fastDisplayUrl} 
+                                      alt={displayName} 
+                                      loading="lazy"
+                                      decoding="async"
+                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200 pointer-events-none"
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}=w360`
+                                      }}
+                                    />
+
+                                    {/* Lớp phủ Watermark nếu bật */}
+                                    {selectedAlbum.enable_watermark && (
+                                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-30 select-none">
+                                        <span className="font-serif font-black text-white text-xs sm:text-sm tracking-widest uppercase -rotate-12 border border-white/50 px-2 py-0.5 rounded">
+                                          DINHTHONG GALLERY
+                                        </span>
+                                      </div>
+                                    )}
+                                  </>
                                 )}
 
                                 <button
@@ -1916,9 +2069,17 @@ export default function GalleryClient() {
                               </div>
 
                               <div className="p-2.5 sm:p-3 flex items-center justify-between text-xs">
-                                <span className={`truncate font-medium text-[11px] sm:text-xs transition-colors ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={displayName}>
-                                  {displayName}
-                                </span>
+                                <div className="truncate flex-1 pr-1">
+                                  <span className={`truncate font-medium text-[11px] sm:text-xs block ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={displayName}>
+                                    {displayName}
+                                  </span>
+                                  {comments[item.id] && (
+                                    <span className="text-[10px] text-amber-500 flex items-center gap-1 truncate mt-0.5">
+                                      <MessageSquare className="w-2.5 h-2.5 flex-shrink-0" /> {comments[item.id]}
+                                    </span>
+                                  )}
+                                </div>
+
                                 <button 
                                   onClick={(e) => handleDownloadMedia(item, e)}
                                   disabled={downloadingId === item.id}
@@ -2016,11 +2177,21 @@ export default function GalleryClient() {
                 />
               </div>
             ) : (
-              <img 
-                src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
-                alt={previewMedia.name}
-                className="max-h-full max-w-full object-contain rounded-lg shadow-2xl transition-all duration-150"
-              />
+              <div className="relative max-h-full max-w-full flex items-center justify-center">
+                <img 
+                  src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
+                  alt={previewMedia.name}
+                  className="max-h-full max-w-full object-contain rounded-lg shadow-2xl transition-all duration-150"
+                />
+
+                {selectedAlbum?.enable_watermark && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-35 select-none">
+                    <span className="font-serif font-black text-white text-2xl sm:text-4xl tracking-widest uppercase -rotate-12 border-2 border-white/60 px-6 py-2 rounded-2xl shadow-2xl">
+                      DINHTHONG GALLERY
+                    </span>
+                  </div>
+                )}
+              </div>
             )}
 
             <button
@@ -2037,8 +2208,29 @@ export default function GalleryClient() {
             </button>
           </div>
 
-          {/* Thanh công cụ đánh giá Sao & Đặt ảnh bìa ở dưới cùng */}
-          <div className="flex flex-col items-center gap-2 pb-2 z-20">
+          {/* Thanh công cụ đánh giá, Bình luận & Đặt ảnh bìa ở dưới cùng */}
+          <div className="flex flex-col items-center gap-2 pb-2 z-20 max-w-xl mx-auto w-full px-2">
+            
+            {/* Ô Bình Luận Cho Từng Ảnh */}
+            {selectedAlbum?.allow_comments && (
+              <div className="w-full flex items-center gap-1.5 bg-black/70 px-3 py-1.5 rounded-2xl backdrop-blur-md border border-white/10">
+                <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <input 
+                  type="text"
+                  value={currentCommentInput}
+                  onChange={(e) => setCurrentCommentInput(e.target.value)}
+                  placeholder="Ghi chú yêu cầu sửa ảnh (ví dụ: bóp eo, làm mịn da...)"
+                  className="bg-transparent border-0 outline-none text-xs text-white placeholder:text-white/40 flex-1 px-1"
+                />
+                <button
+                  onClick={() => handleSaveComment(previewMedia.id)}
+                  className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition flex-shrink-0 cursor-pointer"
+                >
+                  Lưu
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center gap-1.5 bg-black/60 px-4 py-2 rounded-full backdrop-blur-md border border-white/10">
               <span className="text-[11px] text-white/70 mr-1">Đánh giá:</span>
               {[1, 2, 3, 4, 5].map((star) => (
@@ -2098,7 +2290,8 @@ export default function GalleryClient() {
         <div className="fixed bottom-6 inset-x-0 z-40 flex justify-center px-4 animate-in slide-in-from-bottom-5 duration-200">
           <div className="flex items-center gap-2.5 sm:gap-4 px-4 sm:px-6 py-3 rounded-2xl bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white shadow-2xl border border-white/15">
             <span className="text-xs font-medium text-emerald-400">
-              Đã chọn: <strong className="text-white">{currentSelectionCount}</strong> mục
+              Đã chọn: <strong className="text-white">{currentSelectionCount}</strong>
+              {selectedAlbum?.max_select ? ` / ${selectedAlbum.max_select}` : ''} mục
             </span>
 
             <div className="h-4 w-[1px] bg-white/20" />
@@ -2233,6 +2426,29 @@ export default function GalleryClient() {
                 <label className="block font-medium mb-1">Link ảnh bìa (Tùy chọn):</label>
                 <input type="text" name="cover" placeholder="Link ảnh hoặc để trống tự động lấy" className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
               </div>
+              
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <div>
+                  <label className="block font-medium mb-1">Mật khẩu bảo vệ (Tùy chọn):</label>
+                  <input type="text" name="password" placeholder="Đặt mã PIN..." className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Giới hạn chọn ảnh:</label>
+                  <input type="number" name="max_select" placeholder="0 = Không giới hạn" className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" name="enable_watermark" className="rounded text-emerald-600" />
+                  <span>Bật Watermark bản quyền</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" name="allow_comments" defaultChecked className="rounded text-emerald-600" />
+                  <span>Cho phép bình luận</span>
+                </label>
+              </div>
+
               <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">Hủy</button>
                 <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Thêm Album</button>
@@ -2242,14 +2458,17 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL CHỈNH SỬA ALBUM */}
+      {/* MODAL TÙY CHỈNH & BẢO MẬT ALBUM */}
       {editingAlbum && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
             isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
           }`}>
             <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
-              <h3 className="font-serif font-bold text-base">Sửa Thông Tin Album</h3>
+              <div className="flex items-center gap-2">
+                <Settings className="w-5 h-5 text-emerald-500" />
+                <h3 className="font-serif font-bold text-base">Tùy Chỉnh Album</h3>
+              </div>
               <button onClick={() => setEditingAlbum(null)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
                 <X className="w-5 h-5" />
               </button>
@@ -2267,9 +2486,32 @@ export default function GalleryClient() {
                 <label className="block font-medium mb-1">Link ảnh bìa:</label>
                 <input type="text" value={editingAlbum.coverUrl} onChange={(e) => setEditingAlbum({ ...editingAlbum, coverUrl: e.target.value })} placeholder="Link ảnh bìa" className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
               </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <div>
+                  <label className="block font-medium mb-1">Mật khẩu PIN:</label>
+                  <input type="text" value={editingAlbum.password || ''} onChange={(e) => setEditingAlbum({ ...editingAlbum, password: e.target.value })} placeholder="Để trống nếu không khóa" className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Giới hạn chọn ảnh:</label>
+                  <input type="number" value={editingAlbum.max_select || 0} onChange={(e) => setEditingAlbum({ ...editingAlbum, max_select: Number(e.target.value) })} placeholder="0 = Vô hạn" className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editingAlbum.enable_watermark ?? false} onChange={(e) => setEditingAlbum({ ...editingAlbum, enable_watermark: e.target.checked })} className="rounded text-emerald-600" />
+                  <span>Bật Watermark</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={editingAlbum.allow_comments ?? true} onChange={(e) => setEditingAlbum({ ...editingAlbum, allow_comments: e.target.checked })} className="rounded text-emerald-600" />
+                  <span>Cho phép bình luận</span>
+                </label>
+              </div>
+
               <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
                 <button type="button" onClick={() => setEditingAlbum(null)} className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">Hủy</button>
-                <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Cập nhật</button>
+                <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Lưu Tùy Chỉnh</button>
               </div>
             </form>
           </div>
