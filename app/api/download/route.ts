@@ -20,14 +20,16 @@ export async function GET(req: NextRequest) {
     }
 
     const contentType = response.headers.get('content-type') || 'application/octet-stream'
-    const arrayBuffer = await response.arrayBuffer()
+    const contentLength = response.headers.get('content-length')
 
     const headers = new Headers()
     headers.set('Content-Type', contentType)
     headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`)
-    headers.set('Content-Length', arrayBuffer.byteLength.toString())
+    if (contentLength) {
+      headers.set('Content-Length', contentLength)
+    }
 
-    return new NextResponse(arrayBuffer, {
+    return new NextResponse(response.body, {
       status: 200,
       headers
     })
