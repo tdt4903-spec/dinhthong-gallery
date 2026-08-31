@@ -1681,7 +1681,7 @@ export default function GalleryClient() {
                         className="absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
                         title={isChecked ? 'Bỏ chọn' : 'Chọn album'}
                       >
-                        {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
+                        {isChecked ? <CheckSquare className="w-5 h-5 text-emerald-400" /> : <Square className="w-5 h-5 text-white/80" />}
                       </button>
 
                       {!isSharedGuest && (
@@ -2158,6 +2158,7 @@ export default function GalleryClient() {
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
+          {/* Header Lightbox */}
           <div className="flex items-center justify-between px-3 py-2 text-white/90 z-30">
             <div className="truncate max-w-[50vw]">
               <h4 className="text-xs sm:text-sm font-medium truncate">
@@ -2780,90 +2781,6 @@ export default function GalleryClient() {
               >
                 {isSavingVisibility ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 <span>{isSavingVisibility ? 'Đang lưu...' : 'Lưu trạng thái hiển thị'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL KIỂM DUYỆT ĐỒNG BỘ THƯ MỤC CON MỚI */}
-      {isSyncModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
-            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
-          }`}>
-            <div className="flex items-start justify-between pb-4 border-b border-gray-100 dark:border-white/10">
-              <div className="flex items-center gap-3">
-                <div className="p-3 rounded-2xl bg-emerald-500 text-white flex-shrink-0 shadow-md">
-                  <FolderSync className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="font-serif font-bold text-base sm:text-lg">Kiểm Duyệt Thư Mục Mới Từ Drive</h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Phát hiện {pendingSyncAlbums.length} thư mục mới vừa được thêm trên Google Drive.
-                  </p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setIsSyncModalOpen(false)}
-                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="my-5">
-              <div className="flex items-center justify-between text-xs px-1 mb-3">
-                <button
-                  type="button"
-                  onClick={handleSelectAllPending}
-                  className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline cursor-pointer"
-                >
-                  {selectedPendingIds.size === pendingSyncAlbums.length ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
-                </button>
-                <span className="text-gray-400">Cho phép hiển thị: {selectedPendingIds.size}/{pendingSyncAlbums.length}</span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-60 overflow-y-auto p-1">
-                {pendingSyncAlbums.map((folder) => {
-                  const isChecked = selectedPendingIds.has(folder.id)
-                  return (
-                    <div 
-                      key={folder.id}
-                      onClick={() => handleToggleSelectPending(folder.id)}
-                      className={`flex flex-col p-3 rounded-2xl border text-xs cursor-pointer select-none transition ${
-                        isChecked 
-                          ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 font-semibold shadow-sm' 
-                          : 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-400'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-600 flex-shrink-0" /> : <Square className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-                        <span className="truncate">{folder.name}</span>
-                      </div>
-                      <span className="text-[10px] text-gray-400 mt-1 pl-6">Nằm trong: {folder.parentTitle}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-white/10">
-              <button
-                type="button"
-                onClick={() => setIsSyncModalOpen(false)}
-                className="px-5 py-2.5 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10 transition cursor-pointer"
-              >
-                Để sau / Hủy
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmSync}
-                disabled={isSyncing}
-                className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md transition cursor-pointer disabled:opacity-50"
-              >
-                {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                <span>{isSyncing ? 'Đang cập nhật...' : `Xác nhận hiển thị (${selectedPendingIds.size})`}</span>
               </button>
             </div>
           </div>
