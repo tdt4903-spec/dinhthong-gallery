@@ -119,7 +119,33 @@ export default function GalleryClient() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [isDarkMode, setIsDarkMode] = useState(false)
+
+  // LOGIC TỰ ĐỘNG CHUYỂN GIAO DIỆN THEO GIỜ (6H - 18H SÁNG, 18H - 6H TỐI)
+  const isTimeForDarkMode = () => {
+    const currentHour = new Date().getHours()
+    return currentHour < 6 || currentHour >= 18
+  }
+
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(false)
+  const hasUserToggledMode = useRef<boolean>(false)
+
+  useEffect(() => {
+    setIsDarkMode(isTimeForDarkMode())
+
+    const interval = setInterval(() => {
+      if (!hasUserToggledMode.current) {
+        setIsDarkMode(isTimeForDarkMode())
+      }
+    }, 60 * 1000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  const handleToggleDarkMode = () => {
+    hasUserToggledMode.current = true
+    setIsDarkMode(prev => !prev)
+  }
+
   const [searchTerm, setSearchTerm] = useState('')
   const [albums, setAlbums] = useState<Album[]>([])
   
@@ -150,8 +176,6 @@ export default function GalleryClient() {
   // Zoom và Pan cử chỉ cho Lightbox
   const [zoomScale, setZoomScale] = useState(1)
   const [panPosition, setPanPosition] = useState({ x: 0, y: 0 })
-  const isDragging = useRef(false)
-  const dragStart = useRef({ x: 0, y: 0 })
   const lastTapRef = useRef<number>(0)
 
   const [starFilter, setStarFilter] = useState<number | 'all'>('all')
@@ -673,7 +697,7 @@ export default function GalleryClient() {
     }
   }
   const handleTouchEnd = () => {
-    if (zoomScale > 1) return // Nếu đang zoom thì vô hiệu hóa lướt chuyển bài
+    if (zoomScale > 1) return
     if (!touchStartX.current || !touchEndX.current) return
     const distance = touchStartX.current - touchEndX.current
     if (distance > 45) handleNextImage()
@@ -682,7 +706,6 @@ export default function GalleryClient() {
     touchEndX.current = null
   }
 
-  // Chức năng Zoom In / Zoom Out
   const handleZoomIn = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
     setZoomScale(prev => Math.min(prev + 0.4, 4))
@@ -1052,7 +1075,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Khách bấm Lưu bình luận
   const handleSaveComment = async (itemId: string) => {
     const text = currentCommentInput.trim()
     setIsSavingComment(true)
@@ -1070,7 +1092,6 @@ export default function GalleryClient() {
     }
   }
 
-  // Admin xóa tất cả bình luận
   const handleDeleteAllComments = async () => {
     if (confirm('CẢNH BÁO: Bạn có chắc muốn XÓA TẤT CẢ bình luận của khách hàng trên hệ thống?')) {
       const { error } = await supabase.from('item_comments').delete().neq('id', '00000000-0000-0000-0000-000000000000')
@@ -1656,11 +1677,11 @@ export default function GalleryClient() {
 
             <div className="flex items-center gap-1.5 pl-1.5 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
               <button
-                onClick={() => setIsDarkMode(!isDarkMode)}
+                onClick={handleToggleDarkMode}
                 className={`p-2 rounded-full border transition cursor-pointer flex-shrink-0 ${
                   isDarkMode ? 'border-white/10 hover:bg-white/10 text-emerald-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
                 }`}
-                title="Giao diện"
+                title="Giao diện (Tự động 6h-18h sáng / 18h-6h tối)"
               >
                 {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
               </button>
@@ -2283,7 +2304,7 @@ export default function GalleryClient() {
         )}
       </main>
 
-      {/* MODAL LIGHTBOX / XEM ẢNH & VIDEO (HỖ TRỢ ZOOM IN/OUT & GHI CHÚ MOBILE) */}
+      {/* MODAL LIGHTBOX / XEM ẢNH & VIDEO */}
       {previewMedia && (
         <div 
           className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-2 sm:p-4 select-none touch-pan-y"
@@ -2303,7 +2324,6 @@ export default function GalleryClient() {
             </div>
 
             <div className="flex items-center gap-1.5 sm:gap-2">
-              {/* CỤM NÚT ZOOM IN / ZOOM OUT TRỰC QUAN */}
               {previewMedia.type !== 'video' && (
                 <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md px-1.5 py-1 rounded-full border border-white/10 mr-1">
                   <button
@@ -2350,7 +2370,6 @@ export default function GalleryClient() {
             </div>
           </div>
 
-          {/* Vùng hiển thị ảnh / video: TỰ CO GIÃN THEO TỶ LỆ THỰC VÀ HỖ TRỢ ZOOM ĐA ĐIỂM */}
           <div 
             className="relative flex-1 flex items-center justify-center p-2 overflow-hidden w-full h-full cursor-grab active:cursor-grabbing"
             onClick={handleDoubleTap}
@@ -2405,10 +2424,7 @@ export default function GalleryClient() {
             )}
           </div>
 
-          {/* Thanh công cụ bình luận & Đánh giá (Tối ưu cho cả điện thoại và máy tính) */}
           <div className="flex flex-col items-center gap-2 pb-2 z-30 max-w-xl mx-auto w-full px-2">
-            
-            {/* Khung bình luận tối ưu mobile: Cỡ chữ 16px chống tự zoom + nút Send trực quan */}
             {activeSetting.allow_comments && (
               <div className="w-full flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl backdrop-blur-md border border-white/15 shadow-xl">
                 <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
@@ -2481,7 +2497,7 @@ export default function GalleryClient() {
         </div>
       )}
 
-      {/* MODAL XEM TẤT CẢ BÌNH LUẬN CỦA KHÁCH (CHỈ ADMIN MỚI MỞ ĐƯỢC) */}
+      {/* MODAL XEM TẤT CẢ BÌNH LUẬN CỦA KHÁCH */}
       {isCommentModalOpen && !isSharedGuest && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl border transition-all ${
