@@ -163,17 +163,11 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-const formatBytes = (bytes: number) => {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-}
-
-// TẢI VIDEO ĐƠN QUA PROXY CỦA WEBSITE
-// Browser chỉ gọi /api/download, không đi tới trang tải/quét virus của Drive.
+// TẢI VIDEO QUA SERVER PROXY CỦA WEBSITE
+// Giữ nguyên mục tiêu: browser chỉ gọi website, không điều hướng sang Google Drive.
+// Endpoint /api/download hỗ trợ Range để video có thể phát mượt theo từng đoạn.
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const downloadUrl = `/api/download?action=download&id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+  const downloadUrl = `/api/download?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
 
   const link = document.createElement('a')
   link.href = downloadUrl
@@ -187,6 +181,12 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
     if (document.body.contains(link)) document.body.removeChild(link)
   }, 1500)
 }
+
+const getDirectImageSource = (fileId: string) =>
+  `https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}=s0`
+
+const isIOSDevice = () =>
+  typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
 
 export default function GalleryClient() {
   const router = useRouter()
@@ -231,16 +231,6 @@ export default function GalleryClient() {
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
-
-  // Thông tin tải/phát video qua proxy của website
-  const [videoLoadInfo, setVideoLoadInfo] = useState({
-    speedBytesPerSecond: 0,
-    bufferedPercent: 0,
-    loadedBytes: 0,
-    totalBytes: 0,
-    loading: false,
-  })
-  const videoElementRef = useRef<HTMLVideoElement | null>(null)
 
   const [selectedAlbumIds, setSelectedAlbumIds] = useState<Set<string>>(new Set())
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
@@ -614,37 +604,45 @@ export default function GalleryClient() {
         return
       }
 
-      // NẾU LÀ HÌNH ẢNH: TẢI QUA PROXY ĐỂ ĐÓNG WATERMARK NẾU CÓ
-      const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
-      const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
-      const res = await fetch(proxyUrl)
-      if (!res.ok) throw new Error('Fetch failed')
-      
-      let blob = await res.blob()
+      // ẢNH: nếu không bật watermark thì lấy ảnh trực tiếp từ Googleusercontent
+      // để giữ tốc độ như trước; chỉ dùng proxy khi thực sự cần watermark.
+      const ios = isIOSDevice()
+      let blob: Blob
 
       if (activeSetting.enable_watermark) {
+        const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
+        const res = await fetch(proxyUrl, { cache: 'no-store' })
+        if (!res.ok) throw new Error('Fetch ảnh qua proxy thất bại')
+        blob = await res.blob()
         blob = await applyWatermarkToImageBlob(blob)
+      } else {
+        const imageUrl = getDirectImageSource(item.id)
+        const res = await fetch(imageUrl, { cache: 'force-cache' })
+        if (!res.ok) throw new Error('Không thể tải ảnh trực tiếp')
+        blob = await res.blob()
       }
 
-      const fileObj = new File([blob], exactFileName, { type: 'image/jpeg' })
+      const fileObj = new File([blob], exactFileName, { type: blob.type || 'image/jpeg' })
 
-      if (isIOS && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
+      // iPhone/iPad: dùng Share Sheet vì Safari thường không tôn trọng
+      // thuộc tính download với Blob URL. Người dùng có thể chọn Lưu hình ảnh/Tệp.
+      if (ios && navigator.share && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
         await navigator.share({ files: [fileObj], title: exactFileName })
-        setDownloadingId(null)
         return
       }
 
       const blobUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = blobUrl
-      link.setAttribute('download', exactFileName)
+      link.download = exactFileName
       link.style.display = 'none'
+      link.setAttribute('aria-hidden', 'true')
       document.body.appendChild(link)
       link.click()
-      setTimeout(() => {
+      window.setTimeout(() => {
         if (document.body.contains(link)) document.body.removeChild(link)
         URL.revokeObjectURL(blobUrl)
-      }, 1000)
+      }, 1500)
     } catch (err) {
       console.error('Lỗi khi tải:', err)
     } finally {
@@ -1563,72 +1561,6 @@ export default function GalleryClient() {
   }, [])
 
   useEffect(() => {
-    if (!previewMedia || previewMedia.type !== 'video') {
-      setVideoLoadInfo({ speedBytesPerSecond: 0, bufferedPercent: 0, loadedBytes: 0, totalBytes: 0, loading: false })
-      return
-    }
-
-    let cancelled = false
-    let timer: number | null = null
-    let lastTime = performance.now()
-    let lastEstimatedBytes = 0
-
-    const loadInfo = async () => {
-      try {
-        const infoUrl = `/api/download?action=info&id=${encodeURIComponent(previewMedia.id)}`
-        const res = await fetch(infoUrl, { cache: 'no-store' })
-        if (!res.ok) throw new Error('Không lấy được thông tin video')
-        const data = await res.json()
-        if (cancelled) return
-        const totalBytes = Number(data.size || 0)
-        setVideoLoadInfo(prev => ({ ...prev, totalBytes, loading: true }))
-
-        const sample = () => {
-          if (cancelled) return
-          const video = videoElementRef.current
-          const now = performance.now()
-          if (video && Number.isFinite(video.duration) && video.duration > 0 && totalBytes > 0) {
-            let bufferedEnd = 0
-            for (let i = 0; i < video.buffered.length; i++) {
-              try {
-                bufferedEnd = Math.max(bufferedEnd, video.buffered.end(i))
-              } catch {}
-            }
-
-            const estimatedBytes = Math.min(totalBytes, Math.max(0, (bufferedEnd / video.duration) * totalBytes))
-            const dt = (now - lastTime) / 1000
-            const db = Math.max(0, estimatedBytes - lastEstimatedBytes)
-            if (dt > 0.15) {
-              const currentSpeed = db / dt
-              setVideoLoadInfo(prev => ({
-                ...prev,
-                speedBytesPerSecond: currentSpeed > 0 ? currentSpeed : prev.speedBytesPerSecond,
-                bufferedPercent: Math.min(100, (estimatedBytes / totalBytes) * 100),
-                loadedBytes: estimatedBytes,
-              }))
-              lastTime = now
-              lastEstimatedBytes = estimatedBytes
-            }
-          }
-          timer = window.setTimeout(sample, 350)
-        }
-
-        sample()
-      } catch (error) {
-        console.error('Video info error:', error)
-      }
-    }
-
-    setVideoLoadInfo({ speedBytesPerSecond: 0, bufferedPercent: 0, loadedBytes: 0, totalBytes: 0, loading: true })
-    loadInfo()
-
-    return () => {
-      cancelled = true
-      if (timer !== null) window.clearTimeout(timer)
-    }
-  }, [previewMedia?.id, previewMedia?.type])
-
-  useEffect(() => {
     if (previewMedia) {
       const fileName = customNames[previewMedia.id] || previewMedia.name
       document.title = `${fileName} - Dinh Thong Gallery`
@@ -2308,29 +2240,12 @@ export default function GalleryClient() {
                                   </p>
                                 </div>
 
-                                <div className="flex items-center gap-1.5 flex-shrink-0">
-                                  {!isSharedGuest && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => handleShareFolder(folder.id, e)}
-                                      className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20 transition cursor-pointer"
-                                      title="Chia sẻ thư mục này"
-                                    >
-                                      {shareCopiedId === folder.id ? (
-                                        <Check className="w-3.5 h-3.5" />
-                                      ) : (
-                                        <Share2 className="w-3.5 h-3.5" />
-                                      )}
-                                    </button>
-                                  )}
-
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
-                                    disabled={Boolean(zippingFolderId)}
-                                    className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
-                                    title="Tải nén toàn bộ thư mục này"
-                                  >
+                                <button
+                                  onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
+                                  disabled={Boolean(zippingFolderId)}
+                                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
+                                  title="Tải nén toàn bộ thư mục này"
+                                >
                                   {isThisFolderZipping ? (
                                     <>
                                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -2342,8 +2257,7 @@ export default function GalleryClient() {
                                       <span>Tải</span>
                                     </>
                                   )}
-                                  </button>
-                                </div>
+                                </button>
                               </div>
                             </div>
                           )
@@ -2587,48 +2501,15 @@ export default function GalleryClient() {
             {previewMedia.type === 'video' ? (
               <div className="relative w-full max-w-5xl aspect-video flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-2xl">
                 <video
-                  ref={videoElementRef}
-                  src={`/api/download?action=download&id=${encodeURIComponent(previewMedia.id)}&name=${encodeURIComponent(previewMedia.name)}&inline=1`}
-                  className="w-full h-full object-contain bg-black"
+                  key={previewMedia.id}
+                  src={`/api/download?id=${encodeURIComponent(previewMedia.id)}&action=download&name=${encodeURIComponent(previewMedia.name)}`}
+                  className="w-full h-full rounded-2xl object-contain bg-black"
                   controls
                   playsInline
-                  preload="metadata"
-                  onLoadStart={() => setVideoLoadInfo(prev => ({ ...prev, loading: true }))}
-                  onCanPlay={() => setVideoLoadInfo(prev => ({ ...prev, loading: false }))}
-                  onWaiting={() => setVideoLoadInfo(prev => ({ ...prev, loading: true }))}
-                  onPlaying={() => setVideoLoadInfo(prev => ({ ...prev, loading: false }))}
-                  onError={(e) => console.error('Video playback error:', e)}
+                  preload="auto"
+                  poster={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
+                  controlsList="nodownload"
                 />
-
-                <div className="absolute left-3 bottom-3 z-20 pointer-events-none">
-                  <div className="px-3 py-2 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 text-[10px] sm:text-[11px] text-white/90 shadow-lg">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-1.5 h-1.5 rounded-full ${videoLoadInfo.loading ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
-                      <span>
-                        {videoLoadInfo.loading ? 'Đang tải' : 'Đang phát'}
-                      </span>
-                      {videoLoadInfo.speedBytesPerSecond > 0 && (
-                        <span className="font-mono text-emerald-300">
-                          {formatBytes(videoLoadInfo.speedBytesPerSecond)}/s
-                        </span>
-                      )}
-                    </div>
-                    {videoLoadInfo.totalBytes > 0 && (
-                      <div className="mt-1.5 w-44 sm:w-56">
-                        <div className="h-1 rounded-full bg-white/15 overflow-hidden">
-                          <div
-                            className="h-full bg-emerald-400 transition-all duration-300"
-                            style={{ width: `${Math.max(0, Math.min(100, videoLoadInfo.bufferedPercent))}%` }}
-                          />
-                        </div>
-                        <div className="flex items-center justify-between mt-1 text-[9px] text-white/50">
-                          <span>{formatBytes(videoLoadInfo.loadedBytes)}</span>
-                          <span>{formatBytes(videoLoadInfo.totalBytes)}</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
               </div>
             ) : (
               <div 
