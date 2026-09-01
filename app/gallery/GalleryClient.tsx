@@ -163,12 +163,17 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// HÀM TẢI VIDEO NGUYÊN BẢN CHUẨN XÁC 100% QUA NATIVE BROWSER STREAM
-const triggerNativeDirectVideoDownload = (fileId: string, fileName: string) => {
+// HÀM TẢI TRỰC TIẾP KHÔNG MỞ TAB MỚI VÀ TỰ ĐỘNG BỎ QUA CẢNH BÁO VIRUS
+const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
+  const iframe = document.createElement('iframe')
+  iframe.style.display = 'none'
+  iframe.name = `dl_frame_${fileId}_${Date.now()}`
+  document.body.appendChild(iframe)
+
   const form = document.createElement('form')
   form.method = 'POST'
   form.action = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`
-  form.target = '_blank'
+  form.target = iframe.name
   form.style.display = 'none'
 
   const inputId = document.createElement('input')
@@ -176,12 +181,6 @@ const triggerNativeDirectVideoDownload = (fileId: string, fileName: string) => {
   inputId.name = 'id'
   inputId.value = fileId
   form.appendChild(inputId)
-
-  const inputExport = document.createElement('input')
-  inputExport.type = 'hidden'
-  inputExport.name = 'export'
-  inputExport.value = 'download'
-  form.appendChild(inputExport)
 
   const inputConfirm = document.createElement('input')
   inputConfirm.type = 'hidden'
@@ -193,10 +192,9 @@ const triggerNativeDirectVideoDownload = (fileId: string, fileName: string) => {
   form.submit()
 
   setTimeout(() => {
-    if (document.body.contains(form)) {
-      document.body.removeChild(form)
-    }
-  }, 1000)
+    if (document.body.contains(form)) document.body.removeChild(form)
+    if (document.body.contains(iframe)) document.body.removeChild(iframe)
+  }, 4000)
 }
 
 export default function GalleryClient() {
@@ -594,7 +592,7 @@ export default function GalleryClient() {
     URL.revokeObjectURL(url)
   }
 
-  // TẢI LẺ 1 FILE: TỰ ĐỘNG BẮT LUỒNG TRỰC TIẾP DÀNH CHO VIDEO LỚN VÀ GIẢI PHÓNG NÚT BẤM
+  // TẢI 1 FILE: VIDEO TẢI NGUYÊN BẢN 100% QUA NATIVE IFRAME KHÔNG NHẢY TRANG
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -608,16 +606,16 @@ export default function GalleryClient() {
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
 
-      // NẾU LÀ VIDEO: GỌI NATIVE POST TRỰC TIẾP ĐỂ LẤY FILE NGUYÊN BẢN HÀNG TRĂM MB
+      // NẾU LÀ VIDEO: GỌI TRỰC TIẾP FORM ẨN QUA IFRAME NGẦM (CHUẨN 100% GỐC, KHÔNG ĐỔI TRANG)
       if (item.type === 'video') {
-        triggerNativeDirectVideoDownload(item.id, exactFileName)
+        triggerDirectBrowserDownload(item.id, exactFileName)
         setTimeout(() => {
           setDownloadingId(null)
         }, 1200)
         return
       }
 
-      // NẾU LÀ HÌNH ẢNH: TẢI QUA PROXY ĐỂ ÁP DỤNG WATERMARK (NẾU CÓ)
+      // NẾU LÀ HÌNH ẢNH: TẢI QUA PROXY ĐỂ ÁP DỤNG WATERMARK
       const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
       const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
       const res = await fetch(proxyUrl)
@@ -650,7 +648,7 @@ export default function GalleryClient() {
       }, 1000)
     } catch (err) {
       console.error('Lỗi khi tải:', err)
-      triggerNativeDirectVideoDownload(item.id, item.name)
+      triggerDirectBrowserDownload(item.id, item.name)
     } finally {
       setTimeout(() => {
         setDownloadingId(null)
@@ -658,7 +656,7 @@ export default function GalleryClient() {
     }
   }
 
-  // TẢI ZIP RIÊNG BIỆT CHO MỘT THƯ MỤC
+  // TẢI ZIP RIÊNG BIỆT CHO TỪNG THƯ MỤC
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -690,12 +688,12 @@ export default function GalleryClient() {
         return
       }
 
-      // NẾU THƯ MỤC CHỈ CHỨA DUY NHẤT 1 HOẶC TOÀN VIDEO LỚN: TỰ ĐỘNG TẢI TRỰC TIẾP TỪNG TỆP TRÁNH GIỚI HẠN MEMORY CỦA ZIP
+      // NẾU THƯ MỤC CHỈ CHỨA VIDEO: TỰ ĐỘNG TẢI TRỰC TIẾP TỪNG TỆP BẰNG NATIVE DOWNLOAD TRÁNH FILE ZIP BỊ RỖNG
       const videoFiles = targetFiles.filter(f => f.type === 'video')
       if (videoFiles.length > 0 && targetFiles.length === videoFiles.length) {
         videoFiles.forEach((v, i) => {
           setTimeout(() => {
-            triggerNativeDirectVideoDownload(v.id, v.name)
+            triggerDirectBrowserDownload(v.id, v.name)
           }, i * 1500)
         })
         setZippingFolderId(null)

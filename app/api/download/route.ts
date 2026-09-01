@@ -32,7 +32,10 @@ export async function GET(req: NextRequest) {
       }
 
       const htmlText = await initialRes.text()
-      const confirmMatch = htmlText.match(/confirm=([0-9A-Za-z_-]+)/) || htmlText.match(/name="confirm"\s+value="([0-9A-Za-z_-]+)"/)
+      const confirmMatch = 
+        htmlText.match(/confirm=([0-9A-Za-z_-]+)/) || 
+        htmlText.match(/name="confirm"\s+value="([0-9A-Za-z_-]+)"/) ||
+        htmlText.match(/value="([0-9A-Za-z_-]+)"\s+name="confirm"/)
 
       if (confirmMatch && confirmMatch[1]) {
         downloadUrl = `https://drive.google.com/uc?export=download&confirm=${confirmMatch[1]}&id=${fileId}`
@@ -43,27 +46,30 @@ export async function GET(req: NextRequest) {
 
     const finalRes = await fetch(downloadUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         ...(cookieHeader ? { Cookie: cookieHeader } : {})
       }
     })
 
     if (!finalRes.ok) {
-      throw new Error(`Lỗi tải: ${finalRes.statusText}`)
+      throw new Error(`Lỗi máy chủ: ${finalRes.statusText}`)
     }
 
     const isMp4 = nameParam.toLowerCase().endsWith('.mp4')
     const contentType = isMp4 ? 'video/mp4' : (finalRes.headers.get('content-type') || 'application/octet-stream')
-    const arrayBuffer = await finalRes.arrayBuffer()
+    const responseHeaders = new Headers()
+    responseHeaders.set('Content-Type', contentType)
+    responseHeaders.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(nameParam)}`)
+    responseHeaders.set('Cache-Control', 'no-cache')
 
-    return new NextResponse(arrayBuffer, {
+    const contentLength = finalRes.headers.get('content-length')
+    if (contentLength) {
+      responseHeaders.set('Content-Length', contentLength)
+    }
+
+    return new NextResponse(finalRes.body as any, {
       status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(nameParam)}`,
-        'Content-Length': arrayBuffer.byteLength.toString(),
-        'Cache-Control': 'no-cache'
-      }
+      headers: responseHeaders
     })
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Lỗi tải tệp' }, { status: 500 })
