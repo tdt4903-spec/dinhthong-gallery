@@ -163,6 +163,37 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
+// HÀM TẢI TRỰC TIẾP KHÔNG MỞ TAB MỚI VÀ TỰ ĐỘNG BỎ QUA CẢNH BÁO VIRUS
+const triggerDirectBrowserDownload = async (fileId: string, fileName: string) => {
+  try {
+    const res = await fetch(`/api/download?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}&action=get_url`)
+    const data = await res.json()
+    const directUrl = data.url || `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`
+
+    const link = document.createElement('a')
+    link.href = directUrl
+    link.setAttribute('download', fileName)
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    
+    setTimeout(() => {
+      if (document.body.contains(link)) document.body.removeChild(link)
+    }, 1000)
+  } catch {
+    const fallbackLink = document.createElement('a')
+    fallbackLink.href = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`
+    fallbackLink.setAttribute('download', fileName)
+    fallbackLink.style.display = 'none'
+    document.body.appendChild(fallbackLink)
+    fallbackLink.click()
+    
+    setTimeout(() => {
+      if (document.body.contains(fallbackLink)) document.body.removeChild(fallbackLink)
+    }, 1000)
+  }
+}
+
 export default function GalleryClient() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
@@ -558,7 +589,7 @@ export default function GalleryClient() {
     URL.revokeObjectURL(url)
   }
 
-  // TẢI LẺ 1 FILE: TỰ ĐỘNG BÓC TÁCH LINK VÀ TẢI THẲNG TRÊN TRÌNH DUYỆT (KHÔNG QUA PROXY SERVERLESS)
+  // TẢI 1 FILE: VIDEO TẢI NGUYÊN BẢN 100% QUA API PROXY URL VÀ TỰ ĐỘNG GIẢI PHÓNG TRẠNG THÁI
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -572,24 +603,14 @@ export default function GalleryClient() {
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
 
-      // NẾU LÀ VIDEO: BÓC TÁCH LINK CHUẨN XÁC VÀ TẢI BẰNG TRÌNH DUYỆT TRỰC TIẾP
+      // NẾU LÀ VIDEO: GỌI TẢI TRỰC TIẾP KHÔNG MỞ TAB MỚI
       if (item.type === 'video') {
-        const res = await fetch(`/api/download?id=${encodeURIComponent(item.id)}&name=${encodeURIComponent(exactFileName)}&action=get_url`)
-        const data = await res.json()
-        const directUrl = data.url || `https://drive.usercontent.google.com/download?id=${item.id}&export=download&authuser=0&confirm=t`
-
-        const link = document.createElement('a')
-        link.href = directUrl
-        link.setAttribute('download', exactFileName)
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-
+        await triggerDirectBrowserDownload(item.id, exactFileName)
         setDownloadingId(null)
         return
       }
 
-      // NẾU LÀ HÌNH ẢNH: TẢI QUA PROXY ĐỂ ĐÓNG WATERMARK NẾU BẬT
+      // NẾU LÀ HÌNH ẢNH: TẢI QUA PROXY ĐỂ ĐÓNG WATERMARK NẾU CÓ
       const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
       const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
       const res = await fetch(proxyUrl)
@@ -622,18 +643,13 @@ export default function GalleryClient() {
       }, 1000)
     } catch (err) {
       console.error('Lỗi khi tải:', err)
-      const fallbackLink = document.createElement('a')
-      fallbackLink.href = `https://drive.usercontent.google.com/download?id=${item.id}&export=download&authuser=0&confirm=t`
-      fallbackLink.setAttribute('download', item.name)
-      document.body.appendChild(fallbackLink)
-      fallbackLink.click()
-      document.body.removeChild(fallbackLink)
+      await triggerDirectBrowserDownload(item.id, item.name)
     } finally {
       setDownloadingId(null)
     }
   }
 
-  // TẢI TOÀN BỘ ALBUM HOẶC THƯ MỤC
+  // TẢI TOÀN BỘ THƯ MỤC
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -665,34 +681,20 @@ export default function GalleryClient() {
         return
       }
 
-      // Phân tách file video và ảnh
       const videoFiles = targetFiles.filter(f => f.type === 'video')
       const imageFiles = targetFiles.filter(f => f.type === 'image')
 
-      // 1. Tải trực tiếp các video bằng luồng Native Download (không qua ZIP để tránh giới hạn RAM)
+      // 1. Tải video bằng Native Download trực tiếp
       if (videoFiles.length > 0) {
         for (let i = 0; i < videoFiles.length; i++) {
           const v = videoFiles[i]
           const ext = 'mp4'
           const exactFileName = v.name.includes('.') ? v.name : `${v.name}.${ext}`
-          try {
-            const res = await fetch(`/api/download?id=${encodeURIComponent(v.id)}&name=${encodeURIComponent(exactFileName)}&action=get_url`)
-            const data = await res.json()
-            const directUrl = data.url || `https://drive.usercontent.google.com/download?id=${v.id}&export=download&authuser=0&confirm=t`
-            
-            const link = document.createElement('a')
-            link.href = directUrl
-            link.setAttribute('download', exactFileName)
-            document.body.appendChild(link)
-            link.click()
-            document.body.removeChild(link)
-          } catch (e) {
-            console.error('Lỗi tải video:', e)
-          }
+          await triggerDirectBrowserDownload(v.id, exactFileName)
         }
       }
 
-      // 2. Nén các file ảnh còn lại (nếu có)
+      // 2. Nén các file ảnh còn lại
       if (imageFiles.length > 0) {
         const zip = new JSZip()
         const total = imageFiles.length
@@ -766,21 +768,11 @@ export default function GalleryClient() {
         const videoFiles = selectedFiles.filter(f => f.type === 'video')
         const imageFiles = selectedFiles.filter(f => f.type === 'image')
 
-        // Tải các video trực tiếp
         for (const v of videoFiles) {
           const exactFileName = v.name.includes('.') ? v.name : `${v.name}.mp4`
-          const res = await fetch(`/api/download?id=${encodeURIComponent(v.id)}&name=${encodeURIComponent(exactFileName)}&action=get_url`)
-          const data = await res.json()
-          const directUrl = data.url || `https://drive.usercontent.google.com/download?id=${v.id}&export=download&authuser=0&confirm=t`
-          const link = document.createElement('a')
-          link.href = directUrl
-          link.setAttribute('download', exactFileName)
-          document.body.appendChild(link)
-          link.click()
-          document.body.removeChild(link)
+          await triggerDirectBrowserDownload(v.id, exactFileName)
         }
 
-        // Nén các ảnh
         if (imageFiles.length > 0) {
           const zip = new JSZip()
           const total = imageFiles.length

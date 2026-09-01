@@ -21,7 +21,6 @@ export async function GET(req: NextRequest) {
     let cookies = ''
 
     if (fileId) {
-      // 1. Quét trang xác nhận của Google Drive để lấy Confirm Token và UUID
       const checkUrl = `https://drive.google.com/uc?export=download&id=${fileId}`
       const initialRes = await fetch(checkUrl, {
         headers: {
@@ -58,12 +57,10 @@ export async function GET(req: NextRequest) {
       directDownloadUrl = urlParam!
     }
 
-    // Trả về link trực tiếp để trình duyệt tải trực tiếp video dung lượng lớn
     if (actionParam === 'get_url') {
       return NextResponse.json({ url: directDownloadUrl }, { status: 200 })
     }
 
-    // Stream nhị phân dành cho tệp hình ảnh
     const finalRes = await fetch(directDownloadUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
