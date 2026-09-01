@@ -163,14 +163,14 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// TẢI VIDEO QUA SERVER PROXY CỦA WEBSITE
-// Browser KHÔNG BAO GIỜ nhận URL download của Google Drive, vì vậy không bị
-// chuyển sang trang "Google Drive cannot scan this file for viruses".
+// TẢI VIDEO ĐƠN TRỰC TIẾP TỪ GOOGLE DRIVE
+// Không đi qua Vercel để tối đa băng thông.
+// Lưu ý: một số file lớn có thể vẫn bị Google Drive yêu cầu xác nhận/quét virus.
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const downloadUrl = `/api/download?action=download&id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+  const directUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`
 
   const link = document.createElement('a')
-  link.href = downloadUrl
+  link.href = directUrl
   link.download = fileName
   link.style.display = 'none'
   link.setAttribute('aria-hidden', 'true')
@@ -178,8 +178,10 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
   link.click()
 
   window.setTimeout(() => {
-    if (document.body.contains(link)) document.body.removeChild(link)
-  }, 1000)
+    if (document.body.contains(link)) {
+      document.body.removeChild(link)
+    }
+  }, 1500)
 }
 
 export default function GalleryClient() {
@@ -636,62 +638,94 @@ export default function GalleryClient() {
     }
   }
 
-  // TẢI TOÀN BỘ ALBUM / THƯ MỤC CON -> SERVER TẠO 1 FILE ZIP STREAM
+  // TẢI TOÀN BỘ THƯ MỤC
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
       e.stopPropagation()
     }
-
     const currentFolder = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1] : null
-    const target = targetInfo || (
-      currentFolder
-        ? { id: currentFolder.id, title: currentFolder.title, driveUrl: currentFolder.driveUrl }
-        : (selectedAlbum ? { id: selectedAlbum.id, title: selectedAlbum.title, driveUrl: selectedAlbum.driveUrl } : null)
-    )
-
+    const target = targetInfo || (currentFolder ? { id: currentFolder.id, title: currentFolder.title, driveUrl: currentFolder.driveUrl } : (selectedAlbum ? { id: selectedAlbum.id, title: selectedAlbum.title, driveUrl: selectedAlbum.driveUrl } : null))
     if (!target || zippingFolderId) return
 
-    const targetFolderId = target.id || extractDriveId(target.driveUrl)
-    if (!targetFolderId) {
-      alert('Không xác định được ID thư mục Google Drive để tạo file ZIP.')
-      return
-    }
-
-    setZippingFolderId(targetFolderId)
-    setZipProgress('Đang chuẩn bị ZIP...')
+    const targetId = target.id || target.driveUrl || 'global'
+    setZippingFolderId(targetId)
+    setZipProgress('Vui lòng đợi...')
 
     try {
-      // Server tự quét toàn bộ cây thư mục và stream ZIP trực tiếp.
-      // Browser không giữ video trong Blob/JSZip nên phù hợp hơn với video lớn.
-      const params = new URLSearchParams({
-        action: 'zip',
-        folderId: targetFolderId,
-        name: target.title,
-      })
+      let targetFiles: MediaItem[] = []
+      
+      if (targetInfo && targetInfo.driveUrl !== (currentFolder?.driveUrl || selectedAlbum?.driveUrl)) {
+        const res = await fetch(`/api/drive?url=${encodeURIComponent(targetInfo.driveUrl)}`)
+        const data = await res.json()
+        targetFiles = (data.files || []).filter((f: any) => f.type !== 'folder' && !hiddenItemIds.has(f.id))
+      } else {
+        targetFiles = visibleItems.filter(f => f.type !== 'folder')
+      }
 
-      const downloadUrl = `/api/download?${params.toString()}`
-      const link = document.createElement('a')
-      link.href = downloadUrl
-      link.download = `${target.title}.zip`
-      link.style.display = 'none'
-      link.setAttribute('aria-hidden', 'true')
-      document.body.appendChild(link)
-      link.click()
-
-      window.setTimeout(() => {
-        if (document.body.contains(link)) document.body.removeChild(link)
-      }, 2000)
-
-      setZipProgress('Đang tải ZIP...')
-    } catch (err: any) {
-      console.error('Lỗi tải ZIP:', err)
-      alert('Có lỗi xảy ra khi tải album: ' + (err?.message || 'Không xác định'))
-    } finally {
-      window.setTimeout(() => {
+      if (targetFiles.length === 0) {
+        alert(`Thư mục "${target.title}" hiện không có tệp nào để tải!`)
         setZippingFolderId(null)
         setZipProgress('')
-      }, 2500)
+        return
+      }
+
+      const videoFiles = targetFiles.filter(f => f.type === 'video')
+      const imageFiles = targetFiles.filter(f => f.type === 'image')
+
+      // 1. Tải video bằng Native Download trực tiếp
+      if (videoFiles.length > 0) {
+        for (let i = 0; i < videoFiles.length; i++) {
+          const v = videoFiles[i]
+          const ext = 'mp4'
+          const exactFileName = v.name.includes('.') ? v.name : `${v.name}.${ext}`
+          triggerDirectBrowserDownload(v.id, exactFileName)
+          // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
+          // nhiều download liên tiếp khi tải cả album.
+          await new Promise(resolve => setTimeout(resolve, 350))
+        }
+      }
+
+      // 2. Nén các file ảnh còn lại
+      if (imageFiles.length > 0) {
+        const zip = new JSZip()
+        const total = imageFiles.length
+        let completedCount = 0
+
+        const CONCURRENCY_LIMIT = 4
+        const fetchImage = async (fileItem: MediaItem) => {
+          const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
+          try {
+            const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
+            if (res.ok) {
+              let blob = await res.blob()
+              if (activeSetting.enable_watermark) {
+                blob = await applyWatermarkToImageBlob(blob)
+              }
+              zip.file(exactFileName, blob, { compression: 'STORE' })
+            }
+          } catch (err) {
+            console.error(`Lỗi tải: ${exactFileName}`, err)
+          } finally {
+            completedCount++
+            setZipProgress(`${completedCount}/${total}`)
+          }
+        }
+
+        for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+          const chunk = imageFiles.slice(i, i + CONCURRENCY_LIMIT)
+          await Promise.all(chunk.map(fileItem => fetchImage(fileItem)))
+        }
+
+        setZipProgress('Tạo file ZIP...')
+        const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+        saveAs(zipContent, `${target.title}.zip`)
+      }
+    } catch (err: any) {
+      alert('Có lỗi xảy ra khi tải album: ' + err.message)
+    } finally {
+      setZippingFolderId(null)
+      setZipProgress('')
     }
   }
 
@@ -2185,7 +2219,7 @@ export default function GalleryClient() {
                               </div>
 
                               <div className="p-3.5 flex items-center justify-between gap-2">
-                                <div onClick={() => handleOpenSubFolder(folder)} className="cursor-pointer truncate flex-1 min-w-0">
+                                <div onClick={() => handleOpenSubFolder(folder)} className="cursor-pointer truncate flex-1">
                                   <h4 className="font-semibold text-xs sm:text-sm hover:text-emerald-600 transition-colors truncate" title={displayName}>
                                     {displayName}
                                   </h4>
@@ -2217,17 +2251,17 @@ export default function GalleryClient() {
                                     className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
                                     title="Tải nén toàn bộ thư mục này"
                                   >
-                                    {isThisFolderZipping ? (
-                                      <>
-                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                        <span>{zipProgress || 'Vui lòng đợi...'}</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Download className="w-3.5 h-3.5" />
-                                        <span>Tải</span>
-                                      </>
-                                    )}
+                                  {isThisFolderZipping ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      <span>{zipProgress || 'Vui lòng đợi...'}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Download className="w-3.5 h-3.5" />
+                                      <span>Tải</span>
+                                    </>
+                                  )}
                                   </button>
                                 </div>
                               </div>
