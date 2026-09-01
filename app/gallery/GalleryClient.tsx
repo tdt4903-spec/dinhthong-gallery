@@ -163,35 +163,25 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// HÀM TẢI TRỰC TIẾP KHÔNG MỞ TAB MỚI VÀ TỰ ĐỘNG BỎ QUA CẢNH BÁO VIRUS
-const triggerDirectBrowserDownload = async (fileId: string, fileName: string) => {
-  try {
-    const res = await fetch(`/api/download?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}&action=get_url`)
-    const data = await res.json()
-    const directUrl = data.url || `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`
+// TẢI VIDEO QUA SERVER PROXY CỦA WEBSITE
+// Browser KHÔNG BAO GIỜ nhận URL download của Google Drive, vì vậy không bị
+// chuyển sang trang "Google Drive cannot scan this file for viruses".
+const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
+  const downloadUrl = `/api/drive?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
 
-    const link = document.createElement('a')
-    link.href = directUrl
-    link.setAttribute('download', fileName)
-    link.style.display = 'none'
-    document.body.appendChild(link)
-    link.click()
-    
-    setTimeout(() => {
-      if (document.body.contains(link)) document.body.removeChild(link)
-    }, 1000)
-  } catch {
-    const fallbackLink = document.createElement('a')
-    fallbackLink.href = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`
-    fallbackLink.setAttribute('download', fileName)
-    fallbackLink.style.display = 'none'
-    document.body.appendChild(fallbackLink)
-    fallbackLink.click()
-    
-    setTimeout(() => {
-      if (document.body.contains(fallbackLink)) document.body.removeChild(fallbackLink)
-    }, 1000)
-  }
+  const link = document.createElement('a')
+  link.href = downloadUrl
+  link.download = fileName
+  link.style.display = 'none'
+  link.setAttribute('aria-hidden', 'true')
+  document.body.appendChild(link)
+  link.click()
+
+  window.setTimeout(() => {
+    if (document.body.contains(link)) {
+      document.body.removeChild(link)
+    }
+  }, 1000)
 }
 
 export default function GalleryClient() {
@@ -605,7 +595,7 @@ export default function GalleryClient() {
 
       // NẾU LÀ VIDEO: GỌI TẢI TRỰC TIẾP KHÔNG MỞ TAB MỚI
       if (item.type === 'video') {
-        await triggerDirectBrowserDownload(item.id, exactFileName)
+        triggerDirectBrowserDownload(item.id, exactFileName)
         setDownloadingId(null)
         return
       }
@@ -643,7 +633,6 @@ export default function GalleryClient() {
       }, 1000)
     } catch (err) {
       console.error('Lỗi khi tải:', err)
-      await triggerDirectBrowserDownload(item.id, item.name)
     } finally {
       setDownloadingId(null)
     }
@@ -690,7 +679,10 @@ export default function GalleryClient() {
           const v = videoFiles[i]
           const ext = 'mp4'
           const exactFileName = v.name.includes('.') ? v.name : `${v.name}.${ext}`
-          await triggerDirectBrowserDownload(v.id, exactFileName)
+          triggerDirectBrowserDownload(v.id, exactFileName)
+          // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
+          // nhiều download liên tiếp khi tải cả album.
+          await new Promise(resolve => setTimeout(resolve, 350))
         }
       }
 
@@ -770,7 +762,10 @@ export default function GalleryClient() {
 
         for (const v of videoFiles) {
           const exactFileName = v.name.includes('.') ? v.name : `${v.name}.mp4`
-          await triggerDirectBrowserDownload(v.id, exactFileName)
+          triggerDirectBrowserDownload(v.id, exactFileName)
+          // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
+          // nhiều download liên tiếp khi tải cả album.
+          await new Promise(resolve => setTimeout(resolve, 350))
         }
 
         if (imageFiles.length > 0) {
