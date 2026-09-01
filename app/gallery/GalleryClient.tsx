@@ -257,7 +257,7 @@ export default function GalleryClient() {
   const [isSavingKey, setIsSavingKey] = useState(false)
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
-  const [isZipping, setIsZipping] = useState(false)
+  const [zippingFolderId, setZippingFolderId] = useState<string | null>(null)
   const [zipProgress, setZipProgress] = useState('')
 
   const [currentPage, setCurrentPage] = useState(1)
@@ -558,6 +558,7 @@ export default function GalleryClient() {
     URL.revokeObjectURL(url)
   }
 
+  // TẢI 1 FILE: VIDEO VÀ ẢNH ĐỀU ĐƯỢC BẢO TOÀN DUNG LƯỢNG GỐC 100%
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -573,23 +574,23 @@ export default function GalleryClient() {
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
       const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
 
+      // Xử lý riêng cho Video: Kích hoạt link tải chuẩn của Google Drive để đảm bảo video nặng vài GB vẫn tải đúng
       if (item.type === 'video') {
-        const directVideoUrl = `https://drive.usercontent.google.com/download?id=${item.id}&export=download&authuser=0&confirm=t`
-        
-        const iframe = document.createElement('iframe')
-        iframe.style.display = 'none'
-        iframe.src = directVideoUrl
-        document.body.appendChild(iframe)
-
+        const downloadDirect = `https://drive.usercontent.google.com/download?id=${item.id}&export=download&authuser=0&confirm=t`
+        const a = document.createElement('a')
+        a.href = downloadDirect
+        a.setAttribute('download', exactFileName)
+        a.style.display = 'none'
+        document.body.appendChild(a)
+        a.click()
         setTimeout(() => {
-          if (document.body.contains(iframe)) {
-            document.body.removeChild(iframe)
-          }
+          if (document.body.contains(a)) document.body.removeChild(a)
           setDownloadingId(null)
-        }, 4000)
+        }, 1500)
         return
       }
 
+      // Xử lý tải hình ảnh (đóng watermark nếu bật)
       const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
       const res = await fetch(proxyUrl)
       if (!res.ok) throw new Error('Fetch failed')
@@ -625,35 +626,46 @@ export default function GalleryClient() {
       const fallbackLink = document.createElement('a')
       fallbackLink.href = fallbackUrl
       fallbackLink.setAttribute('download', item.name)
+      fallbackLink.style.display = 'none'
+      document.body.appendChild(fallbackLink)
       fallbackLink.click()
+      setTimeout(() => {
+        if (document.body.contains(fallbackLink)) document.body.removeChild(fallbackLink)
+      }, 1000)
     } finally {
       setDownloadingId(null)
     }
   }
 
-  const handleDownloadAlbumZip = async (targetInfo?: { title: string; driveUrl: string }, e?: React.MouseEvent) => {
+  // TẢI ZIP RIÊNG BIỆT CHO TỪNG THƯ MỤC
+  const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
       e.stopPropagation()
     }
     const currentFolder = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1] : null
-    const target = targetInfo || currentFolder || selectedAlbum
-    if (!target || isZipping) return
+    const target = targetInfo || (currentFolder ? { id: currentFolder.id, title: currentFolder.title, driveUrl: currentFolder.driveUrl } : (selectedAlbum ? { id: selectedAlbum.id, title: selectedAlbum.title, driveUrl: selectedAlbum.driveUrl } : null))
+    if (!target || zippingFolderId) return
 
-    setIsZipping(true)
+    const targetId = target.id || target.driveUrl || 'global'
+    setZippingFolderId(targetId)
     setZipProgress('Vui lòng đợi...')
 
     try {
-      let targetFiles = visibleItems.filter(f => f.type !== 'folder')
+      let targetFiles: MediaItem[] = []
+      
       if (targetInfo && targetInfo.driveUrl !== (currentFolder?.driveUrl || selectedAlbum?.driveUrl)) {
         const res = await fetch(`/api/drive?url=${encodeURIComponent(targetInfo.driveUrl)}`)
         const data = await res.json()
         targetFiles = (data.files || []).filter((f: any) => f.type !== 'folder' && !hiddenItemIds.has(f.id))
+      } else {
+        targetFiles = visibleItems.filter(f => f.type !== 'folder')
       }
 
       if (targetFiles.length === 0) {
-        alert('Thư mục này hiện không có tệp ảnh/video nào để tải!')
-        setIsZipping(false)
+        alert(`Thư mục "${target.title}" hiện không có tệp nào để tải!`)
+        setZippingFolderId(null)
+        setZipProgress('')
         return
       }
 
@@ -687,7 +699,7 @@ export default function GalleryClient() {
         await Promise.all(chunk.map(fileItem => fetchRawOriginalFile(fileItem)))
       }
 
-      setZipProgress('Vui lòng đợi...')
+      setZipProgress('Tạo file ZIP...')
       const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE', streamFiles: true }, (metadata) => {
         setZipProgress(`${Math.floor(metadata.percent)}%`)
       })
@@ -695,26 +707,26 @@ export default function GalleryClient() {
     } catch (err: any) {
       alert('Có lỗi xảy ra khi tải album: ' + err.message)
     } finally {
-      setIsZipping(false)
+      setZippingFolderId(null)
       setZipProgress('')
     }
   }
 
   const handleBatchDownload = async () => {
-    if (isZipping) return
+    if (zippingFolderId) return
     if (!selectedAlbum) {
       const selectedAlbumsList = (albums || []).filter(a => a && selectedAlbumIds.has(a.id))
       if (selectedAlbumsList.length === 0) return
 
-      setIsZipping(true)
+      setZippingFolderId('batch_albums')
       setZipProgress('Chuẩn bị tải...')
       try {
         for (const alb of selectedAlbumsList) {
-          await handleDownloadAlbumZip({ title: alb.title, driveUrl: alb.driveUrl })
+          await handleDownloadAlbumZip({ id: alb.id, title: alb.title, driveUrl: alb.driveUrl })
         }
         setSelectedAlbumIds(new Set())
       } finally {
-        setIsZipping(false)
+        setZippingFolderId(null)
         setZipProgress('')
       }
     } else {
@@ -724,7 +736,7 @@ export default function GalleryClient() {
         return
       }
 
-      setIsZipping(true)
+      setZippingFolderId('batch_items')
       setZipProgress('Đang nén...')
       try {
         const zip = new JSZip()
@@ -764,7 +776,7 @@ export default function GalleryClient() {
       } catch (e: any) {
         alert('Lỗi tải tệp: ' + e.message)
       } finally {
-        setIsZipping(false)
+        setZippingFolderId(null)
         setZipProgress('')
       }
     }
@@ -1468,7 +1480,6 @@ export default function GalleryClient() {
             }
           }
         } else {
-          // Phiên Admin
           const { data: sessionData } = await supabase.auth.getSession()
           if (!sessionData.session) {
             setLoading(false)
@@ -1640,11 +1651,20 @@ export default function GalleryClient() {
 
                 <button
                   onClick={(e) => handleDownloadAlbumZip(undefined, e)}
-                  disabled={isZipping}
+                  disabled={Boolean(zippingFolderId)}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer disabled:opacity-60 flex-shrink-0"
                 >
-                  {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                  <span>{isZipping ? zipProgress : 'Tải album'}</span>
+                  {zippingFolderId === (currentActiveFolderId || 'global') ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>{zipProgress || 'Vui lòng đợi...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Tải album</span>
+                    </>
+                  )}
                 </button>
 
                 <button
@@ -1837,6 +1857,7 @@ export default function GalleryClient() {
                 const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
                 const hasImageCover = Boolean(coverImage)
                 const isChecked = selectedAlbumIds.has(album.id)
+                const isThisZipping = zippingFolderId === album.id
 
                 return (
                   <div 
@@ -1875,7 +1896,7 @@ export default function GalleryClient() {
                         className="absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
                         title={isChecked ? 'Bỏ chọn' : 'Chọn album'}
                       >
-                        {isChecked ? <CheckSquare className="w-5 h-5 text-emerald-400" /> : <Square className="w-5 h-5 text-white/80" />}
+                        {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
                       </button>
 
                       {!isSharedGuest && (
@@ -1898,12 +1919,21 @@ export default function GalleryClient() {
                       </div>
 
                       <button 
-                        onClick={(e) => handleDownloadAlbumZip({ title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)}
-                        disabled={isZipping}
+                        onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)}
+                        disabled={Boolean(zippingFolderId)}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
                       >
-                        {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                        <span>Tải</span>
+                        {isThisZipping ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>{zipProgress || 'Vui lòng đợi...'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Tải</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -2102,6 +2132,7 @@ export default function GalleryClient() {
                           const displayName = customNames[folder.id] || folder.name
                           const isChecked = selectedItemIds.has(folder.id)
                           const currentCover = albumCovers[folder.id] || folder.coverUrl
+                          const isThisFolderZipping = zippingFolderId === folder.id
 
                           return (
                             <div
@@ -2167,13 +2198,22 @@ export default function GalleryClient() {
                                 </div>
 
                                 <button
-                                  onClick={(e) => handleDownloadAlbumZip({ title: displayName, driveUrl: folderDriveUrl }, e)}
-                                  disabled={isZipping}
+                                  onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
+                                  disabled={Boolean(zippingFolderId)}
                                   className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
                                   title="Tải nén toàn bộ thư mục này"
                                 >
-                                  {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                                  <span>Tải</span>
+                                  {isThisFolderZipping ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      <span>{zipProgress || 'Vui lòng đợi...'}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Download className="w-3.5 h-3.5" />
+                                      <span>Tải</span>
+                                    </>
+                                  )}
                                 </button>
                               </div>
                             </div>
@@ -2352,6 +2392,7 @@ export default function GalleryClient() {
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
+          {/* Header Lightbox */}
           <div className="flex items-center justify-between px-3 py-2 text-white/90 z-30">
             <div className="truncate max-w-[50vw]">
               <h4 className="text-xs sm:text-sm font-medium truncate">
@@ -2610,11 +2651,20 @@ export default function GalleryClient() {
 
             <button
               onClick={handleBatchDownload}
-              disabled={isZipping}
+              disabled={Boolean(zippingFolderId)}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow transition cursor-pointer disabled:opacity-50"
             >
-              {isZipping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-              <span>{isZipping ? zipProgress : 'Lưu ZIP'}</span>
+              {zippingFolderId?.startsWith('batch') ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>{zipProgress || 'Lưu ZIP...'}</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Lưu ZIP</span>
+                </>
+              )}
             </button>
 
             {!isSharedGuest && (

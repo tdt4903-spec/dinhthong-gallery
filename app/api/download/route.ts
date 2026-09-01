@@ -15,23 +15,46 @@ export async function GET(req: NextRequest) {
       fileId = matchId[1]
     }
 
-    const directUrl = fileId 
-      ? `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`
-      : urlParam
+    let downloadUrl = urlParam
+    let cookieHeader = ''
 
-    const res = await fetch(directUrl, {
+    if (fileId) {
+      const initialUrl = `https://drive.google.com/uc?export=download&id=${fileId}`
+      const initialRes = await fetch(initialUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      })
+
+      const setCookie = initialRes.headers.get('set-cookie')
+      if (setCookie) {
+        cookieHeader = setCookie.split(';')[0]
+      }
+
+      const textResponse = await initialRes.text()
+      const confirmMatch = textResponse.match(/confirm=([0-9A-Za-z_]+)/) || textResponse.match(/name="confirm"\s+value="([0-9A-Za-z_]+)"/)
+
+      if (confirmMatch && confirmMatch[1]) {
+        downloadUrl = `https://drive.google.com/uc?export=download&confirm=${confirmMatch[1]}&id=${fileId}`
+      } else {
+        downloadUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`
+      }
+    }
+
+    const finalRes = await fetch(downloadUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ...(cookieHeader ? { Cookie: cookieHeader } : {})
       }
     })
 
-    if (!res.ok) {
-      throw new Error(`Lỗi máy chủ lưu trữ: ${res.statusText}`)
+    if (!finalRes.ok) {
+      throw new Error(`Lỗi máy chủ lưu trữ: ${finalRes.statusText}`)
     }
 
     const isMp4 = nameParam.toLowerCase().endsWith('.mp4')
-    const contentType = isMp4 ? 'video/mp4' : (res.headers.get('content-type') || 'application/octet-stream')
-    const arrayBuffer = await res.arrayBuffer()
+    const contentType = isMp4 ? 'video/mp4' : (finalRes.headers.get('content-type') || 'application/octet-stream')
+    const arrayBuffer = await finalRes.arrayBuffer()
 
     return new NextResponse(arrayBuffer, {
       status: 200,
