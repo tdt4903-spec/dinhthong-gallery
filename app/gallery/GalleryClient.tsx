@@ -167,7 +167,7 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
 // Browser KHÔNG BAO GIỜ nhận URL download của Google Drive, vì vậy không bị
 // chuyển sang trang "Google Drive cannot scan this file for viruses".
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const downloadUrl = `/api/drive?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
+  const downloadUrl = `/api/download?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
 
   const link = document.createElement('a')
   link.href = downloadUrl
