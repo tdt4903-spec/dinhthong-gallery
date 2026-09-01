@@ -450,8 +450,8 @@ export default function GalleryClient() {
 
   const fetchMasterFoldersList = async () => {
     try {
-      const { data } = await supabase.from('master_folders').select('*').order('created_at', { ascending: false })
-      if (data) {
+      const { data, error } = await supabase.from('master_folders').select('*').order('created_at', { ascending: false })
+      if (!error && data) {
         setMasterFoldersList(data)
         return data
       }
@@ -1396,9 +1396,182 @@ export default function GalleryClient() {
     }
   }
 
+  // Effect xác thực và khởi tạo dữ liệu không xung đột F5
   useEffect(() => {
-    if (isKeyGenOpen) fetchLicenses()
-  }, [isKeyGenOpen])
+    const pathParts = window.location.pathname.split('/').filter(Boolean)
+    const isShortRoute = pathParts[0] === 's'
+    const params = new URLSearchParams(window.location.search)
+    const sharedId = isShortRoute ? pathParts[1] : params.get('id')
+
+    const initData = async () => {
+      try {
+        await fetchHiddenItemIds()
+        const knownSet = await fetchKnownFolderIds()
+        await fetchCustomNames()
+        await fetchCustomCovers()
+        const fComments = await fetchComments()
+        const fSettings = await fetchFolderSettings()
+        const fAlbums = await fetchAlbumsFromSupabase()
+
+        if (sharedId) {
+          setIsSharedGuest(true)
+          const matchedAlbum = fAlbums.find(a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.driveUrl) === sharedId)
+
+          if (matchedAlbum) {
+            setSelectedAlbum(matchedAlbum)
+            setFolderHistory([])
+            const currentPass = fSettings[matchedAlbum.id]?.password || matchedAlbum.password
+            if (currentPass) {
+              setIsLocked(true)
+            } else {
+              await fetchAlbumImages(matchedAlbum.driveUrl)
+            }
+          } else {
+            let realFolderId = sharedId
+            let adminSetTitle = customNames[sharedId] || ''
+
+            const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
+            const fallbackAlbum: Album = {
+              id: realFolderId,
+              title: adminSetTitle || 'DinhThong Album',
+              coverUrl: '',
+              driveUrl: folderDriveUrl
+            }
+
+            setSelectedAlbum(fallbackAlbum)
+            const subPass = fSettings[realFolderId]?.password
+            if (subPass) {
+              setIsLocked(true)
+            } else {
+              await fetchAlbumImages(folderDriveUrl)
+            }
+          }
+        } else {
+          // Phiên Admin
+          const { data: sessionData } = await supabase.auth.getSession()
+          if (!sessionData.session) {
+            setLoading(false)
+            router.replace('/')
+            return
+          }
+
+          const loggedInEmail = sessionData.session.user.email
+          const { data: whitelist, error } = await supabase.from('allowed_emails').select('email').eq('email', loggedInEmail).single()
+
+          if (error || !whitelist) {
+            alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
+            await supabase.auth.signOut()
+            setLoading(false)
+            router.replace('/')
+            return
+          }
+
+          setUser(sessionData.session.user)
+          const masterFolders = await fetchMasterFoldersList()
+          checkAllMasterFolders(masterFolders, false, knownSet)
+        }
+
+        const savedRatings = localStorage.getItem('dinhthong_image_ratings')
+        if (savedRatings) {
+          try { setRatings(JSON.parse(savedRatings)) } catch {}
+        }
+      } catch (e) {
+        console.error('Lỗi khởi tạo:', e)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    initData()
+  }, [])
+
+  useEffect(() => {
+    if (previewMedia) {
+      const fileName = customNames[previewMedia.id] || previewMedia.name
+      document.title = `${fileName} - Dinh Thong Gallery`
+      setCurrentCommentInput(comments[previewMedia.id] || '')
+      setZoomScale(1)
+      setPanPosition({ x: 0, y: 0 })
+    } else if (folderHistory.length > 0) {
+      const currentFolder = folderHistory[folderHistory.length - 1]
+      document.title = `${currentFolder.title} - Dinh Thong Gallery`
+    } else if (selectedAlbum) {
+      document.title = `${selectedAlbum.title} - Dinh Thong Gallery`
+    } else {
+      document.title = 'Dinh Thong Gallery'
+    }
+  }, [previewMedia, folderHistory, selectedAlbum, customNames, comments])
+
+  useEffect(() => {
+    (albums || []).forEach(async (album) => {
+      if (album && !album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
+        try {
+          const res = await fetch(`/api/drive?url=${encodeURIComponent(album.driveUrl)}`)
+          const data = await res.json()
+          const firstImage = data.files?.find((f: MediaItem) => f.type === 'image' && !hiddenItemIds.has(f.id))
+          if (firstImage) {
+            setAlbumCovers(prev => ({ ...prev, [album.id]: firstImage.url }))
+          } else {
+            setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
+          }
+        } catch {
+          setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
+        }
+      }
+    })
+  }, [albums, hiddenItemIds])
+
+  useEffect(() => {
+    if (currentIndex === -1 || previewSourceList.length === 0) return
+
+    const indicesToPreload = [
+      (currentIndex + 1) % previewSourceList.length,
+      (currentIndex + 2) % previewSourceList.length,
+      (currentIndex + 3) % previewSourceList.length,
+      (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
+      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
+    ]
+
+    indicesToPreload.forEach(idx => {
+      const item = previewSourceList[idx]
+      if (item && item.type === 'image') {
+        const previewUrl = `https://lh3.googleusercontent.com/d/${item.id}=w1600`
+        if (!preloadedCache.has(previewUrl)) {
+          preloadedCache.add(previewUrl)
+          const img = new window.Image()
+          img.src = previewUrl
+        }
+      }
+    })
+
+    if (thumbnailRef.current) {
+      const activeThumb = thumbnailRef.current.children[currentIndex] as HTMLElement
+      if (activeThumb) activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    }
+  }, [currentIndex, previewSourceList])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!previewMedia) return
+      if (e.key === 'ArrowLeft') handlePrevImage()
+      if (e.key === 'ArrowRight') handleNextImage()
+      if (e.key === 'Escape') handleClosePreview()
+      if (e.key === '+' || e.key === '=') handleZoomIn()
+      if (e.key === '-' || e.key === '_') handleZoomOut()
+      if (e.key === '0') handleResetZoom()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [previewMedia, handlePrevImage, handleNextImage, zoomScale])
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#07130c] flex flex-col items-center justify-center text-white">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
+        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Vui lòng đợi</p>
+      </div>
+    )
+  }
 
   return (
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
@@ -1681,7 +1854,7 @@ export default function GalleryClient() {
                         className="absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
                         title={isChecked ? 'Bỏ chọn' : 'Chọn album'}
                       >
-                        {isChecked ? <CheckSquare className="w-5 h-5 text-emerald-400" /> : <Square className="w-5 h-5 text-white/80" />}
+                        {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
                       </button>
 
                       {!isSharedGuest && (
