@@ -558,6 +558,7 @@ export default function GalleryClient() {
     URL.revokeObjectURL(url)
   }
 
+  // HÀM TẢI LẺ 1 FILE (ẢNH HOẶC VIDEO NẶNG/NHẸ ĐỀU TẢI CHUẨN XÁC)
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -579,6 +580,7 @@ export default function GalleryClient() {
       
       let blob = await res.blob()
 
+      // Đóng dấu Watermark nếu bật và là file ảnh
       if (activeSetting.enable_watermark && item.type === 'image') {
         blob = await applyWatermarkToImageBlob(blob)
       }
@@ -610,6 +612,7 @@ export default function GalleryClient() {
     }
   }
 
+  // HÀM TẢI TOÀN BỘ ALBUM DẠNG ZIP (BAO GỒM CẢ VIDEO VÀ ẢNH)
   const handleDownloadAlbumZip = async (targetInfo?: { title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -640,7 +643,7 @@ export default function GalleryClient() {
       const total = targetFiles.length
       let completedCount = 0
 
-      const CONCURRENCY_LIMIT = 8
+      const CONCURRENCY_LIMIT = 4
       const fetchRawOriginalFile = async (fileItem: MediaItem) => {
         const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
         const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
@@ -679,6 +682,7 @@ export default function GalleryClient() {
     }
   }
 
+  // HÀM TẢI CÁC TỆP ĐÃ TICK CHỌN CHECKBOX (ZIP)
   const handleBatchDownload = async () => {
     if (isZipping) return
     if (!selectedAlbum) {
@@ -710,7 +714,7 @@ export default function GalleryClient() {
         const total = selectedFiles.length
         let completedCount = 0
 
-        const CONCURRENCY_LIMIT = 8
+        const CONCURRENCY_LIMIT = 4
         const fetchFile = async (fileItem: MediaItem) => {
           const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
           const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
@@ -1396,7 +1400,7 @@ export default function GalleryClient() {
     }
   }
 
-  // Effect xác thực và khởi tạo dữ liệu không xung đột F5
+  // Effect xác thực và khởi tạo dữ liệu
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
@@ -1854,7 +1858,7 @@ export default function GalleryClient() {
                         className="absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
                         title={isChecked ? 'Bỏ chọn' : 'Chọn album'}
                       >
-                        {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
+                        {isChecked ? <CheckSquare className="w-5 h-5 text-emerald-400" /> : <Square className="w-5 h-5 text-white/80" />}
                       </button>
 
                       {!isSharedGuest && (
@@ -2331,7 +2335,6 @@ export default function GalleryClient() {
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          {/* Header Lightbox */}
           <div className="flex items-center justify-between px-3 py-2 text-white/90 z-30">
             <div className="truncate max-w-[50vw]">
               <h4 className="text-xs sm:text-sm font-medium truncate">
