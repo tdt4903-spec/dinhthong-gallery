@@ -638,91 +638,178 @@ export default function GalleryClient() {
     }
   }
 
-  // TẢI TOÀN BỘ THƯ MỤC
+  // TẢI TOÀN BỘ ALBUM + TOÀN BỘ THƯ MỤC CON VÀO 1 FILE ZIP
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
       e.stopPropagation()
     }
+
     const currentFolder = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1] : null
-    const target = targetInfo || (currentFolder ? { id: currentFolder.id, title: currentFolder.title, driveUrl: currentFolder.driveUrl } : (selectedAlbum ? { id: selectedAlbum.id, title: selectedAlbum.title, driveUrl: selectedAlbum.driveUrl } : null))
+    const target = targetInfo || (
+      currentFolder
+        ? { id: currentFolder.id, title: currentFolder.title, driveUrl: currentFolder.driveUrl }
+        : (selectedAlbum ? { id: selectedAlbum.id, title: selectedAlbum.title, driveUrl: selectedAlbum.driveUrl } : null)
+    )
+
     if (!target || zippingFolderId) return
 
     const targetId = target.id || target.driveUrl || 'global'
     setZippingFolderId(targetId)
-    setZipProgress('Vui lòng đợi...')
+    setZipProgress('Đang quét thư mục...')
 
     try {
-      let targetFiles: MediaItem[] = []
-      
-      if (targetInfo && targetInfo.driveUrl !== (currentFolder?.driveUrl || selectedAlbum?.driveUrl)) {
-        const res = await fetch(`/api/drive?url=${encodeURIComponent(targetInfo.driveUrl)}`)
-        const data = await res.json()
-        targetFiles = (data.files || []).filter((f: any) => f.type !== 'folder' && !hiddenItemIds.has(f.id))
-      } else {
-        targetFiles = visibleItems.filter(f => f.type !== 'folder')
-      }
+      const zip = new JSZip()
+      const downloadedFileIds = new Set<string>()
+      const usedZipPaths = new Set<string>()
+      let totalFiles = 0
+      let completedFiles = 0
 
-      if (targetFiles.length === 0) {
-        alert(`Thư mục "${target.title}" hiện không có tệp nào để tải!`)
-        setZippingFolderId(null)
-        setZipProgress('')
-        return
-      }
-
-      const videoFiles = targetFiles.filter(f => f.type === 'video')
-      const imageFiles = targetFiles.filter(f => f.type === 'image')
-
-      // 1. Tải video bằng Native Download trực tiếp
-      if (videoFiles.length > 0) {
-        for (let i = 0; i < videoFiles.length; i++) {
-          const v = videoFiles[i]
-          const ext = 'mp4'
-          const exactFileName = v.name.includes('.') ? v.name : `${v.name}.${ext}`
-          triggerDirectBrowserDownload(v.id, exactFileName)
-          // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
-          // nhiều download liên tiếp khi tải cả album.
-          await new Promise(resolve => setTimeout(resolve, 350))
+      const uniqueZipPath = (basePath: string, fileName: string) => {
+        const safeName = fileName || 'file'
+        const original = `${basePath ? `${basePath}/` : ''}${safeName}`
+        if (!usedZipPaths.has(original)) {
+          usedZipPaths.add(original)
+          return original
         }
+
+        const dot = safeName.lastIndexOf('.')
+        const stem = dot > 0 ? safeName.slice(0, dot) : safeName
+        const ext = dot > 0 ? safeName.slice(dot) : ''
+        let counter = 2
+        while (usedZipPaths.has(`${basePath ? `${basePath}/` : ''}${stem} (${counter})${ext}`)) {
+          counter++
+        }
+        const resolved = `${basePath ? `${basePath}/` : ''}${stem} (${counter})${ext}`
+        usedZipPaths.add(resolved)
+        return resolved
       }
 
-      // 2. Nén các file ảnh còn lại
-      if (imageFiles.length > 0) {
-        const zip = new JSZip()
-        const total = imageFiles.length
-        let completedCount = 0
+      const getFolderContents = async (driveUrl: string): Promise<MediaItem[]> => {
+        const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}&_t=${Date.now()}`, {
+          cache: 'no-store'
+        })
+        if (!res.ok) {
+          throw new Error(`Không thể đọc thư mục: HTTP ${res.status}`)
+        }
+        const data = await res.json()
+        if (!Array.isArray(data.files)) {
+          throw new Error(data.error || 'Dữ liệu thư mục không hợp lệ')
+        }
+        return data.files as MediaItem[]
+      }
 
-        const CONCURRENCY_LIMIT = 4
-        const fetchImage = async (fileItem: MediaItem) => {
-          const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
-          try {
-            const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
-            if (res.ok) {
-              let blob = await res.blob()
-              if (activeSetting.enable_watermark) {
-                blob = await applyWatermarkToImageBlob(blob)
-              }
-              zip.file(exactFileName, blob, { compression: 'STORE' })
-            }
-          } catch (err) {
-            console.error(`Lỗi tải: ${exactFileName}`, err)
-          } finally {
-            completedCount++
-            setZipProgress(`${completedCount}/${total}`)
+      // Quét đệ quy toàn bộ cây thư mục trước để biết tổng số file.
+      const collectFilesRecursively = async (
+        driveUrl: string,
+        relativePath: string,
+        visitedFolders: Set<string>
+      ): Promise<{ item: MediaItem; zipPath: string }[]> => {
+        const folderId = extractDriveId(driveUrl)
+        if (folderId && visitedFolders.has(folderId)) return []
+        if (folderId) visitedFolders.add(folderId)
+
+        const children = await getFolderContents(driveUrl)
+        const result: { item: MediaItem; zipPath: string }[] = []
+
+        for (const child of children) {
+          if (!child || hiddenItemIds.has(child.id)) continue
+
+          const displayName = customNames[child.id] || child.name
+
+          if (child.type === 'folder') {
+            const childDriveUrl = `https://drive.google.com/drive/folders/${child.id}`
+            const childPath = relativePath ? `${relativePath}/${displayName}` : displayName
+            const nested = await collectFilesRecursively(childDriveUrl, childPath, visitedFolders)
+            result.push(...nested)
+          } else {
+            const fileName = child.name.includes('.')
+              ? child.name
+              : `${child.name}.${child.type === 'video' ? 'mp4' : 'jpg'}`
+            const zipPath = uniqueZipPath(relativePath, fileName)
+            result.push({ item: child, zipPath })
           }
         }
 
-        for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
-          const chunk = imageFiles.slice(i, i + CONCURRENCY_LIMIT)
-          await Promise.all(chunk.map(fileItem => fetchImage(fileItem)))
-        }
-
-        setZipProgress('Tạo file ZIP...')
-        const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
-        saveAs(zipContent, `${target.title}.zip`)
+        return result
       }
+
+      const allFiles = await collectFilesRecursively(target.driveUrl, '', new Set<string>())
+      totalFiles = allFiles.length
+
+      if (totalFiles === 0) {
+        alert(`Thư mục "${target.title}" hiện không có tệp nào để tải!`)
+        return
+      }
+
+      setZipProgress(`Đang chuẩn bị ${totalFiles} tệp...`)
+
+      // Không tải trực tiếp video bằng browser nữa. Tất cả ảnh + video đều vào cùng 1 ZIP.
+      // Với file video: dùng proxy /api/download để tránh Google Drive mở trang quét virus.
+      // Với ảnh: vẫn dùng endpoint /api/download?url=... để giữ watermark hiện tại.
+      const CONCURRENCY_LIMIT = 3
+      let nextIndex = 0
+
+      const downloadOne = async () => {
+        while (true) {
+          const index = nextIndex++
+          if (index >= allFiles.length) return
+
+          const { item, zipPath } = allFiles[index]
+          if (downloadedFileIds.has(item.id)) continue
+          downloadedFileIds.add(item.id)
+
+          try {
+            let blob: Blob
+
+            if (item.type === 'video') {
+              const fileName = item.name.includes('.') ? item.name : `${item.name}.mp4`
+              const videoUrl = `/api/download?id=${encodeURIComponent(item.id)}&action=download&name=${encodeURIComponent(fileName)}`
+              const res = await fetch(videoUrl, { cache: 'no-store' })
+              if (!res.ok) throw new Error(`Video HTTP ${res.status}`)
+              blob = await res.blob()
+            } else {
+              const fileName = item.name.includes('.') ? item.name : `${item.name}.jpg`
+              const imageUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(fileName)}`
+              const res = await fetch(imageUrl, { cache: 'no-store' })
+              if (!res.ok) throw new Error(`Ảnh HTTP ${res.status}`)
+              blob = await res.blob()
+
+              if (activeSetting.enable_watermark) {
+                blob = await applyWatermarkToImageBlob(blob)
+              }
+            }
+
+            zip.file(zipPath, blob, { compression: 'STORE' })
+          } catch (err) {
+            console.error(`Lỗi tải ${item.name}:`, err)
+          } finally {
+            completedFiles++
+            setZipProgress(`Đang tải ${completedFiles}/${totalFiles}`)
+          }
+        }
+      }
+
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY_LIMIT, allFiles.length) }, () => downloadOne())
+      )
+
+      setZipProgress('Đang tạo file ZIP...')
+      const zipContent = await zip.generateAsync(
+        {
+          type: 'blob',
+          compression: 'STORE',
+          streamFiles: true
+        },
+        (metadata) => {
+          setZipProgress(`Đang đóng gói ${Math.round(metadata.percent)}%`)
+        }
+      )
+
+      saveAs(zipContent, `${target.title}.zip`)
     } catch (err: any) {
-      alert('Có lỗi xảy ra khi tải album: ' + err.message)
+      console.error('Lỗi tải toàn bộ album:', err)
+      alert('Có lỗi xảy ra khi tải album: ' + (err?.message || 'Không xác định'))
     } finally {
       setZippingFolderId(null)
       setZipProgress('')
