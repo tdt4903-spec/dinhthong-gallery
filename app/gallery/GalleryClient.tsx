@@ -163,6 +163,42 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
+// HÀM TẢI VIDEO NGUYÊN BẢN CHUẨN XÁC 100% QUA NATIVE BROWSER STREAM
+const triggerNativeDirectVideoDownload = (fileId: string, fileName: string) => {
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`
+  form.target = '_blank'
+  form.style.display = 'none'
+
+  const inputId = document.createElement('input')
+  inputId.type = 'hidden'
+  inputId.name = 'id'
+  inputId.value = fileId
+  form.appendChild(inputId)
+
+  const inputExport = document.createElement('input')
+  inputExport.type = 'hidden'
+  inputExport.name = 'export'
+  inputExport.value = 'download'
+  form.appendChild(inputExport)
+
+  const inputConfirm = document.createElement('input')
+  inputConfirm.type = 'hidden'
+  inputConfirm.name = 'confirm'
+  inputConfirm.value = 't'
+  form.appendChild(inputConfirm)
+
+  document.body.appendChild(form)
+  form.submit()
+
+  setTimeout(() => {
+    if (document.body.contains(form)) {
+      document.body.removeChild(form)
+    }
+  }, 1000)
+}
+
 export default function GalleryClient() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
@@ -558,7 +594,7 @@ export default function GalleryClient() {
     URL.revokeObjectURL(url)
   }
 
-  // TẢI FILE: TỰ ĐỘNG BÓC TÁCH NGUYÊN BẢN CẢ VIDEO NẶNG VÀ GIẢI PHÓNG TRẠNG THÁI
+  // TẢI LẺ 1 FILE: TỰ ĐỘNG BẮT LUỒNG TRỰC TIẾP DÀNH CHO VIDEO LỚN VÀ GIẢI PHÓNG NÚT BẤM
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -567,34 +603,62 @@ export default function GalleryClient() {
     if (downloadingId || item.type === 'folder') return
 
     setDownloadingId(item.id)
-    const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
 
     try {
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
-      const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
 
+      // NẾU LÀ VIDEO: GỌI NATIVE POST TRỰC TIẾP ĐỂ LẤY FILE NGUYÊN BẢN HÀNG TRĂM MB
+      if (item.type === 'video') {
+        triggerNativeDirectVideoDownload(item.id, exactFileName)
+        setTimeout(() => {
+          setDownloadingId(null)
+        }, 1200)
+        return
+      }
+
+      // NẾU LÀ HÌNH ẢNH: TẢI QUA PROXY ĐỂ ÁP DỤNG WATERMARK (NẾU CÓ)
+      const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
       const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
+      const res = await fetch(proxyUrl)
+      if (!res.ok) throw new Error('Fetch failed')
+      
+      let blob = await res.blob()
 
-      // Kích hoạt luồng tải bằng thẻ link trực tiếp thông qua proxy stream
+      if (activeSetting.enable_watermark) {
+        blob = await applyWatermarkToImageBlob(blob)
+      }
+
+      const fileObj = new File([blob], exactFileName, { type: 'image/jpeg' })
+
+      if (isIOS && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
+        await navigator.share({ files: [fileObj], title: exactFileName })
+        setDownloadingId(null)
+        return
+      }
+
+      const blobUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
-      link.href = proxyUrl
+      link.href = blobUrl
       link.setAttribute('download', exactFileName)
       link.style.display = 'none'
       document.body.appendChild(link)
       link.click()
-
       setTimeout(() => {
         if (document.body.contains(link)) document.body.removeChild(link)
-        setDownloadingId(null)
-      }, 1500)
+        URL.revokeObjectURL(blobUrl)
+      }, 1000)
     } catch (err) {
       console.error('Lỗi khi tải:', err)
-      setDownloadingId(null)
+      triggerNativeDirectVideoDownload(item.id, item.name)
+    } finally {
+      setTimeout(() => {
+        setDownloadingId(null)
+      }, 1000)
     }
   }
 
-  // TẢI ZIP RIÊNG BIỆT CHO TỪNG THƯ MỤC
+  // TẢI ZIP RIÊNG BIỆT CHO MỘT THƯ MỤC
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -626,11 +690,24 @@ export default function GalleryClient() {
         return
       }
 
+      // NẾU THƯ MỤC CHỈ CHỨA DUY NHẤT 1 HOẶC TOÀN VIDEO LỚN: TỰ ĐỘNG TẢI TRỰC TIẾP TỪNG TỆP TRÁNH GIỚI HẠN MEMORY CỦA ZIP
+      const videoFiles = targetFiles.filter(f => f.type === 'video')
+      if (videoFiles.length > 0 && targetFiles.length === videoFiles.length) {
+        videoFiles.forEach((v, i) => {
+          setTimeout(() => {
+            triggerNativeDirectVideoDownload(v.id, v.name)
+          }, i * 1500)
+        })
+        setZippingFolderId(null)
+        setZipProgress('')
+        return
+      }
+
       const zip = new JSZip()
       const total = targetFiles.length
       let completedCount = 0
 
-      const CONCURRENCY_LIMIT = 4
+      const CONCURRENCY_LIMIT = 3
       const fetchRawOriginalFile = async (fileItem: MediaItem) => {
         const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
         const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
@@ -669,6 +746,7 @@ export default function GalleryClient() {
     }
   }
 
+  // TẢI ZIP CÁC MỤC ĐÃ TICK CHECKBOX
   const handleBatchDownload = async () => {
     if (zippingFolderId) return
     if (!selectedAlbum) {
@@ -700,7 +778,7 @@ export default function GalleryClient() {
         const total = selectedFiles.length
         let completedCount = 0
 
-        const CONCURRENCY_LIMIT = 4
+        const CONCURRENCY_LIMIT = 3
         const fetchFile = async (fileItem: MediaItem) => {
           const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
           const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
