@@ -413,6 +413,35 @@ export async function GET(request: NextRequest) {
   const fileIdParam = request.nextUrl.searchParams.get('id')
 
   // ============================================================
+  // VIDEO INFO: lấy metadata để client hiển thị dung lượng/buffer/tốc độ ước tính.
+  // ============================================================
+  if (action === 'info' && fileIdParam) {
+    const fileId = getDriveFileId(fileIdParam)
+    if (!fileId) return NextResponse.json({ error: 'Invalid Google Drive file ID' }, { status: 400 })
+
+    try {
+      const metadata = await getDriveMetadata(apiKey, fileId)
+      if (metadata.mimeType === DRIVE_FOLDER_MIME) {
+        return NextResponse.json({ error: 'Không phải tệp video.' }, { status: 400 })
+      }
+
+      return NextResponse.json({
+        id: metadata.id,
+        name: metadata.name,
+        mimeType: metadata.mimeType,
+        size: Number(metadata.size || 0),
+      }, {
+        headers: {
+          'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
+        },
+      })
+    } catch (error: any) {
+      console.error('Video info error:', error)
+      return NextResponse.json({ error: error?.message || 'Không lấy được metadata video.' }, { status: 500 })
+    }
+  }
+
+  // ============================================================
   // STREAM ZIP: toàn bộ thư mục + thư mục con + file vào 1 ZIP.
   // Không dùng Blob/JSZip ở browser.
   // ============================================================
@@ -453,49 +482,7 @@ export async function GET(request: NextRequest) {
   }
 
   // ============================================================
-  // FILE METADATA - dùng cho downloader song song phía browser.
-  // ============================================================
-  if (action === 'meta' && fileIdParam) {
-    const fileId = getDriveFileId(fileIdParam)
-    if (!fileId) {
-      return NextResponse.json({ error: 'Invalid Google Drive file ID' }, { status: 400 })
-    }
-
-    try {
-      const metadata = await getDriveMetadata(apiKey, fileId)
-
-      if (metadata.mimeType === DRIVE_FOLDER_MIME) {
-        return NextResponse.json({ error: 'Không thể lấy metadata của thư mục.' }, { status: 400 })
-      }
-
-      if (metadata.capabilities?.canDownload === false) {
-        return NextResponse.json({ error: 'Tệp này không cho phép tải xuống.' }, { status: 403 })
-      }
-
-      return NextResponse.json({
-        id: metadata.id,
-        name: metadata.name,
-        mimeType: metadata.mimeType || 'application/octet-stream',
-        size: metadata.size ? Number(metadata.size) : null,
-      }, {
-        status: 200,
-        headers: {
-          'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-        },
-      })
-    } catch (error: any) {
-      console.error('Metadata proxy error:', error)
-      return NextResponse.json(
-        { error: error?.message || 'Lỗi khi lấy metadata tệp.' },
-        { status: 500 }
-      )
-    }
-  }
-
-  // ============================================================
-  // DOWNLOAD 1 FILE - hỗ trợ Range để downloader song song.
-  // Browser -> Vercel -> Google Drive API (alt=media)
-  // Không mở tab quét virus của Google Drive.
+  // DOWNLOAD 1 FILE - hỗ trợ Range để tải video nguyên bản.
   // ============================================================
   if (action === 'download' && fileIdParam) {
     const fileId = getDriveFileId(fileIdParam)
@@ -522,7 +509,8 @@ export async function GET(request: NextRequest) {
 
       const headers = new Headers()
       headers.set('Content-Type', metadata.mimeType || driveRes.headers.get('content-type') || 'application/octet-stream')
-      headers.set('Content-Disposition', encodeContentDispositionFilename(fileName))
+      const inline = request.nextUrl.searchParams.get('inline') === '1'
+      headers.set('Content-Disposition', inline ? `inline; filename="${fileName.replace(/[\"\r\n]/g, '_')}"` : encodeContentDispositionFilename(fileName))
       headers.set('Cache-Control', 'private, no-store, max-age=0, must-revalidate')
       headers.set('Pragma', 'no-cache')
       headers.set('Accept-Ranges', 'bytes')

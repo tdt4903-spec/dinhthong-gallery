@@ -163,127 +163,18 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// TẢI VIDEO ĐƠN QUA PROXY CỦA WEBSITE - TỐI ƯU BĂNG THÔNG
-// Browser không mở URL Drive trực tiếp, tránh trang quét virus.
-// Với Chrome/Edge, tải song song nhiều Range request qua proxy và ghi trực tiếp xuống đĩa.
-const triggerDirectBrowserDownload = async (fileId: string, fileName: string, fastMode = true) => {
-  // Chế độ nhanh: tải song song nhiều Range request qua chính proxy của website,
-  // tránh Google Drive mở trang quét virus và đồng thời tận dụng nhiều kết nối.
-  // Chrome/Edge hỗ trợ File System Access API để ghi từng chunk trực tiếp xuống đĩa,
-  // không cần giữ toàn bộ video trong RAM.
-  if (fastMode && typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
-    let writable: any = null
+const formatBytes = (bytes: number) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
+}
 
-    try {
-      const win = window as any
-      const fileHandle = await win.showSaveFilePicker({
-        suggestedName: fileName,
-        types: [{
-          description: 'Video',
-          accept: { 'video/*': ['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm'] },
-        }],
-      })
-
-      const metaRes = await fetch(
-        `/api/download?action=meta&id=${encodeURIComponent(fileId)}`,
-        { cache: 'no-store' }
-      )
-      const meta = await metaRes.json()
-      if (!metaRes.ok || !meta.size) {
-        throw new Error(meta?.error || 'Không lấy được dung lượng video.')
-      }
-
-      const totalSize = Number(meta.size)
-      if (!Number.isFinite(totalSize) || totalSize <= 0) {
-        throw new Error('Dung lượng video không hợp lệ.')
-      }
-
-      const CHUNK_SIZE = 32 * 1024 * 1024 // 32 MB / request
-      const CONCURRENCY = 6
-      const totalChunks = Math.ceil(totalSize / CHUNK_SIZE)
-      let nextChunk = 0
-      let completed = 0
-      let writeChain = Promise.resolve()
-
-      writable = await fileHandle.createWritable()
-      await writable.truncate(totalSize)
-
-      const downloadChunk = async (chunkIndex: number) => {
-        const start = chunkIndex * CHUNK_SIZE
-        const end = Math.min(totalSize - 1, start + CHUNK_SIZE - 1)
-
-        const res = await fetch(
-          `/api/download?action=download&id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`,
-          {
-            cache: 'no-store',
-            headers: { Range: `bytes=${start}-${end}` },
-          }
-        )
-
-        if (!res.ok || !res.body) {
-          throw new Error(`Chunk ${chunkIndex + 1}/${totalChunks} tải lỗi (HTTP ${res.status})`)
-        }
-
-        // Khi gửi Range, proxy phải trả 206. Nếu upstream trả sai dạng response,
-        // dừng để không tạo ra file thiếu/corrupt.
-        if (res.status !== 206) {
-          throw new Error(`Server không hỗ trợ Range cho chunk ${chunkIndex + 1} (HTTP ${res.status})`)
-        }
-
-        const buffer = await res.arrayBuffer()
-        const bytes = new Uint8Array(buffer)
-        const expectedLength = end - start + 1
-
-        if (bytes.byteLength !== expectedLength) {
-          throw new Error(
-            `Chunk ${chunkIndex + 1}/${totalChunks} thiếu dữ liệu: nhận ${bytes.byteLength} / ${expectedLength} bytes`
-          )
-        }
-
-        // Ghi tuần tự để tránh nhiều writable.write() đụng nhau,
-        // nhưng các request mạng vẫn chạy song song.
-        writeChain = writeChain.then(() =>
-          writable.write({ type: 'write', position: start, data: bytes })
-        )
-        await writeChain
-
-        completed++
-      }
-
-      const worker = async () => {
-        while (true) {
-          const chunkIndex = nextChunk++
-          if (chunkIndex >= totalChunks) return
-          await downloadChunk(chunkIndex)
-        }
-      }
-
-      await Promise.all(
-        Array.from({ length: Math.min(CONCURRENCY, totalChunks) }, () => worker())
-      )
-
-      if (completed !== totalChunks) {
-        throw new Error(`Chỉ tải được ${completed}/${totalChunks} phần của video.`)
-      }
-
-      await writable.close()
-      writable = null
-      return
-    } catch (error: any) {
-      try {
-        if (writable) await writable.abort()
-      } catch {}
-
-      // Người dùng bấm Cancel trên hộp thoại lưu -> không báo lỗi.
-      if (error?.name === 'AbortError') return
-
-      console.error('Fast video download failed:', error)
-      // Fallback về một request proxy duy nhất để vẫn tải được file.
-    }
-  }
-
-  // Fallback tương thích Safari/Firefox hoặc khi browser không có File System Access API.
+// TẢI VIDEO ĐƠN QUA PROXY CỦA WEBSITE
+// Browser chỉ gọi /api/download, không đi tới trang tải/quét virus của Drive.
+const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
   const downloadUrl = `/api/download?action=download&id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+
   const link = document.createElement('a')
   link.href = downloadUrl
   link.download = fileName
@@ -340,6 +231,16 @@ export default function GalleryClient() {
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+
+  // Thông tin tải/phát video qua proxy của website
+  const [videoLoadInfo, setVideoLoadInfo] = useState({
+    speedBytesPerSecond: 0,
+    bufferedPercent: 0,
+    loadedBytes: 0,
+    totalBytes: 0,
+    loading: false,
+  })
+  const videoElementRef = useRef<HTMLVideoElement | null>(null)
 
   const [selectedAlbumIds, setSelectedAlbumIds] = useState<Set<string>>(new Set())
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
@@ -708,7 +609,8 @@ export default function GalleryClient() {
 
       // NẾU LÀ VIDEO: GỌI TẢI TRỰC TIẾP KHÔNG MỞ TAB MỚI
       if (item.type === 'video') {
-        await triggerDirectBrowserDownload(item.id, exactFileName, true)
+        triggerDirectBrowserDownload(item.id, exactFileName)
+        setDownloadingId(null)
         return
       }
 
@@ -791,7 +693,7 @@ export default function GalleryClient() {
           const v = videoFiles[i]
           const ext = 'mp4'
           const exactFileName = v.name.includes('.') ? v.name : `${v.name}.${ext}`
-          triggerDirectBrowserDownload(v.id, exactFileName, false)
+          triggerDirectBrowserDownload(v.id, exactFileName)
           // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
           // nhiều download liên tiếp khi tải cả album.
           await new Promise(resolve => setTimeout(resolve, 350))
@@ -874,7 +776,7 @@ export default function GalleryClient() {
 
         for (const v of videoFiles) {
           const exactFileName = v.name.includes('.') ? v.name : `${v.name}.mp4`
-          triggerDirectBrowserDownload(v.id, exactFileName, false)
+          triggerDirectBrowserDownload(v.id, exactFileName)
           // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
           // nhiều download liên tiếp khi tải cả album.
           await new Promise(resolve => setTimeout(resolve, 350))
@@ -1659,6 +1561,72 @@ export default function GalleryClient() {
 
     initData()
   }, [])
+
+  useEffect(() => {
+    if (!previewMedia || previewMedia.type !== 'video') {
+      setVideoLoadInfo({ speedBytesPerSecond: 0, bufferedPercent: 0, loadedBytes: 0, totalBytes: 0, loading: false })
+      return
+    }
+
+    let cancelled = false
+    let timer: number | null = null
+    let lastTime = performance.now()
+    let lastEstimatedBytes = 0
+
+    const loadInfo = async () => {
+      try {
+        const infoUrl = `/api/download?action=info&id=${encodeURIComponent(previewMedia.id)}`
+        const res = await fetch(infoUrl, { cache: 'no-store' })
+        if (!res.ok) throw new Error('Không lấy được thông tin video')
+        const data = await res.json()
+        if (cancelled) return
+        const totalBytes = Number(data.size || 0)
+        setVideoLoadInfo(prev => ({ ...prev, totalBytes, loading: true }))
+
+        const sample = () => {
+          if (cancelled) return
+          const video = videoElementRef.current
+          const now = performance.now()
+          if (video && Number.isFinite(video.duration) && video.duration > 0 && totalBytes > 0) {
+            let bufferedEnd = 0
+            for (let i = 0; i < video.buffered.length; i++) {
+              try {
+                bufferedEnd = Math.max(bufferedEnd, video.buffered.end(i))
+              } catch {}
+            }
+
+            const estimatedBytes = Math.min(totalBytes, Math.max(0, (bufferedEnd / video.duration) * totalBytes))
+            const dt = (now - lastTime) / 1000
+            const db = Math.max(0, estimatedBytes - lastEstimatedBytes)
+            if (dt > 0.15) {
+              const currentSpeed = db / dt
+              setVideoLoadInfo(prev => ({
+                ...prev,
+                speedBytesPerSecond: currentSpeed > 0 ? currentSpeed : prev.speedBytesPerSecond,
+                bufferedPercent: Math.min(100, (estimatedBytes / totalBytes) * 100),
+                loadedBytes: estimatedBytes,
+              }))
+              lastTime = now
+              lastEstimatedBytes = estimatedBytes
+            }
+          }
+          timer = window.setTimeout(sample, 350)
+        }
+
+        sample()
+      } catch (error) {
+        console.error('Video info error:', error)
+      }
+    }
+
+    setVideoLoadInfo({ speedBytesPerSecond: 0, bufferedPercent: 0, loadedBytes: 0, totalBytes: 0, loading: true })
+    loadInfo()
+
+    return () => {
+      cancelled = true
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [previewMedia?.id, previewMedia?.type])
 
   useEffect(() => {
     if (previewMedia) {
@@ -2618,12 +2586,49 @@ export default function GalleryClient() {
           >
             {previewMedia.type === 'video' ? (
               <div className="relative w-full max-w-5xl aspect-video flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-2xl">
-                <iframe
-                  src={`https://drive.google.com/file/d/${previewMedia.id}/preview`}
-                  className="w-full h-full border-0 rounded-2xl"
-                  allow="autoplay; fullscreen"
-                  allowFullScreen
+                <video
+                  ref={videoElementRef}
+                  src={`/api/download?action=download&id=${encodeURIComponent(previewMedia.id)}&name=${encodeURIComponent(previewMedia.name)}&inline=1`}
+                  className="w-full h-full object-contain bg-black"
+                  controls
+                  playsInline
+                  preload="metadata"
+                  onLoadStart={() => setVideoLoadInfo(prev => ({ ...prev, loading: true }))}
+                  onCanPlay={() => setVideoLoadInfo(prev => ({ ...prev, loading: false }))}
+                  onWaiting={() => setVideoLoadInfo(prev => ({ ...prev, loading: true }))}
+                  onPlaying={() => setVideoLoadInfo(prev => ({ ...prev, loading: false }))}
+                  onError={(e) => console.error('Video playback error:', e)}
                 />
+
+                <div className="absolute left-3 bottom-3 z-20 pointer-events-none">
+                  <div className="px-3 py-2 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 text-[10px] sm:text-[11px] text-white/90 shadow-lg">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-1.5 h-1.5 rounded-full ${videoLoadInfo.loading ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+                      <span>
+                        {videoLoadInfo.loading ? 'Đang tải' : 'Đang phát'}
+                      </span>
+                      {videoLoadInfo.speedBytesPerSecond > 0 && (
+                        <span className="font-mono text-emerald-300">
+                          {formatBytes(videoLoadInfo.speedBytesPerSecond)}/s
+                        </span>
+                      )}
+                    </div>
+                    {videoLoadInfo.totalBytes > 0 && (
+                      <div className="mt-1.5 w-44 sm:w-56">
+                        <div className="h-1 rounded-full bg-white/15 overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-400 transition-all duration-300"
+                            style={{ width: `${Math.max(0, Math.min(100, videoLoadInfo.bufferedPercent))}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between mt-1 text-[9px] text-white/50">
+                          <span>{formatBytes(videoLoadInfo.loadedBytes)}</span>
+                          <span>{formatBytes(videoLoadInfo.totalBytes)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             ) : (
               <div 
