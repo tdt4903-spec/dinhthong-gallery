@@ -558,7 +558,6 @@ export default function GalleryClient() {
     URL.revokeObjectURL(url)
   }
 
-  // HÀM TẢI LẺ 1 FILE (ẢNH HOẶC VIDEO NẶNG/NHẸ ĐỀU TẢI CHUẨN XÁC)
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -574,13 +573,29 @@ export default function GalleryClient() {
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
       const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
 
+      if (item.type === 'video') {
+        const directVideoUrl = `https://drive.usercontent.google.com/download?id=${item.id}&export=download&authuser=0&confirm=t`
+        
+        const iframe = document.createElement('iframe')
+        iframe.style.display = 'none'
+        iframe.src = directVideoUrl
+        document.body.appendChild(iframe)
+
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            document.body.removeChild(iframe)
+          }
+          setDownloadingId(null)
+        }, 4000)
+        return
+      }
+
       const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
       const res = await fetch(proxyUrl)
       if (!res.ok) throw new Error('Fetch failed')
       
       let blob = await res.blob()
 
-      // Đóng dấu Watermark nếu bật và là file ảnh
       if (activeSetting.enable_watermark && item.type === 'image') {
         blob = await applyWatermarkToImageBlob(blob)
       }
@@ -605,14 +620,17 @@ export default function GalleryClient() {
         URL.revokeObjectURL(blobUrl)
       }, 1000)
     } catch (err) {
-      console.error(err)
-      window.open(item.downloadUrl, '_blank')
+      console.error('Lỗi khi tải:', err)
+      const fallbackUrl = `https://drive.usercontent.google.com/download?id=${item.id}&export=download&authuser=0&confirm=t`
+      const fallbackLink = document.createElement('a')
+      fallbackLink.href = fallbackUrl
+      fallbackLink.setAttribute('download', item.name)
+      fallbackLink.click()
     } finally {
       setDownloadingId(null)
     }
   }
 
-  // HÀM TẢI TOÀN BỘ ALBUM DẠNG ZIP (BAO GỒM CẢ VIDEO VÀ ẢNH)
   const handleDownloadAlbumZip = async (targetInfo?: { title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -682,7 +700,6 @@ export default function GalleryClient() {
     }
   }
 
-  // HÀM TẢI CÁC TỆP ĐÃ TICK CHỌN CHECKBOX (ZIP)
   const handleBatchDownload = async () => {
     if (isZipping) return
     if (!selectedAlbum) {

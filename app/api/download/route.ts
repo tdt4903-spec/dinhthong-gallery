@@ -5,7 +5,7 @@ export async function GET(req: NextRequest) {
   const nameParam = req.nextUrl.searchParams.get('name') || 'download'
 
   if (!urlParam) {
-    return NextResponse.json({ error: 'Thiếu URL tải tệp' }, { status: 400 })
+    return NextResponse.json({ error: 'Thiếu URL' }, { status: 400 })
   }
 
   try {
@@ -15,46 +15,23 @@ export async function GET(req: NextRequest) {
       fileId = matchId[1]
     }
 
-    let downloadUrl = urlParam
-    let cookieHeader = ''
+    const directUrl = fileId 
+      ? `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`
+      : urlParam
 
-    if (fileId) {
-      // 1. Quét token xác nhận bypass cảnh báo virus đối với file lớn
-      const initialUrl = `https://drive.google.com/uc?export=download&id=${fileId}`
-      const initialRes = await fetch(initialUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-      })
-
-      const setCookie = initialRes.headers.get('set-cookie')
-      if (setCookie) {
-        cookieHeader = setCookie.split(';')[0]
-      }
-
-      const textResponse = await initialRes.text()
-      const confirmMatch = textResponse.match(/confirm=([0-9A-Za-z_]+)/) || textResponse.match(/name="confirm"\s+value="([0-9A-Za-z_]+)"/)
-
-      if (confirmMatch && confirmMatch[1]) {
-        downloadUrl = `https://drive.google.com/uc?export=download&confirm=${confirmMatch[1]}&id=${fileId}`
-      }
-    }
-
-    // 2. Fetch dữ liệu nhị phân thực tế
-    const finalRes = await fetch(downloadUrl, {
+    const res = await fetch(directUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        ...(cookieHeader ? { Cookie: cookieHeader } : {})
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
     })
 
-    if (!finalRes.ok) {
-      throw new Error(`Lỗi từ máy chủ lưu trữ: ${finalRes.statusText}`)
+    if (!res.ok) {
+      throw new Error(`Lỗi máy chủ lưu trữ: ${res.statusText}`)
     }
 
     const isMp4 = nameParam.toLowerCase().endsWith('.mp4')
-    const contentType = isMp4 ? 'video/mp4' : (finalRes.headers.get('content-type') || 'application/octet-stream')
-    const arrayBuffer = await finalRes.arrayBuffer()
+    const contentType = isMp4 ? 'video/mp4' : (res.headers.get('content-type') || 'application/octet-stream')
+    const arrayBuffer = await res.arrayBuffer()
 
     return new NextResponse(arrayBuffer, {
       status: 200,
