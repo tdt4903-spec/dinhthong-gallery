@@ -558,7 +558,7 @@ export default function GalleryClient() {
     URL.revokeObjectURL(url)
   }
 
-  // TẢI 1 FILE: VIDEO VÀ ẢNH ĐỀU ĐƯỢC BẢO TOÀN DUNG LƯỢNG GỐC 100%
+  // TẢI FILE: TỰ ĐỘNG BÓC TÁCH NGUYÊN BẢN CẢ VIDEO NẶNG VÀ GIẢI PHÓNG TRẠNG THÁI
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -574,65 +574,22 @@ export default function GalleryClient() {
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
       const mimeType = item.type === 'video' ? 'video/mp4' : 'image/jpeg'
 
-      // Xử lý riêng cho Video: Kích hoạt link tải chuẩn của Google Drive để đảm bảo video nặng vài GB vẫn tải đúng
-      if (item.type === 'video') {
-        const downloadDirect = `https://drive.usercontent.google.com/download?id=${item.id}&export=download&authuser=0&confirm=t`
-        const a = document.createElement('a')
-        a.href = downloadDirect
-        a.setAttribute('download', exactFileName)
-        a.style.display = 'none'
-        document.body.appendChild(a)
-        a.click()
-        setTimeout(() => {
-          if (document.body.contains(a)) document.body.removeChild(a)
-          setDownloadingId(null)
-        }, 1500)
-        return
-      }
-
-      // Xử lý tải hình ảnh (đóng watermark nếu bật)
       const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
-      const res = await fetch(proxyUrl)
-      if (!res.ok) throw new Error('Fetch failed')
-      
-      let blob = await res.blob()
 
-      if (activeSetting.enable_watermark && item.type === 'image') {
-        blob = await applyWatermarkToImageBlob(blob)
-      }
-
-      const fileObj = new File([blob], exactFileName, { type: mimeType })
-
-      if (isIOS && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
-        await navigator.share({ files: [fileObj], title: exactFileName })
-        setDownloadingId(null)
-        return
-      }
-
-      const blobUrl = URL.createObjectURL(blob)
+      // Kích hoạt luồng tải bằng thẻ link trực tiếp thông qua proxy stream
       const link = document.createElement('a')
-      link.href = blobUrl
+      link.href = proxyUrl
       link.setAttribute('download', exactFileName)
       link.style.display = 'none'
       document.body.appendChild(link)
       link.click()
+
       setTimeout(() => {
-        document.body.removeChild(link)
-        URL.revokeObjectURL(blobUrl)
-      }, 1000)
+        if (document.body.contains(link)) document.body.removeChild(link)
+        setDownloadingId(null)
+      }, 1500)
     } catch (err) {
       console.error('Lỗi khi tải:', err)
-      const fallbackUrl = `https://drive.usercontent.google.com/download?id=${item.id}&export=download&authuser=0&confirm=t`
-      const fallbackLink = document.createElement('a')
-      fallbackLink.href = fallbackUrl
-      fallbackLink.setAttribute('download', item.name)
-      fallbackLink.style.display = 'none'
-      document.body.appendChild(fallbackLink)
-      fallbackLink.click()
-      setTimeout(() => {
-        if (document.body.contains(fallbackLink)) document.body.removeChild(fallbackLink)
-      }, 1000)
-    } finally {
       setDownloadingId(null)
     }
   }
@@ -1429,7 +1386,7 @@ export default function GalleryClient() {
     }
   }
 
-  // Effect xác thực và khởi tạo dữ liệu
+  // Khởi tạo và đồng bộ
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
@@ -1921,7 +1878,7 @@ export default function GalleryClient() {
                       <button 
                         onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)}
                         disabled={Boolean(zippingFolderId)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
                       >
                         {isThisZipping ? (
                           <>
@@ -2242,6 +2199,7 @@ export default function GalleryClient() {
                           const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`
                           const displayName = customNames[item.id] || item.name
                           const isChecked = selectedItemIds.has(item.id)
+                          const isThisDownloading = downloadingId === item.id
 
                           return (
                             <div 
@@ -2339,11 +2297,11 @@ export default function GalleryClient() {
 
                                 <button 
                                   onClick={(e) => handleDownloadMedia(item, e)}
-                                  disabled={downloadingId === item.id}
+                                  disabled={Boolean(downloadingId)}
                                   className="p-1 text-gray-400 hover:text-emerald-600 transition cursor-pointer disabled:opacity-50 flex-shrink-0"
                                   title="Lưu tệp về máy"
                                 >
-                                  {downloadingId === item.id ? (
+                                  {isThisDownloading ? (
                                     <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
                                   ) : (
                                     <Download className="w-4 h-4" />
@@ -2434,7 +2392,7 @@ export default function GalleryClient() {
 
               <button
                 onClick={(e) => handleDownloadMedia(previewMedia, e)}
-                disabled={downloadingId === previewMedia.id}
+                disabled={Boolean(downloadingId)}
                 className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
                 title="Tải về máy"
               >

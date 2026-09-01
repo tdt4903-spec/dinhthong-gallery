@@ -19,8 +19,9 @@ export async function GET(req: NextRequest) {
     let cookieHeader = ''
 
     if (fileId) {
-      const initialUrl = `https://drive.google.com/uc?export=download&id=${fileId}`
-      const initialRes = await fetch(initialUrl, {
+      // 1. Gửi request thăm dò để lấy token confirm và session cookie vượt qua trang cảnh báo 726MB
+      const checkUrl = `https://drive.google.com/uc?export=download&id=${fileId}`
+      const initialRes = await fetch(checkUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
@@ -31,8 +32,13 @@ export async function GET(req: NextRequest) {
         cookieHeader = setCookie.split(';')[0]
       }
 
-      const textResponse = await initialRes.text()
-      const confirmMatch = textResponse.match(/confirm=([0-9A-Za-z_]+)/) || textResponse.match(/name="confirm"\s+value="([0-9A-Za-z_]+)"/)
+      const htmlText = await initialRes.text()
+      
+      // Bóc tách token từ form cảnh báo virus của Google
+      const confirmMatch = 
+        htmlText.match(/confirm=([0-9A-Za-z_-]+)/) || 
+        htmlText.match(/name="confirm"\s+value="([0-9A-Za-z_-]+)"/) ||
+        htmlText.match(/value="([0-9A-Za-z_-]+)"\s+name="confirm"/)
 
       if (confirmMatch && confirmMatch[1]) {
         downloadUrl = `https://drive.google.com/uc?export=download&confirm=${confirmMatch[1]}&id=${fileId}`
@@ -41,6 +47,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // 2. Tải luồng video nguyên vẹn
     const finalRes = await fetch(downloadUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -54,16 +61,21 @@ export async function GET(req: NextRequest) {
 
     const isMp4 = nameParam.toLowerCase().endsWith('.mp4')
     const contentType = isMp4 ? 'video/mp4' : (finalRes.headers.get('content-type') || 'application/octet-stream')
-    const arrayBuffer = await finalRes.arrayBuffer()
 
-    return new NextResponse(arrayBuffer, {
+    // Stream trực tiếp body về trình duyệt, không buffer vào RAM để hỗ trợ video dung lượng lớn
+    const responseHeaders = new Headers()
+    responseHeaders.set('Content-Type', contentType)
+    responseHeaders.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(nameParam)}`)
+    responseHeaders.set('Cache-Control', 'no-cache')
+
+    const contentLength = finalRes.headers.get('content-length')
+    if (contentLength) {
+      responseHeaders.set('Content-Length', contentLength)
+    }
+
+    return new NextResponse(finalRes.body as any, {
       status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(nameParam)}`,
-        'Content-Length': arrayBuffer.byteLength.toString(),
-        'Cache-Control': 'no-cache'
-      }
+      headers: responseHeaders
     })
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Tải tệp thất bại' }, { status: 500 })
