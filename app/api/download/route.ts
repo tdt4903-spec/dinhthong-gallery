@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 export const maxDuration = 300
 
 const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'

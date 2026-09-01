@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
@@ -165,7 +167,7 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
 // Browser KHÔNG BAO GIỜ nhận URL download của Google Drive, vì vậy không bị
 // chuyển sang trang "Google Drive cannot scan this file for viruses".
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const downloadUrl = `/api/drive?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
+  const downloadUrl = `/api/download?action=download&id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
 
   const link = document.createElement('a')
   link.href = downloadUrl
@@ -176,9 +178,7 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
   link.click()
 
   window.setTimeout(() => {
-    if (document.body.contains(link)) {
-      document.body.removeChild(link)
-    }
+    if (document.body.contains(link)) document.body.removeChild(link)
   }, 1000)
 }
 
@@ -659,28 +659,31 @@ export default function GalleryClient() {
     }
 
     setZippingFolderId(targetFolderId)
-    setZipProgress('Đang chuẩn bị file ZIP...')
+    setZipProgress('Đang chuẩn bị ZIP...')
 
     try {
-      // Server sẽ quét đệ quy và stream ZIP trực tiếp, không đưa video vào RAM/browser.
+      // Server tự quét toàn bộ cây thư mục và stream ZIP trực tiếp.
+      // Browser không giữ video trong Blob/JSZip nên phù hợp hơn với video lớn.
       const params = new URLSearchParams({
         action: 'zip',
         folderId: targetFolderId,
         name: target.title,
       })
 
+      const downloadUrl = `/api/download?${params.toString()}`
       const link = document.createElement('a')
-      link.href = `/api/download?${params.toString()}`
-      link.setAttribute('download', `${target.title}.zip`)
+      link.href = downloadUrl
+      link.download = `${target.title}.zip`
       link.style.display = 'none'
+      link.setAttribute('aria-hidden', 'true')
       document.body.appendChild(link)
       link.click()
-
-      setZipProgress('Đang tải ZIP từ máy chủ...')
 
       window.setTimeout(() => {
         if (document.body.contains(link)) document.body.removeChild(link)
       }, 2000)
+
+      setZipProgress('Đang tải ZIP...')
     } catch (err: any) {
       console.error('Lỗi tải ZIP:', err)
       alert('Có lỗi xảy ra khi tải album: ' + (err?.message || 'Không xác định'))
@@ -688,7 +691,7 @@ export default function GalleryClient() {
       window.setTimeout(() => {
         setZippingFolderId(null)
         setZipProgress('')
-      }, 1500)
+      }, 2500)
     }
   }
 
@@ -712,39 +715,63 @@ export default function GalleryClient() {
       }
     } else {
       const selectedFiles = visibleItems.filter(f => selectedItemIds.has(f.id) && f.type !== 'folder')
-      const selectedFolders = visibleItems.filter(f => selectedItemIds.has(f.id) && f.type === 'folder')
-      if (selectedFiles.length === 0 && selectedFolders.length === 0) {
-        alert('Vui lòng chọn ít nhất 1 tệp ảnh/video hoặc thư mục để tải!')
+      if (selectedFiles.length === 0) {
+        alert('Vui lòng chọn ít nhất 1 tệp ảnh/video để tải!')
         return
       }
 
-      // Với các mục chọn trong một thư mục hiện tại, giữ hành vi tải theo selection.
-      // Thư mục được chọn sẽ dùng server-side ZIP riêng.
       setZippingFolderId('batch_items')
-      setZipProgress('Đang chuẩn bị tải...')
+      setZipProgress('Đang xử lý...')
       try {
-        if (selectedFolders.length === 1 && selectedFiles.length === 0) {
-          const folder = selectedFolders[0]
-          await handleDownloadAlbumZip({
-            id: folder.id,
-            title: customNames[folder.id] || folder.name,
-            driveUrl: `https://drive.google.com/drive/folders/${folder.id}`,
-          })
-        } else {
-          // Selection nhiều file riêng lẻ: tải từng file như trước để không phá UX hiện tại.
-          for (const item of selectedFiles) {
-            await new Promise<void>((resolve) => {
-              const fileName = item.name.includes('.')
-                ? item.name
-                : `${item.name}.${item.type === 'video' ? 'mp4' : 'jpg'}`
-              triggerDirectBrowserDownload(item.id, fileName)
-              window.setTimeout(resolve, 250)
-            })
-          }
+        const videoFiles = selectedFiles.filter(f => f.type === 'video')
+        const imageFiles = selectedFiles.filter(f => f.type === 'image')
+
+        for (const v of videoFiles) {
+          const exactFileName = v.name.includes('.') ? v.name : `${v.name}.mp4`
+          triggerDirectBrowserDownload(v.id, exactFileName)
+          // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
+          // nhiều download liên tiếp khi tải cả album.
+          await new Promise(resolve => setTimeout(resolve, 350))
         }
+
+        if (imageFiles.length > 0) {
+          const zip = new JSZip()
+          const total = imageFiles.length
+          let completedCount = 0
+
+          const CONCURRENCY_LIMIT = 4
+          const fetchImage = async (fileItem: MediaItem) => {
+            const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
+            try {
+              const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
+              if (res.ok) {
+                let blob = await res.blob()
+                if (activeSetting.enable_watermark) {
+                  blob = await applyWatermarkToImageBlob(blob)
+                }
+                zip.file(exactFileName, blob, { compression: 'STORE' })
+              }
+            } catch (err) {
+              console.error(err)
+            } finally {
+              completedCount++
+              setZipProgress(`${completedCount}/${total}`)
+            }
+          }
+
+          for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+            const chunk = imageFiles.slice(i, i + CONCURRENCY_LIMIT)
+            await Promise.all(chunk.map(fileItem => fetchImage(fileItem)))
+          }
+
+          setZipProgress('Tạo file ZIP...')
+          const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+          saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
+        }
+
         setSelectedItemIds(new Set())
       } catch (e: any) {
-        alert('Lỗi tải tệp: ' + (e?.message || 'Không xác định'))
+        alert('Lỗi tải tệp: ' + e.message)
       } finally {
         setZippingFolderId(null)
         setZipProgress('')
@@ -1033,27 +1060,13 @@ export default function GalleryClient() {
     }
   }
 
-  const handleShareFolder = async (folderId: string, e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault()
-      e.stopPropagation()
-    }
-
-    if (!folderId) return
-
-    try {
-      // Giữ format link /s/XXXXXX hiện tại để tương thích với Album.
-      // Với thư mục con, initData() sẽ dò mã này trong known_drive_folders.
-      const numericCode = toNumericCode(folderId)
-      const shareUrl = `${window.location.origin}/s/${numericCode}`
-
-      await navigator.clipboard.writeText(shareUrl)
-      setShareCopiedId(folderId)
-      setTimeout(() => setShareCopiedId(null), 2500)
-    } catch (err) {
-      console.error('Lỗi tạo link chia sẻ:', err)
-      alert('Không thể sao chép link chia sẻ. Vui lòng kiểm tra quyền Clipboard của trình duyệt.')
-    }
+  const handleShareFolder = (folderId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    const numericCode = toNumericCode(folderId)
+    const shareUrl = `${window.location.origin}/s/${numericCode}`
+    navigator.clipboard.writeText(shareUrl)
+    setShareCopiedId(folderId)
+    setTimeout(() => setShareCopiedId(null), 2500)
   }
 
   const handleOpenSubFolder = (folderItem: MediaItem) => {
@@ -1432,87 +1445,35 @@ export default function GalleryClient() {
 
         if (sharedId) {
           setIsSharedGuest(true)
-
-          // 1) Link Album cũ: vẫn hỗ trợ ID, mã số 6 chữ số hoặc Drive ID.
-          const matchedAlbum = fAlbums.find(
-            a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.driveUrl) === sharedId
-          )
+          const matchedAlbum = fAlbums.find(a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.driveUrl) === sharedId)
 
           if (matchedAlbum) {
             setSelectedAlbum(matchedAlbum)
             setFolderHistory([])
             const currentPass = fSettings[matchedAlbum.id]?.password || matchedAlbum.password
-
             if (currentPass) {
               setIsLocked(true)
             } else {
               await fetchAlbumImages(matchedAlbum.driveUrl)
             }
           } else {
-            // 2) Link thư mục con: /s/XXXXXX được giải mã bằng bảng
-            // known_drive_folders. Không cần để lộ Drive ID trong URL.
-            const { data: knownFolders, error: knownFoldersError } = await supabase
-              .from('known_drive_folders')
-              .select('id, name, parent_url')
+            let realFolderId = sharedId
+            let adminSetTitle = customNames[sharedId] || ''
 
-            if (knownFoldersError) {
-              console.error('Lỗi đọc thư mục chia sẻ:', knownFoldersError)
+            const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
+            const fallbackAlbum: Album = {
+              id: realFolderId,
+              title: adminSetTitle || 'DinhThong Album',
+              coverUrl: '',
+              driveUrl: folderDriveUrl
             }
 
-            const matchedFolder = (knownFolders || []).find(
-              (f: any) => f.id === sharedId || toNumericCode(f.id) === sharedId
-            )
-
-            if (matchedFolder) {
-              const realFolderId = matchedFolder.id
-              const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
-              const displayTitle = customNames[realFolderId] || matchedFolder.name || 'Thư mục'
-
-              // Xem thư mục được chia sẻ như một root độc lập.
-              // Khi đó guest đi thẳng vào đúng thư mục, không cần qua album cha.
-              const sharedFolderAlbum: Album = {
-                id: realFolderId,
-                title: displayTitle,
-                coverUrl: albumCovers[realFolderId] || '',
-                driveUrl: folderDriveUrl,
-                password: fSettings[realFolderId]?.password || '',
-                max_select: fSettings[realFolderId]?.max_select || 0,
-                allow_comments: fSettings[realFolderId]?.allow_comments ?? true,
-                enable_watermark: fSettings[realFolderId]?.enable_watermark ?? false
-              }
-
-              setSelectedAlbum(sharedFolderAlbum)
-              setFolderHistory([])
-
-              const folderPass = fSettings[realFolderId]?.password
-              if (folderPass) {
-                setIsLocked(true)
-              } else {
-                await fetchAlbumImages(folderDriveUrl)
-              }
+            setSelectedAlbum(fallbackAlbum)
+            const subPass = fSettings[realFolderId]?.password
+            if (subPass) {
+              setIsLocked(true)
             } else {
-              // 3) Tương thích ngược với link cũ dùng trực tiếp Drive ID.
-              const realFolderId = sharedId
-              const adminSetTitle = customNames[realFolderId] || ''
-              const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
-              const fallbackAlbum: Album = {
-                id: realFolderId,
-                title: adminSetTitle || 'DinhThong Album',
-                coverUrl: '',
-                driveUrl: folderDriveUrl,
-                password: fSettings[realFolderId]?.password || '',
-                max_select: fSettings[realFolderId]?.max_select || 0,
-                allow_comments: fSettings[realFolderId]?.allow_comments ?? true,
-                enable_watermark: fSettings[realFolderId]?.enable_watermark ?? false
-              }
-
-              setSelectedAlbum(fallbackAlbum)
-              const subPass = fSettings[realFolderId]?.password
-              if (subPass) {
-                setIsLocked(true)
-              } else {
-                await fetchAlbumImages(folderDriveUrl)
-              }
+              await fetchAlbumImages(folderDriveUrl)
             }
           }
         } else {
@@ -1954,16 +1915,6 @@ export default function GalleryClient() {
                         <p className="text-[11px] text-gray-400 mt-0.5">Nhấp để xem</p>
                       </div>
 
-                      {!isSharedGuest && (
-                        <button
-                          onClick={(e) => handleShareFolder(album.id, e)}
-                          className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer flex-shrink-0"
-                          title="Chia sẻ album"
-                        >
-                          {shareCopiedId === album.id ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
-                        </button>
-                      )}
-
                       <button 
                         onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)}
                         disabled={Boolean(zippingFolderId)}
@@ -2109,18 +2060,6 @@ export default function GalleryClient() {
                   </>
                 )}
 
-                {!isSharedGuest && (
-                  <button
-                    onClick={(e) => handleShareFolder(currentActiveFolderId, e)}
-                    disabled={!currentActiveFolderId}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition cursor-pointer shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Chia sẻ thư mục đang mở"
-                  >
-                    {shareCopiedId === currentActiveFolderId ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
-                    <span>{shareCopiedId === currentActiveFolderId ? 'Đã chép!' : 'Chia sẻ'}</span>
-                  </button>
-                )}
-
                 {mediaFiles.length > 0 && (
                   <>
                     <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 p-1 rounded-xl border border-gray-200 dark:border-white/10 text-xs overflow-x-auto max-w-full">
@@ -2246,7 +2185,7 @@ export default function GalleryClient() {
                               </div>
 
                               <div className="p-3.5 flex items-center justify-between gap-2">
-                                <div onClick={() => handleOpenSubFolder(folder)} className="cursor-pointer truncate flex-1">
+                                <div onClick={() => handleOpenSubFolder(folder)} className="cursor-pointer truncate flex-1 min-w-0">
                                   <h4 className="font-semibold text-xs sm:text-sm hover:text-emerald-600 transition-colors truncate" title={displayName}>
                                     {displayName}
                                   </h4>
@@ -2255,34 +2194,42 @@ export default function GalleryClient() {
                                   </p>
                                 </div>
 
-                                {!isSharedGuest && (
-                                  <button
-                                    onClick={(e) => handleShareFolder(folder.id, e)}
-                                    className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer flex-shrink-0"
-                                    title="Chia sẻ thư mục này"
-                                  >
-                                    {shareCopiedId === folder.id ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
-                                  </button>
-                                )}
-
-                                <button
-                                  onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
-                                  disabled={Boolean(zippingFolderId)}
-                                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
-                                  title="Tải nén toàn bộ thư mục này"
-                                >
-                                  {isThisFolderZipping ? (
-                                    <>
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      <span>{zipProgress || 'Vui lòng đợi...'}</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Download className="w-3.5 h-3.5" />
-                                      <span>Tải</span>
-                                    </>
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  {!isSharedGuest && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleShareFolder(folder.id, e)}
+                                      className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20 transition cursor-pointer"
+                                      title="Chia sẻ thư mục này"
+                                    >
+                                      {shareCopiedId === folder.id ? (
+                                        <Check className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <Share2 className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
                                   )}
-                                </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
+                                    disabled={Boolean(zippingFolderId)}
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
+                                    title="Tải nén toàn bộ thư mục này"
+                                  >
+                                    {isThisFolderZipping ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>{zipProgress || 'Vui lòng đợi...'}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Download className="w-3.5 h-3.5" />
+                                        <span>Tải</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           )
