@@ -163,40 +163,6 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// HÀM TẢI TRỰC TIẾP KHÔNG MỞ TAB MỚI VÀ TỰ ĐỘNG BỎ QUA CẢNH BÁO VIRUS
-const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const iframe = document.createElement('iframe')
-  iframe.style.display = 'none'
-  iframe.name = `dl_frame_${fileId}_${Date.now()}`
-  document.body.appendChild(iframe)
-
-  const form = document.createElement('form')
-  form.method = 'POST'
-  form.action = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`
-  form.target = iframe.name
-  form.style.display = 'none'
-
-  const inputId = document.createElement('input')
-  inputId.type = 'hidden'
-  inputId.name = 'id'
-  inputId.value = fileId
-  form.appendChild(inputId)
-
-  const inputConfirm = document.createElement('input')
-  inputConfirm.type = 'hidden'
-  inputConfirm.name = 'confirm'
-  inputConfirm.value = 't'
-  form.appendChild(inputConfirm)
-
-  document.body.appendChild(form)
-  form.submit()
-
-  setTimeout(() => {
-    if (document.body.contains(form)) document.body.removeChild(form)
-    if (document.body.contains(iframe)) document.body.removeChild(iframe)
-  }, 4000)
-}
-
 export default function GalleryClient() {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
@@ -592,7 +558,7 @@ export default function GalleryClient() {
     URL.revokeObjectURL(url)
   }
 
-  // TẢI 1 FILE: VIDEO TẢI NGUYÊN BẢN 100% QUA NATIVE IFRAME KHÔNG NHẢY TRANG
+  // TẢI LẺ 1 FILE: TỰ ĐỘNG BÓC TÁCH LINK VÀ TẢI THẲNG TRÊN TRÌNH DUYỆT (KHÔNG QUA PROXY SERVERLESS)
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -606,16 +572,24 @@ export default function GalleryClient() {
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
 
-      // NẾU LÀ VIDEO: GỌI TRỰC TIẾP FORM ẨN QUA IFRAME NGẦM (CHUẨN 100% GỐC, KHÔNG ĐỔI TRANG)
+      // NẾU LÀ VIDEO: BÓC TÁCH LINK CHUẨN XÁC VÀ TẢI BẰNG TRÌNH DUYỆT TRỰC TIẾP
       if (item.type === 'video') {
-        triggerDirectBrowserDownload(item.id, exactFileName)
-        setTimeout(() => {
-          setDownloadingId(null)
-        }, 1200)
+        const res = await fetch(`/api/download?id=${encodeURIComponent(item.id)}&name=${encodeURIComponent(exactFileName)}&action=get_url`)
+        const data = await res.json()
+        const directUrl = data.url || `https://drive.usercontent.google.com/download?id=${item.id}&export=download&authuser=0&confirm=t`
+
+        const link = document.createElement('a')
+        link.href = directUrl
+        link.setAttribute('download', exactFileName)
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+
+        setDownloadingId(null)
         return
       }
 
-      // NẾU LÀ HÌNH ẢNH: TẢI QUA PROXY ĐỂ ÁP DỤNG WATERMARK
+      // NẾU LÀ HÌNH ẢNH: TẢI QUA PROXY ĐỂ ĐÓNG WATERMARK NẾU BẬT
       const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
       const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
       const res = await fetch(proxyUrl)
@@ -648,15 +622,18 @@ export default function GalleryClient() {
       }, 1000)
     } catch (err) {
       console.error('Lỗi khi tải:', err)
-      triggerDirectBrowserDownload(item.id, item.name)
+      const fallbackLink = document.createElement('a')
+      fallbackLink.href = `https://drive.usercontent.google.com/download?id=${item.id}&export=download&authuser=0&confirm=t`
+      fallbackLink.setAttribute('download', item.name)
+      document.body.appendChild(fallbackLink)
+      fallbackLink.click()
+      document.body.removeChild(fallbackLink)
     } finally {
-      setTimeout(() => {
-        setDownloadingId(null)
-      }, 1000)
+      setDownloadingId(null)
     }
   }
 
-  // TẢI ZIP RIÊNG BIỆT CHO TỪNG THƯ MỤC
+  // TẢI TOÀN BỘ ALBUM HOẶC THƯ MỤC
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -688,54 +665,68 @@ export default function GalleryClient() {
         return
       }
 
-      // NẾU THƯ MỤC CHỈ CHỨA VIDEO: TỰ ĐỘNG TẢI TRỰC TIẾP TỪNG TỆP BẰNG NATIVE DOWNLOAD TRÁNH FILE ZIP BỊ RỖNG
+      // Phân tách file video và ảnh
       const videoFiles = targetFiles.filter(f => f.type === 'video')
-      if (videoFiles.length > 0 && targetFiles.length === videoFiles.length) {
-        videoFiles.forEach((v, i) => {
-          setTimeout(() => {
-            triggerDirectBrowserDownload(v.id, v.name)
-          }, i * 1500)
-        })
-        setZippingFolderId(null)
-        setZipProgress('')
-        return
-      }
+      const imageFiles = targetFiles.filter(f => f.type === 'image')
 
-      const zip = new JSZip()
-      const total = targetFiles.length
-      let completedCount = 0
-
-      const CONCURRENCY_LIMIT = 3
-      const fetchRawOriginalFile = async (fileItem: MediaItem) => {
-        const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
-        const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
-        try {
-          const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
-          if (res.ok) {
-            let blob = await res.blob()
-            if (activeSetting.enable_watermark && fileItem.type === 'image') {
-              blob = await applyWatermarkToImageBlob(blob)
-            }
-            zip.file(exactFileName, blob, { compression: 'STORE' })
+      // 1. Tải trực tiếp các video bằng luồng Native Download (không qua ZIP để tránh giới hạn RAM)
+      if (videoFiles.length > 0) {
+        for (let i = 0; i < videoFiles.length; i++) {
+          const v = videoFiles[i]
+          const ext = 'mp4'
+          const exactFileName = v.name.includes('.') ? v.name : `${v.name}.${ext}`
+          try {
+            const res = await fetch(`/api/download?id=${encodeURIComponent(v.id)}&name=${encodeURIComponent(exactFileName)}&action=get_url`)
+            const data = await res.json()
+            const directUrl = data.url || `https://drive.usercontent.google.com/download?id=${v.id}&export=download&authuser=0&confirm=t`
+            
+            const link = document.createElement('a')
+            link.href = directUrl
+            link.setAttribute('download', exactFileName)
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+          } catch (e) {
+            console.error('Lỗi tải video:', e)
           }
-        } catch (err) {
-          console.error(`Lỗi tải: ${exactFileName}`, err)
-        } finally {
-          completedCount++
-          setZipProgress(`${completedCount}/${total}`)
         }
       }
 
-      for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
-        const chunk = targetFiles.slice(i, i + CONCURRENCY_LIMIT)
-        await Promise.all(chunk.map(fileItem => fetchRawOriginalFile(fileItem)))
-      }
+      // 2. Nén các file ảnh còn lại (nếu có)
+      if (imageFiles.length > 0) {
+        const zip = new JSZip()
+        const total = imageFiles.length
+        let completedCount = 0
 
-      setZipProgress('Tạo file ZIP...')
-      const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE', streamFiles: true }, (metadata) => {
-        setZipProgress(`${Math.floor(metadata.percent)}%`)
-      })
-      saveAs(zipContent, `${target.title}.zip`)
+        const CONCURRENCY_LIMIT = 4
+        const fetchImage = async (fileItem: MediaItem) => {
+          const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
+          try {
+            const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
+            if (res.ok) {
+              let blob = await res.blob()
+              if (activeSetting.enable_watermark) {
+                blob = await applyWatermarkToImageBlob(blob)
+              }
+              zip.file(exactFileName, blob, { compression: 'STORE' })
+            }
+          } catch (err) {
+            console.error(`Lỗi tải: ${exactFileName}`, err)
+          } finally {
+            completedCount++
+            setZipProgress(`${completedCount}/${total}`)
+          }
+        }
+
+        for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+          const chunk = imageFiles.slice(i, i + CONCURRENCY_LIMIT)
+          await Promise.all(chunk.map(fileItem => fetchImage(fileItem)))
+        }
+
+        setZipProgress('Tạo file ZIP...')
+        const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+        saveAs(zipContent, `${target.title}.zip`)
+      }
     } catch (err: any) {
       alert('Có lỗi xảy ra khi tải album: ' + err.message)
     } finally {
@@ -770,41 +761,61 @@ export default function GalleryClient() {
       }
 
       setZippingFolderId('batch_items')
-      setZipProgress('Đang nén...')
+      setZipProgress('Đang xử lý...')
       try {
-        const zip = new JSZip()
-        const total = selectedFiles.length
-        let completedCount = 0
+        const videoFiles = selectedFiles.filter(f => f.type === 'video')
+        const imageFiles = selectedFiles.filter(f => f.type === 'image')
 
-        const CONCURRENCY_LIMIT = 3
-        const fetchFile = async (fileItem: MediaItem) => {
-          const ext = fileItem.type === 'video' ? 'mp4' : 'jpg'
-          const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.${ext}`
-          try {
-            const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
-            if (res.ok) {
-              let blob = await res.blob()
-              if (activeSetting.enable_watermark && fileItem.type === 'image') {
-                blob = await applyWatermarkToImageBlob(blob)
+        // Tải các video trực tiếp
+        for (const v of videoFiles) {
+          const exactFileName = v.name.includes('.') ? v.name : `${v.name}.mp4`
+          const res = await fetch(`/api/download?id=${encodeURIComponent(v.id)}&name=${encodeURIComponent(exactFileName)}&action=get_url`)
+          const data = await res.json()
+          const directUrl = data.url || `https://drive.usercontent.google.com/download?id=${v.id}&export=download&authuser=0&confirm=t`
+          const link = document.createElement('a')
+          link.href = directUrl
+          link.setAttribute('download', exactFileName)
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+        }
+
+        // Nén các ảnh
+        if (imageFiles.length > 0) {
+          const zip = new JSZip()
+          const total = imageFiles.length
+          let completedCount = 0
+
+          const CONCURRENCY_LIMIT = 4
+          const fetchImage = async (fileItem: MediaItem) => {
+            const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
+            try {
+              const res = await fetch(`/api/download?url=${encodeURIComponent(fileItem.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`)
+              if (res.ok) {
+                let blob = await res.blob()
+                if (activeSetting.enable_watermark) {
+                  blob = await applyWatermarkToImageBlob(blob)
+                }
+                zip.file(exactFileName, blob, { compression: 'STORE' })
               }
-              zip.file(exactFileName, blob, { compression: 'STORE' })
+            } catch (err) {
+              console.error(err)
+            } finally {
+              completedCount++
+              setZipProgress(`${completedCount}/${total}`)
             }
-          } catch (err) {
-            console.error(err)
-          } finally {
-            completedCount++
-            setZipProgress(`${completedCount}/${total}`)
           }
+
+          for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+            const chunk = imageFiles.slice(i, i + CONCURRENCY_LIMIT)
+            await Promise.all(chunk.map(fileItem => fetchImage(fileItem)))
+          }
+
+          setZipProgress('Tạo file ZIP...')
+          const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+          saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
         }
 
-        for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
-          const chunk = selectedFiles.slice(i, i + CONCURRENCY_LIMIT)
-          await Promise.all(chunk.map(fileItem => fetchFile(fileItem)))
-        }
-
-        setZipProgress('Tạo file ZIP...')
-        const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
-        saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
         setSelectedItemIds(new Set())
       } catch (e: any) {
         alert('Lỗi tải tệp: ' + e.message)
