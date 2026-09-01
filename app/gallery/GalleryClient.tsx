@@ -66,6 +66,10 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
+interface GalleryClientProps {
+  authenticatedUser?: any
+}
+
 const extractDriveId = (url: string) => {
   if (!url) return ''
   const clean = url.trim()
@@ -188,9 +192,9 @@ const getDirectImageSource = (fileId: string) =>
 const isIOSDevice = () =>
   typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
 
-export default function GalleryClient() {
+export default function GalleryClient({ authenticatedUser = null }: GalleryClientProps) {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
+  const [user, setUser] = useState<any>(authenticatedUser)
   const [loading, setLoading] = useState(true)
 
   const isTimeForDarkMode = () => {
@@ -1523,25 +1527,8 @@ export default function GalleryClient() {
             }
           }
         } else {
-          const { data: sessionData } = await supabase.auth.getSession()
-          if (!sessionData.session) {
-            setLoading(false)
-            router.replace('/')
-            return
-          }
-
-          const loggedInEmail = sessionData.session.user.email
-          const { data: whitelist, error } = await supabase.from('allowed_emails').select('email').eq('email', loggedInEmail).single()
-
-          if (error || !whitelist) {
-            alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
-            await supabase.auth.signOut()
-            setLoading(false)
-            router.replace('/')
-            return
-          }
-
-          setUser(sessionData.session.user)
+          // Xác thực đã được tách ra khỏi GalleryClient và xử lý tại /gallery/page.tsx.
+          if (authenticatedUser) setUser(authenticatedUser)
           const masterFolders = await fetchMasterFoldersList()
           checkAllMasterFolders(masterFolders, false, knownSet)
         }
@@ -1558,7 +1545,7 @@ export default function GalleryClient() {
     }
 
     initData()
-  }, [])
+  }, [authenticatedUser])
 
   useEffect(() => {
     if (previewMedia) {
