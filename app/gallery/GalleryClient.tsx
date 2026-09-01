@@ -167,7 +167,7 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
 // Browser KHÔNG BAO GIỜ nhận URL download của Google Drive, vì vậy không bị
 // chuyển sang trang "Google Drive cannot scan this file for viruses".
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const downloadUrl = `/api/download?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
+  const downloadUrl = `/api/drive?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
 
   const link = document.createElement('a')
   link.href = downloadUrl
@@ -1094,13 +1094,27 @@ export default function GalleryClient() {
     }
   }
 
-  const handleShareFolder = (folderId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    const numericCode = toNumericCode(folderId)
-    const shareUrl = `${window.location.origin}/s/${numericCode}`
-    navigator.clipboard.writeText(shareUrl)
-    setShareCopiedId(folderId)
-    setTimeout(() => setShareCopiedId(null), 2500)
+  const handleShareFolder = async (folderId: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
+    if (!folderId) return
+
+    try {
+      // Giữ format link /s/XXXXXX hiện tại để tương thích với Album.
+      // Với thư mục con, initData() sẽ dò mã này trong known_drive_folders.
+      const numericCode = toNumericCode(folderId)
+      const shareUrl = `${window.location.origin}/s/${numericCode}`
+
+      await navigator.clipboard.writeText(shareUrl)
+      setShareCopiedId(folderId)
+      setTimeout(() => setShareCopiedId(null), 2500)
+    } catch (err) {
+      console.error('Lỗi tạo link chia sẻ:', err)
+      alert('Không thể sao chép link chia sẻ. Vui lòng kiểm tra quyền Clipboard của trình duyệt.')
+    }
   }
 
   const handleOpenSubFolder = (folderItem: MediaItem) => {
@@ -1479,35 +1493,87 @@ export default function GalleryClient() {
 
         if (sharedId) {
           setIsSharedGuest(true)
-          const matchedAlbum = fAlbums.find(a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.driveUrl) === sharedId)
+
+          // 1) Link Album cũ: vẫn hỗ trợ ID, mã số 6 chữ số hoặc Drive ID.
+          const matchedAlbum = fAlbums.find(
+            a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.driveUrl) === sharedId
+          )
 
           if (matchedAlbum) {
             setSelectedAlbum(matchedAlbum)
             setFolderHistory([])
             const currentPass = fSettings[matchedAlbum.id]?.password || matchedAlbum.password
+
             if (currentPass) {
               setIsLocked(true)
             } else {
               await fetchAlbumImages(matchedAlbum.driveUrl)
             }
           } else {
-            let realFolderId = sharedId
-            let adminSetTitle = customNames[sharedId] || ''
+            // 2) Link thư mục con: /s/XXXXXX được giải mã bằng bảng
+            // known_drive_folders. Không cần để lộ Drive ID trong URL.
+            const { data: knownFolders, error: knownFoldersError } = await supabase
+              .from('known_drive_folders')
+              .select('id, name, parent_url')
 
-            const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
-            const fallbackAlbum: Album = {
-              id: realFolderId,
-              title: adminSetTitle || 'DinhThong Album',
-              coverUrl: '',
-              driveUrl: folderDriveUrl
+            if (knownFoldersError) {
+              console.error('Lỗi đọc thư mục chia sẻ:', knownFoldersError)
             }
 
-            setSelectedAlbum(fallbackAlbum)
-            const subPass = fSettings[realFolderId]?.password
-            if (subPass) {
-              setIsLocked(true)
+            const matchedFolder = (knownFolders || []).find(
+              (f: any) => f.id === sharedId || toNumericCode(f.id) === sharedId
+            )
+
+            if (matchedFolder) {
+              const realFolderId = matchedFolder.id
+              const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
+              const displayTitle = customNames[realFolderId] || matchedFolder.name || 'Thư mục'
+
+              // Xem thư mục được chia sẻ như một root độc lập.
+              // Khi đó guest đi thẳng vào đúng thư mục, không cần qua album cha.
+              const sharedFolderAlbum: Album = {
+                id: realFolderId,
+                title: displayTitle,
+                coverUrl: albumCovers[realFolderId] || '',
+                driveUrl: folderDriveUrl,
+                password: fSettings[realFolderId]?.password || '',
+                max_select: fSettings[realFolderId]?.max_select || 0,
+                allow_comments: fSettings[realFolderId]?.allow_comments ?? true,
+                enable_watermark: fSettings[realFolderId]?.enable_watermark ?? false
+              }
+
+              setSelectedAlbum(sharedFolderAlbum)
+              setFolderHistory([])
+
+              const folderPass = fSettings[realFolderId]?.password
+              if (folderPass) {
+                setIsLocked(true)
+              } else {
+                await fetchAlbumImages(folderDriveUrl)
+              }
             } else {
-              await fetchAlbumImages(folderDriveUrl)
+              // 3) Tương thích ngược với link cũ dùng trực tiếp Drive ID.
+              const realFolderId = sharedId
+              const adminSetTitle = customNames[realFolderId] || ''
+              const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
+              const fallbackAlbum: Album = {
+                id: realFolderId,
+                title: adminSetTitle || 'DinhThong Album',
+                coverUrl: '',
+                driveUrl: folderDriveUrl,
+                password: fSettings[realFolderId]?.password || '',
+                max_select: fSettings[realFolderId]?.max_select || 0,
+                allow_comments: fSettings[realFolderId]?.allow_comments ?? true,
+                enable_watermark: fSettings[realFolderId]?.enable_watermark ?? false
+              }
+
+              setSelectedAlbum(fallbackAlbum)
+              const subPass = fSettings[realFolderId]?.password
+              if (subPass) {
+                setIsLocked(true)
+              } else {
+                await fetchAlbumImages(folderDriveUrl)
+              }
             }
           }
         } else {
@@ -1949,6 +2015,16 @@ export default function GalleryClient() {
                         <p className="text-[11px] text-gray-400 mt-0.5">Nhấp để xem</p>
                       </div>
 
+                      {!isSharedGuest && (
+                        <button
+                          onClick={(e) => handleShareFolder(album.id, e)}
+                          className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer flex-shrink-0"
+                          title="Chia sẻ album"
+                        >
+                          {shareCopiedId === album.id ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
+
                       <button 
                         onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)}
                         disabled={Boolean(zippingFolderId)}
@@ -2094,6 +2170,18 @@ export default function GalleryClient() {
                   </>
                 )}
 
+                {!isSharedGuest && (
+                  <button
+                    onClick={(e) => handleShareFolder(currentActiveFolderId, e)}
+                    disabled={!currentActiveFolderId}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition cursor-pointer shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Chia sẻ thư mục đang mở"
+                  >
+                    {shareCopiedId === currentActiveFolderId ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+                    <span>{shareCopiedId === currentActiveFolderId ? 'Đã chép!' : 'Chia sẻ'}</span>
+                  </button>
+                )}
+
                 {mediaFiles.length > 0 && (
                   <>
                     <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 p-1 rounded-xl border border-gray-200 dark:border-white/10 text-xs overflow-x-auto max-w-full">
@@ -2227,6 +2315,16 @@ export default function GalleryClient() {
                                     {hasCover ? 'Album ảnh' : 'Thư mục con'}
                                   </p>
                                 </div>
+
+                                {!isSharedGuest && (
+                                  <button
+                                    onClick={(e) => handleShareFolder(folder.id, e)}
+                                    className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer flex-shrink-0"
+                                    title="Chia sẻ thư mục này"
+                                  >
+                                    {shareCopiedId === folder.id ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
+                                  </button>
+                                )}
 
                                 <button
                                   onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
