@@ -163,14 +163,129 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// TẢI VIDEO ĐƠN TRỰC TIẾP TỪ GOOGLE DRIVE
-// Không đi qua Vercel để tối đa băng thông.
-// Lưu ý: một số file lớn có thể vẫn bị Google Drive yêu cầu xác nhận/quét virus.
-const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const directUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`
+// TẢI VIDEO ĐƠN QUA PROXY CỦA WEBSITE - TỐI ƯU BĂNG THÔNG
+// Browser không mở URL Drive trực tiếp, tránh trang quét virus.
+// Với Chrome/Edge, tải song song nhiều Range request qua proxy và ghi trực tiếp xuống đĩa.
+const triggerDirectBrowserDownload = async (fileId: string, fileName: string, fastMode = true) => {
+  // Chế độ nhanh: tải song song nhiều Range request qua chính proxy của website,
+  // tránh Google Drive mở trang quét virus và đồng thời tận dụng nhiều kết nối.
+  // Chrome/Edge hỗ trợ File System Access API để ghi từng chunk trực tiếp xuống đĩa,
+  // không cần giữ toàn bộ video trong RAM.
+  if (fastMode && typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+    let writable: any = null
 
+    try {
+      const win = window as any
+      const fileHandle = await win.showSaveFilePicker({
+        suggestedName: fileName,
+        types: [{
+          description: 'Video',
+          accept: { 'video/*': ['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm'] },
+        }],
+      })
+
+      const metaRes = await fetch(
+        `/api/download?action=meta&id=${encodeURIComponent(fileId)}`,
+        { cache: 'no-store' }
+      )
+      const meta = await metaRes.json()
+      if (!metaRes.ok || !meta.size) {
+        throw new Error(meta?.error || 'Không lấy được dung lượng video.')
+      }
+
+      const totalSize = Number(meta.size)
+      if (!Number.isFinite(totalSize) || totalSize <= 0) {
+        throw new Error('Dung lượng video không hợp lệ.')
+      }
+
+      const CHUNK_SIZE = 32 * 1024 * 1024 // 32 MB / request
+      const CONCURRENCY = 6
+      const totalChunks = Math.ceil(totalSize / CHUNK_SIZE)
+      let nextChunk = 0
+      let completed = 0
+      let writeChain = Promise.resolve()
+
+      writable = await fileHandle.createWritable()
+      await writable.truncate(totalSize)
+
+      const downloadChunk = async (chunkIndex: number) => {
+        const start = chunkIndex * CHUNK_SIZE
+        const end = Math.min(totalSize - 1, start + CHUNK_SIZE - 1)
+
+        const res = await fetch(
+          `/api/download?action=download&id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`,
+          {
+            cache: 'no-store',
+            headers: { Range: `bytes=${start}-${end}` },
+          }
+        )
+
+        if (!res.ok || !res.body) {
+          throw new Error(`Chunk ${chunkIndex + 1}/${totalChunks} tải lỗi (HTTP ${res.status})`)
+        }
+
+        // Khi gửi Range, proxy phải trả 206. Nếu upstream trả sai dạng response,
+        // dừng để không tạo ra file thiếu/corrupt.
+        if (res.status !== 206) {
+          throw new Error(`Server không hỗ trợ Range cho chunk ${chunkIndex + 1} (HTTP ${res.status})`)
+        }
+
+        const buffer = await res.arrayBuffer()
+        const bytes = new Uint8Array(buffer)
+        const expectedLength = end - start + 1
+
+        if (bytes.byteLength !== expectedLength) {
+          throw new Error(
+            `Chunk ${chunkIndex + 1}/${totalChunks} thiếu dữ liệu: nhận ${bytes.byteLength} / ${expectedLength} bytes`
+          )
+        }
+
+        // Ghi tuần tự để tránh nhiều writable.write() đụng nhau,
+        // nhưng các request mạng vẫn chạy song song.
+        writeChain = writeChain.then(() =>
+          writable.write({ type: 'write', position: start, data: bytes })
+        )
+        await writeChain
+
+        completed++
+      }
+
+      const worker = async () => {
+        while (true) {
+          const chunkIndex = nextChunk++
+          if (chunkIndex >= totalChunks) return
+          await downloadChunk(chunkIndex)
+        }
+      }
+
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, totalChunks) }, () => worker())
+      )
+
+      if (completed !== totalChunks) {
+        throw new Error(`Chỉ tải được ${completed}/${totalChunks} phần của video.`)
+      }
+
+      await writable.close()
+      writable = null
+      return
+    } catch (error: any) {
+      try {
+        if (writable) await writable.abort()
+      } catch {}
+
+      // Người dùng bấm Cancel trên hộp thoại lưu -> không báo lỗi.
+      if (error?.name === 'AbortError') return
+
+      console.error('Fast video download failed:', error)
+      // Fallback về một request proxy duy nhất để vẫn tải được file.
+    }
+  }
+
+  // Fallback tương thích Safari/Firefox hoặc khi browser không có File System Access API.
+  const downloadUrl = `/api/download?action=download&id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
   const link = document.createElement('a')
-  link.href = directUrl
+  link.href = downloadUrl
   link.download = fileName
   link.style.display = 'none'
   link.setAttribute('aria-hidden', 'true')
@@ -178,9 +293,7 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
   link.click()
 
   window.setTimeout(() => {
-    if (document.body.contains(link)) {
-      document.body.removeChild(link)
-    }
+    if (document.body.contains(link)) document.body.removeChild(link)
   }, 1500)
 }
 
@@ -595,8 +708,7 @@ export default function GalleryClient() {
 
       // NẾU LÀ VIDEO: GỌI TẢI TRỰC TIẾP KHÔNG MỞ TAB MỚI
       if (item.type === 'video') {
-        triggerDirectBrowserDownload(item.id, exactFileName)
-        setDownloadingId(null)
+        await triggerDirectBrowserDownload(item.id, exactFileName, true)
         return
       }
 
@@ -679,7 +791,7 @@ export default function GalleryClient() {
           const v = videoFiles[i]
           const ext = 'mp4'
           const exactFileName = v.name.includes('.') ? v.name : `${v.name}.${ext}`
-          triggerDirectBrowserDownload(v.id, exactFileName)
+          triggerDirectBrowserDownload(v.id, exactFileName, false)
           // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
           // nhiều download liên tiếp khi tải cả album.
           await new Promise(resolve => setTimeout(resolve, 350))
@@ -762,7 +874,7 @@ export default function GalleryClient() {
 
         for (const v of videoFiles) {
           const exactFileName = v.name.includes('.') ? v.name : `${v.name}.mp4`
-          triggerDirectBrowserDownload(v.id, exactFileName)
+          triggerDirectBrowserDownload(v.id, exactFileName, false)
           // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
           // nhiều download liên tiếp khi tải cả album.
           await new Promise(resolve => setTimeout(resolve, 350))
