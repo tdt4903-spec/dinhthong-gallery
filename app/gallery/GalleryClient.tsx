@@ -190,7 +190,11 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
   }, 1000)
 }
 
-export default function GalleryClient() {
+interface GalleryClientProps {
+  displayName: string
+}
+
+export default function GalleryClient({ displayName }: GalleryClientProps) {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -1957,6 +1961,13 @@ export default function GalleryClient() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
         {!selectedAlbum ? (
           <div>
+            {!isSharedGuest && (
+              <div className="mb-5 sm:mb-7">
+                <p className="text-xs sm:text-sm font-medium text-emerald-600 dark:text-emerald-400 tracking-wide">
+                  Xin chào, {displayName} 👋
+                </p>
+              </div>
+            )}
             <section className="relative rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl min-h-[260px] sm:min-h-[385px] flex items-center mb-8 sm:mb-12 group">
               <img 
                 src="/banner.jpg" 
