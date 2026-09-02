@@ -191,10 +191,10 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
 }
 
 interface GalleryClientProps {
-  displayName: string
+  displayName?: string
 }
 
-export default function GalleryClient({ displayName }: GalleryClientProps) {
+export default function GalleryClient({ displayName = '' }: GalleryClientProps) {
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -1964,7 +1964,7 @@ export default function GalleryClient({ displayName }: GalleryClientProps) {
             {!isSharedGuest && (
               <div className="mb-5 sm:mb-7">
                 <p className="text-xs sm:text-sm font-medium text-emerald-600 dark:text-emerald-400 tracking-wide">
-                  Xin chào, {displayName} 👋
+                  {displayName ? `Xin chào, ${displayName} 👋` : ''}
                 </p>
               </div>
             )}
