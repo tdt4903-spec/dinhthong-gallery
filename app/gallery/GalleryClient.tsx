@@ -1770,6 +1770,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               )
             )}
 
+            {!isSharedGuest && displayName.trim() && (
+              <span
+                className={`hidden sm:block font-serif italic text-xs sm:text-sm whitespace-nowrap transition-colors ${
+                  isDarkMode ? 'text-gray-300' : 'text-gray-500'
+                }`}
+              >
+                Xin chào, {displayName.trim()}
+              </span>
+            )}
+
             <div className="flex items-center gap-1.5 pl-1.5 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
               <button
                 onClick={handleToggleDarkMode}
