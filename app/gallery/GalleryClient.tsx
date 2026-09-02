@@ -167,7 +167,7 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
 // Browser KHÔNG BAO GIỜ nhận URL download của Google Drive, vì vậy không bị
 // chuyển sang trang "Google Drive cannot scan this file for viruses".
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const downloadUrl = `/api/drive?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
+  const downloadUrl = `https://dinhthong-video-proxy.tdt4903.workers.dev/video?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
 
   const link = document.createElement('a')
   link.href = downloadUrl
@@ -1664,6 +1664,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               <span className="text-base sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
               <span className="font-serif italic text-emerald-600 text-xs sm:text-lg">gallery</span>
             </div>
+
+            {!isSharedGuest && displayName.trim() && (
+              <span
+                className={`hidden sm:inline-block text-xs md:text-sm font-serif italic tracking-wide truncate max-w-[180px] ${
+                  isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                }`}
+                title={`Xin chào, ${displayName.trim()}`}
+              >
+                Xin chào, {displayName.trim()}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
