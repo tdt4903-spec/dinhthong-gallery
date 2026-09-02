@@ -66,10 +66,6 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
-interface GalleryClientProps {
-  authenticatedUser?: any
-}
-
 const extractDriveId = (url: string) => {
   if (!url) return ''
   const clean = url.trim()
@@ -168,10 +164,10 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
 }
 
 // TẢI VIDEO QUA SERVER PROXY CỦA WEBSITE
-// Giữ nguyên mục tiêu: browser chỉ gọi website, không điều hướng sang Google Drive.
-// Endpoint /api/download hỗ trợ Range để video có thể phát mượt theo từng đoạn.
+// Browser KHÔNG BAO GIỜ nhận URL download của Google Drive, vì vậy không bị
+// chuyển sang trang "Google Drive cannot scan this file for viruses".
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const downloadUrl = `/api/download?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
+  const downloadUrl = `/api/drive?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
 
   const link = document.createElement('a')
   link.href = downloadUrl
@@ -182,19 +178,15 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
   link.click()
 
   window.setTimeout(() => {
-    if (document.body.contains(link)) document.body.removeChild(link)
-  }, 1500)
+    if (document.body.contains(link)) {
+      document.body.removeChild(link)
+    }
+  }, 1000)
 }
 
-const getDirectImageSource = (fileId: string) =>
-  `https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}=s0`
-
-const isIOSDevice = () =>
-  typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
-
-export default function GalleryClient({ authenticatedUser = null }: GalleryClientProps) {
+export default function GalleryClient() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(authenticatedUser)
+  const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   const isTimeForDarkMode = () => {
@@ -299,6 +291,14 @@ export default function GalleryClient({ authenticatedUser = null }: GalleryClien
   const thumbnailRef = useRef<HTMLDivElement>(null)
   const touchStartX = useRef<number | null>(null)
   const touchEndX = useRef<number | null>(null)
+
+  // Drag/Pan ảnh khi đã zoom
+  const zoomContainerRef = useRef<HTMLDivElement>(null)
+  const zoomImageRef = useRef<HTMLImageElement>(null)
+  const isPanningRef = useRef(false)
+  const panStartPointRef = useRef({ x: 0, y: 0 })
+  const panStartPositionRef = useRef({ x: 0, y: 0 })
+  const didPanRef = useRef(false)
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -608,45 +608,37 @@ export default function GalleryClient({ authenticatedUser = null }: GalleryClien
         return
       }
 
-      // ẢNH: nếu không bật watermark thì lấy ảnh trực tiếp từ Googleusercontent
-      // để giữ tốc độ như trước; chỉ dùng proxy khi thực sự cần watermark.
-      const ios = isIOSDevice()
-      let blob: Blob
+      // NẾU LÀ HÌNH ẢNH: TẢI QUA PROXY ĐỂ ĐÓNG WATERMARK NẾU CÓ
+      const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
+      const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
+      const res = await fetch(proxyUrl)
+      if (!res.ok) throw new Error('Fetch failed')
+      
+      let blob = await res.blob()
 
       if (activeSetting.enable_watermark) {
-        const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
-        const res = await fetch(proxyUrl, { cache: 'no-store' })
-        if (!res.ok) throw new Error('Fetch ảnh qua proxy thất bại')
-        blob = await res.blob()
         blob = await applyWatermarkToImageBlob(blob)
-      } else {
-        const imageUrl = getDirectImageSource(item.id)
-        const res = await fetch(imageUrl, { cache: 'force-cache' })
-        if (!res.ok) throw new Error('Không thể tải ảnh trực tiếp')
-        blob = await res.blob()
       }
 
-      const fileObj = new File([blob], exactFileName, { type: blob.type || 'image/jpeg' })
+      const fileObj = new File([blob], exactFileName, { type: 'image/jpeg' })
 
-      // iPhone/iPad: dùng Share Sheet vì Safari thường không tôn trọng
-      // thuộc tính download với Blob URL. Người dùng có thể chọn Lưu hình ảnh/Tệp.
-      if (ios && navigator.share && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
+      if (isIOS && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
         await navigator.share({ files: [fileObj], title: exactFileName })
+        setDownloadingId(null)
         return
       }
 
       const blobUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = blobUrl
-      link.download = exactFileName
+      link.setAttribute('download', exactFileName)
       link.style.display = 'none'
-      link.setAttribute('aria-hidden', 'true')
       document.body.appendChild(link)
       link.click()
-      window.setTimeout(() => {
+      setTimeout(() => {
         if (document.body.contains(link)) document.body.removeChild(link)
         URL.revokeObjectURL(blobUrl)
-      }, 1500)
+      }, 1000)
     } catch (err) {
       console.error('Lỗi khi tải:', err)
     } finally {
@@ -1232,22 +1224,130 @@ export default function GalleryClient({ authenticatedUser = null }: GalleryClien
     }
   }
 
-  const handleTouchStart = (e: React.TouchEvent) => { 
+  const getPanBounds = useCallback(() => {
+    const container = zoomContainerRef.current
+    const image = zoomImageRef.current
+    if (!container || !image || zoomScale <= 1) return { maxX: 0, maxY: 0 }
+
+    const containerWidth = container.clientWidth
+    const containerHeight = container.clientHeight
+    const imageWidth = image.offsetWidth * zoomScale
+    const imageHeight = image.offsetHeight * zoomScale
+
+    return {
+      maxX: Math.max(0, (imageWidth - containerWidth) / 2),
+      maxY: Math.max(0, (imageHeight - containerHeight) / 2),
+    }
+  }, [zoomScale])
+
+  const clampPan = useCallback((x: number, y: number) => {
+    const { maxX, maxY } = getPanBounds()
+    return {
+      x: Math.max(-maxX, Math.min(maxX, x)),
+      y: Math.max(-maxY, Math.min(maxY, y)),
+    }
+  }, [getPanBounds])
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (previewMedia?.type === 'video' || zoomScale <= 1) {
+      touchStartX.current = e.clientX
+      touchEndX.current = null
+      return
+    }
+
+    e.preventDefault()
+    e.stopPropagation()
+    isPanningRef.current = true
+    didPanRef.current = false
+    panStartPointRef.current = { x: e.clientX, y: e.clientY }
+    panStartPositionRef.current = { ...panPosition }
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isPanningRef.current || previewMedia?.type === 'video') {
+      if (zoomScale <= 1 && touchStartX.current !== null) {
+        touchEndX.current = e.clientX
+        if (Math.abs(e.clientX - touchStartX.current) > 8) {
+          didPanRef.current = true
+        }
+      }
+      return
+    }
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    const dx = e.clientX - panStartPointRef.current.x
+    const dy = e.clientY - panStartPointRef.current.y
+
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+      didPanRef.current = true
+    }
+
+    const next = clampPan(
+      panStartPositionRef.current.x + dx,
+      panStartPositionRef.current.y + dy
+    )
+    setPanPosition(next)
+  }
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isPanningRef.current) {
+      isPanningRef.current = false
+      try {
+        e.currentTarget.releasePointerCapture?.(e.pointerId)
+      } catch {}
+      return
+    }
+
+    if (previewMedia?.type === 'video' || zoomScale > 1) return
+    if (touchStartX.current === null || touchEndX.current === null) {
+      touchStartX.current = null
+      touchEndX.current = null
+      return
+    }
+
+    const distance = touchStartX.current - touchEndX.current
+    const isSwipe = Math.abs(distance) > 45
+
+    if (distance > 45) handleNextImage()
+    if (distance < -45) handlePrevImage()
+
+    if (isSwipe) {
+      didPanRef.current = true
+    }
+
+    touchStartX.current = null
+    touchEndX.current = null
+  }
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (zoomScale > 1 || previewMedia?.type === 'video') return
     if (e.touches.length === 1) {
-      touchStartX.current = e.targetTouches[0].clientX 
+      touchStartX.current = e.targetTouches[0].clientX
     }
   }
-  const handleTouchMove = (e: React.TouchEvent) => { 
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (zoomScale > 1 || previewMedia?.type === 'video') return
     if (e.touches.length === 1) {
-      touchEndX.current = e.targetTouches[0].clientX 
+      touchEndX.current = e.targetTouches[0].clientX
     }
   }
+
   const handleTouchEnd = () => {
-    if (zoomScale > 1) return
-    if (!touchStartX.current || !touchEndX.current) return
+    if (zoomScale > 1 || previewMedia?.type === 'video') return
+    if (touchStartX.current === null || touchEndX.current === null) {
+      touchStartX.current = null
+      touchEndX.current = null
+      return
+    }
+
     const distance = touchStartX.current - touchEndX.current
     if (distance > 45) handleNextImage()
     if (distance < -45) handlePrevImage()
+
     touchStartX.current = null
     touchEndX.current = null
   }
@@ -1261,7 +1361,19 @@ export default function GalleryClient({ authenticatedUser = null }: GalleryClien
     if (e) e.stopPropagation()
     setZoomScale(prev => {
       const next = Math.max(prev - 0.4, 1)
-      if (next === 1) setPanPosition({ x: 0, y: 0 })
+      if (next === 1) {
+        setPanPosition({ x: 0, y: 0 })
+      } else {
+        requestAnimationFrame(() => {
+          setPanPosition(current => {
+            const { maxX, maxY } = getPanBounds()
+            return {
+              x: Math.max(-maxX, Math.min(maxX, current.x)),
+              y: Math.max(-maxY, Math.min(maxY, current.y)),
+            }
+          })
+        })
+      }
       return next
     })
   }
@@ -1272,12 +1384,25 @@ export default function GalleryClient({ authenticatedUser = null }: GalleryClien
     setPanPosition({ x: 0, y: 0 })
   }
 
+  useEffect(() => {
+    if (zoomScale <= 1 || previewMedia?.type === 'video') {
+      setPanPosition({ x: 0, y: 0 })
+      isPanningRef.current = false
+      didPanRef.current = false
+    } else {
+      requestAnimationFrame(() => {
+        setPanPosition(current => clampPan(current.x, current.y))
+      })
+    }
+  }, [zoomScale, previewMedia?.id, clampPan])
+
   const handleDoubleTap = (e: React.TouchEvent | React.MouseEvent) => {
     const now = Date.now()
     if (now - lastTapRef.current < 300) {
       if (zoomScale > 1) {
         handleResetZoom()
       } else {
+        setPanPosition({ x: 0, y: 0 })
         setZoomScale(2.2)
       }
     }
@@ -1527,8 +1652,25 @@ export default function GalleryClient({ authenticatedUser = null }: GalleryClien
             }
           }
         } else {
-          // Xác thực đã được tách ra khỏi GalleryClient và xử lý tại /gallery/page.tsx.
-          if (authenticatedUser) setUser(authenticatedUser)
+          const { data: sessionData } = await supabase.auth.getSession()
+          if (!sessionData.session) {
+            setLoading(false)
+            router.replace('/')
+            return
+          }
+
+          const loggedInEmail = sessionData.session.user.email
+          const { data: whitelist, error } = await supabase.from('allowed_emails').select('email').eq('email', loggedInEmail).single()
+
+          if (error || !whitelist) {
+            alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
+            await supabase.auth.signOut()
+            setLoading(false)
+            router.replace('/')
+            return
+          }
+
+          setUser(sessionData.session.user)
           const masterFolders = await fetchMasterFoldersList()
           checkAllMasterFolders(masterFolders, false, knownSet)
         }
@@ -1545,7 +1687,7 @@ export default function GalleryClient({ authenticatedUser = null }: GalleryClien
     }
 
     initData()
-  }, [authenticatedUser])
+  }, [])
 
   useEffect(() => {
     if (previewMedia) {
@@ -2419,9 +2561,10 @@ export default function GalleryClient({ authenticatedUser = null }: GalleryClien
       {previewMedia && (
         <div 
           className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-2 sm:p-4 select-none touch-pan-y"
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
         >
           {/* Header Lightbox */}
           <div className="flex items-center justify-between px-3 py-2 text-white/90 z-30">
@@ -2482,33 +2625,48 @@ export default function GalleryClient({ authenticatedUser = null }: GalleryClien
           </div>
 
           <div 
-            className="relative flex-1 flex items-center justify-center p-2 overflow-hidden w-full h-full cursor-grab active:cursor-grabbing"
-            onClick={handleDoubleTap}
+            ref={zoomContainerRef}
+            className={`relative flex-1 flex items-center justify-center p-2 overflow-hidden w-full h-full ${
+              previewMedia.type === 'video' || zoomScale <= 1
+                ? 'cursor-default'
+                : isPanningRef.current
+                  ? 'cursor-grabbing'
+                  : 'cursor-grab'
+            }`}
+            style={{ touchAction: zoomScale > 1 && previewMedia.type !== 'video' ? 'none' : 'pan-y' }}
+            onClick={(e) => {
+              if (didPanRef.current) {
+                didPanRef.current = false
+                e.stopPropagation()
+                return
+              }
+              handleDoubleTap(e)
+            }}
           >
             {previewMedia.type === 'video' ? (
               <div className="relative w-full max-w-5xl aspect-video flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-2xl">
-                <video
-                  key={previewMedia.id}
-                  src={`/api/download?id=${encodeURIComponent(previewMedia.id)}&action=download&name=${encodeURIComponent(previewMedia.name)}`}
-                  className="w-full h-full rounded-2xl object-contain bg-black"
-                  controls
-                  playsInline
-                  preload="auto"
-                  poster={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
-                  controlsList="nodownload"
+                <iframe
+                  src={`https://drive.google.com/file/d/${previewMedia.id}/preview`}
+                  className="w-full h-full border-0 rounded-2xl"
+                  allow="autoplay; fullscreen"
+                  allowFullScreen
                 />
               </div>
             ) : (
               <div 
                 className="relative max-h-full max-w-full flex items-center justify-center transition-transform duration-100 ease-out"
                 style={{
-                  transform: `scale(${zoomScale}) translate(${panPosition.x}px, ${panPosition.y}px)`
+                  transform: `translate3d(${panPosition.x}px, ${panPosition.y}px, 0) scale(${zoomScale})`,
+                  transformOrigin: 'center center',
+                  willChange: zoomScale > 1 ? 'transform' : 'auto',
                 }}
               >
                 <img 
+                  ref={zoomImageRef}
                   src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
                   alt={previewMedia.name}
-                  className="max-h-[78vh] max-w-[95vw] object-contain rounded-lg shadow-2xl transition-all duration-150 pointer-events-none"
+                  draggable={false}
+                  className="max-h-[78vh] max-w-[95vw] object-contain rounded-lg shadow-2xl transition-all duration-150 pointer-events-none select-none"
                 />
 
                 {activeSetting.enable_watermark && (
