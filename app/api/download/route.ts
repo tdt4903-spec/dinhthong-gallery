@@ -4,6 +4,9 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export const maxDuration = 300
 
+// NOTE: Video downloads should use NEXT_PUBLIC_MEDIA_PROXY_URL (Cloudflare Worker).
+// This Vercel endpoint is kept only as a backward-compatible fallback.
+
 const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
 
 const getDriveFileId = (value: string) => {
@@ -129,8 +132,16 @@ export async function GET(request: NextRequest) {
       headers.set('Content-Type', metadata.mimeType || driveRes.headers.get('content-type') || 'application/octet-stream')
       headers.set('Content-Disposition', encodeContentDispositionFilename(fileName))
       headers.set('Accept-Ranges', 'bytes')
-      headers.set('Cache-Control', 'private, max-age=0, must-revalidate')
-      headers.set('Pragma', 'no-cache')
+
+      // Cho phép Vercel CDN cache file tải xuống.
+      // Trước đây route dùng `private, no-cache` nên mỗi lần khách tải
+      // lại đều phải stream toàn bộ dữ liệu từ Function -> Edge, làm
+      // Fast Origin Transfer tăng rất nhanh.
+      //
+      // File được định danh bởi URL chứa fileId + name nên cùng một file
+      // có thể được phục vụ lại từ CDN cho các lượt tải tiếp theo.
+      headers.set('Cache-Control', 'public, max-age=0, must-revalidate')
+      headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=604800, stale-while-revalidate=86400')
       headers.set('X-Content-Type-Options', 'nosniff')
 
       const contentRange = driveRes.headers.get('content-range')

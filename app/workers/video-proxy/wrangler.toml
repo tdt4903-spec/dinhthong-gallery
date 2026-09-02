@@ -1,0 +1,7 @@
+name = "dinhthong-gallery-video"
+main = "cloudflare-video-worker.js"
+compatibility_date = "2026-09-02"
+
+[vars]
+# Do NOT put GOOGLE_DRIVE_API_KEY here.
+# Add it as a Worker secret in Cloudflare.

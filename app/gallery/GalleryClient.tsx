@@ -163,11 +163,17 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// TẢI VIDEO QUA SERVER PROXY CỦA WEBSITE
-// Browser KHÔNG BAO GIỜ nhận URL download của Google Drive, vì vậy không bị
-// chuyển sang trang "Google Drive cannot scan this file for viruses".
+// TẢI VIDEO QUA MEDIA PROXY NGOÀI VERCEL
+// Mục tiêu: browser chỉ nhận URL của media proxy, không nhận URL Google Drive
+// và dữ liệu video lớn không đi qua Vercel Function.
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const downloadUrl = `/api/drive?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
+  const mediaProxyBase = process.env.NEXT_PUBLIC_MEDIA_PROXY_URL?.trim()
+
+  // Fallback tạm thời để website không hỏng nếu chưa cấu hình Cloudflare Worker.
+  // Khi NEXT_PUBLIC_MEDIA_PROXY_URL đã được cấu hình, video sẽ không còn đi qua Vercel.
+  const downloadUrl = mediaProxyBase
+    ? `${mediaProxyBase.replace(/\/$/, '')}/video?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+    : `/api/drive?id=${encodeURIComponent(fileId)}&action=download&name=${encodeURIComponent(fileName)}`
 
   const link = document.createElement('a')
   link.href = downloadUrl
