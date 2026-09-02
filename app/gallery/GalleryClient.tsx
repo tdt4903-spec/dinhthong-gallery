@@ -1670,21 +1670,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <span className="text-base sm:text-2xl font-serif font-bold tracking-tight">
                   DinhThong
                 </span>
-                <span className="font-serif italic text-gray-500 dark:text-gray-400 text-xs sm:text-lg">
+                <span className="font-serif italic text-emerald-600 text-xs sm:text-lg">
                   gallery
                 </span>
               </div>
-
-              {!isSharedGuest && displayName.trim() && (
-                <span
-                  className={`mt-1 font-serif italic text-[10px] sm:text-xs leading-none truncate max-w-[150px] sm:max-w-[220px] ${
-                    isDarkMode ? 'text-gray-400' : 'text-gray-500'
-                  }`}
-                >
-                  Xin chào {displayName.trim()}
-                </span>
-              )}
-            </div>
+</div>
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
@@ -1830,6 +1820,24 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           </div>
         </div>
       </header>
+
+      {!isSharedGuest && displayName.trim() && (
+        <div
+          className={`w-full border-b ${
+            isDarkMode ? 'border-white/10' : 'border-gray-100'
+          }`}
+        >
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 sm:py-3">
+            <p
+              className={`font-serif italic text-xs sm:text-sm leading-none truncate ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}
+            >
+              Xin chào {displayName.trim()}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
