@@ -1776,7 +1776,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   isDarkMode ? 'text-gray-300' : 'text-gray-500'
                 }`}
               >
-                Xin chào, {displayName.trim()}
+                Xin chào {displayName.trim()}
               </span>
             )}
 
