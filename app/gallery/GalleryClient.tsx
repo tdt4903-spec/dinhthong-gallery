@@ -163,14 +163,20 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// TẢI VIDEO ĐƠN TRỰC TIẾP TỪ GOOGLE DRIVE
-// Không đi qua Vercel để tối đa băng thông.
-// Lưu ý: một số file lớn có thể vẫn bị Google Drive yêu cầu xác nhận/quét virus.
+// TẢI VIDEO QUA SERVER PROXY CỦA WEBSITE
+// Browser KHÔNG BAO GIỜ nhận URL download của Google Drive, vì vậy không bị
+// chuyển sang trang "Google Drive cannot scan this file for viruses".
+const CLOUDFLARE_VIDEO_PROXY =
+  process.env.NEXT_PUBLIC_MEDIA_PROXY_URL?.replace(/\/$/, '') ||
+  'https://dinhthong-video-proxy.tdt4903.workers.dev'
+
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const directUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`
+  const downloadUrl =
+    `${CLOUDFLARE_VIDEO_PROXY}/video?id=${encodeURIComponent(fileId)}` +
+    `&name=${encodeURIComponent(fileName)}`
 
   const link = document.createElement('a')
-  link.href = directUrl
+  link.href = downloadUrl
   link.download = fileName
   link.style.display = 'none'
   link.setAttribute('aria-hidden', 'true')
@@ -181,7 +187,7 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
     if (document.body.contains(link)) {
       document.body.removeChild(link)
     }
-  }, 1500)
+  }, 1000)
 }
 
 export default function GalleryClient() {
@@ -291,6 +297,14 @@ export default function GalleryClient() {
   const thumbnailRef = useRef<HTMLDivElement>(null)
   const touchStartX = useRef<number | null>(null)
   const touchEndX = useRef<number | null>(null)
+
+  // Drag/Pan ảnh khi đã zoom
+  const zoomContainerRef = useRef<HTMLDivElement>(null)
+  const zoomImageRef = useRef<HTMLImageElement>(null)
+  const isPanningRef = useRef(false)
+  const panStartPointRef = useRef({ x: 0, y: 0 })
+  const panStartPositionRef = useRef({ x: 0, y: 0 })
+  const didPanRef = useRef(false)
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -1216,22 +1230,130 @@ export default function GalleryClient() {
     }
   }
 
-  const handleTouchStart = (e: React.TouchEvent) => { 
+  const getPanBounds = useCallback(() => {
+    const container = zoomContainerRef.current
+    const image = zoomImageRef.current
+    if (!container || !image || zoomScale <= 1) return { maxX: 0, maxY: 0 }
+
+    const containerWidth = container.clientWidth
+    const containerHeight = container.clientHeight
+    const imageWidth = image.offsetWidth * zoomScale
+    const imageHeight = image.offsetHeight * zoomScale
+
+    return {
+      maxX: Math.max(0, (imageWidth - containerWidth) / 2),
+      maxY: Math.max(0, (imageHeight - containerHeight) / 2),
+    }
+  }, [zoomScale])
+
+  const clampPan = useCallback((x: number, y: number) => {
+    const { maxX, maxY } = getPanBounds()
+    return {
+      x: Math.max(-maxX, Math.min(maxX, x)),
+      y: Math.max(-maxY, Math.min(maxY, y)),
+    }
+  }, [getPanBounds])
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (previewMedia?.type === 'video' || zoomScale <= 1) {
+      touchStartX.current = e.clientX
+      touchEndX.current = null
+      return
+    }
+
+    e.preventDefault()
+    e.stopPropagation()
+    isPanningRef.current = true
+    didPanRef.current = false
+    panStartPointRef.current = { x: e.clientX, y: e.clientY }
+    panStartPositionRef.current = { ...panPosition }
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isPanningRef.current || previewMedia?.type === 'video') {
+      if (zoomScale <= 1 && touchStartX.current !== null) {
+        touchEndX.current = e.clientX
+        if (Math.abs(e.clientX - touchStartX.current) > 8) {
+          didPanRef.current = true
+        }
+      }
+      return
+    }
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    const dx = e.clientX - panStartPointRef.current.x
+    const dy = e.clientY - panStartPointRef.current.y
+
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+      didPanRef.current = true
+    }
+
+    const next = clampPan(
+      panStartPositionRef.current.x + dx,
+      panStartPositionRef.current.y + dy
+    )
+    setPanPosition(next)
+  }
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (isPanningRef.current) {
+      isPanningRef.current = false
+      try {
+        e.currentTarget.releasePointerCapture?.(e.pointerId)
+      } catch {}
+      return
+    }
+
+    if (previewMedia?.type === 'video' || zoomScale > 1) return
+    if (touchStartX.current === null || touchEndX.current === null) {
+      touchStartX.current = null
+      touchEndX.current = null
+      return
+    }
+
+    const distance = touchStartX.current - touchEndX.current
+    const isSwipe = Math.abs(distance) > 45
+
+    if (distance > 45) handleNextImage()
+    if (distance < -45) handlePrevImage()
+
+    if (isSwipe) {
+      didPanRef.current = true
+    }
+
+    touchStartX.current = null
+    touchEndX.current = null
+  }
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (zoomScale > 1 || previewMedia?.type === 'video') return
     if (e.touches.length === 1) {
-      touchStartX.current = e.targetTouches[0].clientX 
+      touchStartX.current = e.targetTouches[0].clientX
     }
   }
-  const handleTouchMove = (e: React.TouchEvent) => { 
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (zoomScale > 1 || previewMedia?.type === 'video') return
     if (e.touches.length === 1) {
-      touchEndX.current = e.targetTouches[0].clientX 
+      touchEndX.current = e.targetTouches[0].clientX
     }
   }
+
   const handleTouchEnd = () => {
-    if (zoomScale > 1) return
-    if (!touchStartX.current || !touchEndX.current) return
+    if (zoomScale > 1 || previewMedia?.type === 'video') return
+    if (touchStartX.current === null || touchEndX.current === null) {
+      touchStartX.current = null
+      touchEndX.current = null
+      return
+    }
+
     const distance = touchStartX.current - touchEndX.current
     if (distance > 45) handleNextImage()
     if (distance < -45) handlePrevImage()
+
     touchStartX.current = null
     touchEndX.current = null
   }
@@ -1245,7 +1367,19 @@ export default function GalleryClient() {
     if (e) e.stopPropagation()
     setZoomScale(prev => {
       const next = Math.max(prev - 0.4, 1)
-      if (next === 1) setPanPosition({ x: 0, y: 0 })
+      if (next === 1) {
+        setPanPosition({ x: 0, y: 0 })
+      } else {
+        requestAnimationFrame(() => {
+          setPanPosition(current => {
+            const { maxX, maxY } = getPanBounds()
+            return {
+              x: Math.max(-maxX, Math.min(maxX, current.x)),
+              y: Math.max(-maxY, Math.min(maxY, current.y)),
+            }
+          })
+        })
+      }
       return next
     })
   }
@@ -1256,12 +1390,25 @@ export default function GalleryClient() {
     setPanPosition({ x: 0, y: 0 })
   }
 
+  useEffect(() => {
+    if (zoomScale <= 1 || previewMedia?.type === 'video') {
+      setPanPosition({ x: 0, y: 0 })
+      isPanningRef.current = false
+      didPanRef.current = false
+    } else {
+      requestAnimationFrame(() => {
+        setPanPosition(current => clampPan(current.x, current.y))
+      })
+    }
+  }, [zoomScale, previewMedia?.id, clampPan])
+
   const handleDoubleTap = (e: React.TouchEvent | React.MouseEvent) => {
     const now = Date.now()
     if (now - lastTapRef.current < 300) {
       if (zoomScale > 1) {
         handleResetZoom()
       } else {
+        setPanPosition({ x: 0, y: 0 })
         setZoomScale(2.2)
       }
     }
@@ -2228,29 +2375,12 @@ export default function GalleryClient() {
                                   </p>
                                 </div>
 
-                                <div className="flex items-center gap-1.5 flex-shrink-0">
-                                  {!isSharedGuest && (
-                                    <button
-                                      type="button"
-                                      onClick={(e) => handleShareFolder(folder.id, e)}
-                                      className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20 transition cursor-pointer"
-                                      title="Chia sẻ thư mục này"
-                                    >
-                                      {shareCopiedId === folder.id ? (
-                                        <Check className="w-3.5 h-3.5" />
-                                      ) : (
-                                        <Share2 className="w-3.5 h-3.5" />
-                                      )}
-                                    </button>
-                                  )}
-
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
-                                    disabled={Boolean(zippingFolderId)}
-                                    className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
-                                    title="Tải nén toàn bộ thư mục này"
-                                  >
+                                <button
+                                  onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
+                                  disabled={Boolean(zippingFolderId)}
+                                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
+                                  title="Tải nén toàn bộ thư mục này"
+                                >
                                   {isThisFolderZipping ? (
                                     <>
                                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -2262,8 +2392,7 @@ export default function GalleryClient() {
                                       <span>Tải</span>
                                     </>
                                   )}
-                                  </button>
-                                </div>
+                                </button>
                               </div>
                             </div>
                           )
@@ -2438,9 +2567,10 @@ export default function GalleryClient() {
       {previewMedia && (
         <div 
           className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-2 sm:p-4 select-none touch-pan-y"
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
         >
           {/* Header Lightbox */}
           <div className="flex items-center justify-between px-3 py-2 text-white/90 z-30">
@@ -2501,8 +2631,23 @@ export default function GalleryClient() {
           </div>
 
           <div 
-            className="relative flex-1 flex items-center justify-center p-2 overflow-hidden w-full h-full cursor-grab active:cursor-grabbing"
-            onClick={handleDoubleTap}
+            ref={zoomContainerRef}
+            className={`relative flex-1 flex items-center justify-center p-2 overflow-hidden w-full h-full ${
+              previewMedia.type === 'video' || zoomScale <= 1
+                ? 'cursor-default'
+                : isPanningRef.current
+                  ? 'cursor-grabbing'
+                  : 'cursor-grab'
+            }`}
+            style={{ touchAction: zoomScale > 1 && previewMedia.type !== 'video' ? 'none' : 'pan-y' }}
+            onClick={(e) => {
+              if (didPanRef.current) {
+                didPanRef.current = false
+                e.stopPropagation()
+                return
+              }
+              handleDoubleTap(e)
+            }}
           >
             {previewMedia.type === 'video' ? (
               <div className="relative w-full max-w-5xl aspect-video flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-2xl">
@@ -2517,13 +2662,17 @@ export default function GalleryClient() {
               <div 
                 className="relative max-h-full max-w-full flex items-center justify-center transition-transform duration-100 ease-out"
                 style={{
-                  transform: `scale(${zoomScale}) translate(${panPosition.x}px, ${panPosition.y}px)`
+                  transform: `translate3d(${panPosition.x}px, ${panPosition.y}px, 0) scale(${zoomScale})`,
+                  transformOrigin: 'center center',
+                  willChange: zoomScale > 1 ? 'transform' : 'auto',
                 }}
               >
                 <img 
+                  ref={zoomImageRef}
                   src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
                   alt={previewMedia.name}
-                  className="max-h-[78vh] max-w-[95vw] object-contain rounded-lg shadow-2xl transition-all duration-150 pointer-events-none"
+                  draggable={false}
+                  className="max-h-[78vh] max-w-[95vw] object-contain rounded-lg shadow-2xl transition-all duration-150 pointer-events-none select-none"
                 />
 
                 {activeSetting.enable_watermark && (
