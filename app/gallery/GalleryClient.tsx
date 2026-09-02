@@ -163,14 +163,14 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// TẢI VIDEO QUA SERVER PROXY CỦA WEBSITE
-// Browser KHÔNG BAO GIỜ nhận URL download của Google Drive, vì vậy không bị
-// chuyển sang trang "Google Drive cannot scan this file for viruses".
+// TẢI VIDEO ĐƠN TRỰC TIẾP TỪ GOOGLE DRIVE
+// Không đi qua Vercel để tối đa băng thông.
+// Lưu ý: một số file lớn có thể vẫn bị Google Drive yêu cầu xác nhận/quét virus.
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const downloadUrl = `https://dinhthong-video-proxy.tdt4903.workers.dev/video?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+  const directUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`
 
   const link = document.createElement('a')
-  link.href = downloadUrl
+  link.href = directUrl
   link.download = fileName
   link.style.display = 'none'
   link.setAttribute('aria-hidden', 'true')
@@ -181,7 +181,7 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
     if (document.body.contains(link)) {
       document.body.removeChild(link)
     }
-  }, 1000)
+  }, 1500)
 }
 
 interface GalleryClientProps {
@@ -1664,17 +1664,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               <span className="text-base sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
               <span className="font-serif italic text-emerald-600 text-xs sm:text-lg">gallery</span>
             </div>
-
-            {!isSharedGuest && displayName.trim() && (
-              <span
-                className={`hidden sm:inline-block text-xs md:text-sm font-serif italic tracking-wide truncate max-w-[180px] ${
-                  isDarkMode ? 'text-gray-300' : 'text-gray-600'
-                }`}
-                title={`Xin chào, ${displayName.trim()}`}
-              >
-                Xin chào, {displayName.trim()}
-              </span>
-            )}
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
@@ -2243,12 +2232,29 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   </p>
                                 </div>
 
-                                <button
-                                  onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
-                                  disabled={Boolean(zippingFolderId)}
-                                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
-                                  title="Tải nén toàn bộ thư mục này"
-                                >
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  {!isSharedGuest && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleShareFolder(folder.id, e)}
+                                      className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20 transition cursor-pointer"
+                                      title="Chia sẻ thư mục này"
+                                    >
+                                      {shareCopiedId === folder.id ? (
+                                        <Check className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <Share2 className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
+                                    disabled={Boolean(zippingFolderId)}
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
+                                    title="Tải nén toàn bộ thư mục này"
+                                  >
                                   {isThisFolderZipping ? (
                                     <>
                                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -2260,7 +2266,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                       <span>Tải</span>
                                     </>
                                   )}
-                                </button>
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           )
