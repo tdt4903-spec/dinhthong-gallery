@@ -1660,9 +1660,30 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </button>
             )}
 
-            <div onClick={() => !isSharedGuest && setSelectedAlbum(null)} className={`flex items-baseline gap-1 ${!isSharedGuest ? 'cursor-pointer' : ''}`}>
-              <span className="text-base sm:text-2xl font-serif font-bold tracking-tight">DinhThong</span>
-              <span className="font-serif italic text-emerald-600 text-xs sm:text-lg">gallery</span>
+            <div
+              onClick={() => !isSharedGuest && setSelectedAlbum(null)}
+              className={`flex flex-col justify-center min-w-0 ${
+                !isSharedGuest ? 'cursor-pointer' : ''
+              }`}
+            >
+              <div className="flex items-baseline gap-1 leading-none">
+                <span className="text-base sm:text-2xl font-serif font-bold tracking-tight">
+                  DinhThong
+                </span>
+                <span className="font-serif italic text-gray-500 dark:text-gray-400 text-xs sm:text-lg">
+                  gallery
+                </span>
+              </div>
+
+              {!isSharedGuest && displayName.trim() && (
+                <span
+                  className={`mt-1 font-serif italic text-[10px] sm:text-xs leading-none truncate max-w-[150px] sm:max-w-[220px] ${
+                    isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                  }`}
+                >
+                  Xin chào {displayName.trim()}
+                </span>
+              )}
             </div>
           </div>
 
@@ -1768,16 +1789,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   </button>
                 </>
               )
-            )}
-
-            {!isSharedGuest && displayName.trim() && (
-              <span
-                className={`hidden sm:block font-serif italic text-xs sm:text-sm whitespace-nowrap transition-colors ${
-                  isDarkMode ? 'text-gray-300' : 'text-gray-500'
-                }`}
-              >
-                Xin chào {displayName.trim()}
-              </span>
             )}
 
             <div className="flex items-center gap-1.5 pl-1.5 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
