@@ -2587,6 +2587,21 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [previewMedia, handlePrevImage, handleNextImage, zoomScale])
 
+  // Chuẩn bị text lời chào hiển thị
+  const rootSetting = getFolderSettingFromState(guestRootAlbumId)
+  const isCollectEnabled = Boolean(rootSetting.collect_customer_info ?? selectedAlbum?.collect_customer_info)
+
+  let welcomeMessage = ''
+  if (!isSharedGuest) {
+    if (displayName.trim()) welcomeMessage = `Xin chào ${displayName.trim()}`
+  } else {
+    if (isCollectEnabled && guestCustomerName.trim()) {
+      welcomeMessage = `Xin chào ${guestCustomerName.trim()}`
+    } else {
+      welcomeMessage = 'Xin chào bạn'
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#07130c] flex flex-col items-center justify-center text-white">
@@ -2793,11 +2808,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       </header>
 
-      {!isSharedGuest && displayName.trim() && (
+      {/* DÒNG LỜI CHÀO LINH HOẠT CHO ADMIN VÀ KHÁCH */}
+      {welcomeMessage && (
         <div className={`w-full border-b ${isDarkMode ? 'border-white/10' : 'border-gray-100'}`}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 sm:py-3">
             <p className={`font-serif italic text-xs sm:text-sm leading-none truncate ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              Xin chào {displayName.trim()}
+              {welcomeMessage}
             </p>
           </div>
         </div>
