@@ -516,17 +516,19 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     if (!folderId) return false
     const setting = getFolderSettingFromState(folderId, fallbackSetting)
     const collect = Boolean(setting.collect_customer_info)
-    const savedName = typeof window !== 'undefined' ? (localStorage.getItem(getGuestIdentityStorageKey(folderId)) || '') : ''
+    const savedName = typeof window !== 'undefined'
+      ? (localStorage.getItem(getGuestIdentityStorageKey(folderId)) || '')
+      : ''
+
+    setGuestAccessDenied(false)
+    setGuestCanSelect(false)
 
     if (collect) {
-      if (savedName.trim()) {
-        setGuestCustomerName(savedName.trim())
-        const result = await registerGuestViewer(folderId, savedName.trim())
-        if (!result.allowed) return false
-        setGuestCanSelect(true)
-        return true
-      }
-      setGuestNameInput('')
+      // Luôn yêu cầu khách xác nhận/nhập tên trước khi kiểm tra giới hạn.
+      // Không được báo "đã đủ số người" trước khi biết tên khách là gì.
+      // Nếu khách đã từng nhập tên trên thiết bị này thì chỉ dùng tên đó để
+      // điền sẵn vào ô nhập, KHÔNG tự động cho vào album.
+      setGuestNameInput(savedName.trim())
       setShowGuestNameModal(true)
       return false
     }
@@ -547,12 +549,27 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
     const folderId = currentActiveFolderId
     if (!folderId) return
+
+    // Chưa lưu localStorage ở đây. Chỉ lưu sau khi máy chủ xác nhận
+    // tên này được phép vào album. Điều này ngăn lần sau tự động bypass
+    // màn hình nhập tên khi tên đó đã bị từ chối vì vượt giới hạn.
+    setGuestAccessDenied(false)
+    setGuestCustomerName(cleanName)
+
+    const result = await registerGuestViewer(folderId, cleanName)
+    if (!result.allowed) {
+      // Tên mới và album đã đủ người: sau khi nhập tên mới hiện thông báo.
+      // Tên trùng người đã khai báo sẽ được registerGuestViewer cho phép vào.
+      setGuestCanSelect(false)
+      setShowGuestNameModal(false)
+      setGuestAccessDenied(true)
+      return
+    }
+
     try {
       localStorage.setItem(getGuestIdentityStorageKey(folderId), cleanName)
     } catch {}
-    setGuestCustomerName(cleanName)
-    const result = await registerGuestViewer(folderId, cleanName)
-    if (!result.allowed) return
+
     setGuestCanSelect(true)
     setShowGuestNameModal(false)
     setGuestNameInput('')
