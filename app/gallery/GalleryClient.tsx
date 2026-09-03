@@ -288,9 +288,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 24
 
-  const [useComma, setUseComma] = useState(false)
-  const [useSpace, setUseSpace] = useState(false)
-  const [useNewline, setUseNewline] = useState(true)
+  const [useComma, setUseComma] = useState(true)
+  const [useSpace, setUseSpace] = useState(true)
+  const [useNewline, setUseNewline] = useState(false)
+  const [useFileExtension, setUseFileExtension] = useState(false)
 
   const thumbnailRef = useRef<HTMLDivElement>(null)
   const touchStartX = useRef<number | null>(null)
@@ -313,117 +314,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     enable_watermark: selectedAlbum?.enable_watermark ?? false
   }
 
-  // Đồng bộ lựa chọn ảnh dùng chung trên Supabase.
-  // Không phụ thuộc vào tài khoản nào: khách share link, Admin và các tài khoản nội bộ
-  // đều nhìn thấy cùng trạng thái chọn sao của album hiện tại.
-  const fetchSyncedRatings = async (folderId: string, itemIds: string[] = []) => {
-    if (!folderId) return {} as Record<string, number>
-
-    try {
-      const { data, error } = await supabase
-        .from('gallery_photo_selections')
-        .select('item_id, stars, updated_at')
-        .eq('album_id', folderId)
-        .order('updated_at', { ascending: false })
-
-      if (error) {
-        console.warn('Không đọc được đồng bộ lựa chọn ảnh:', error.message)
-        const saved = localStorage.getItem('dinhthong_image_ratings')
-        try {
-          const local = saved ? JSON.parse(saved) : {}
-          const fallback: Record<string, number> = {}
-          itemIds.forEach(id => {
-            const value = Number(local?.[id] || 0)
-            if (value > 0) fallback[id] = value
-          })
-          setRatings(prev => {
-            const next = { ...prev }
-            itemIds.forEach(id => delete next[id])
-            Object.assign(next, fallback)
-            return next
-          })
-          return fallback
-        } catch {
-          return {} as Record<string, number>
-        }
-      }
-
-      const synced: Record<string, number> = {}
-      ;(data || []).forEach((row: any) => {
-        if (!row?.item_id) return
-        const value = Number(row.stars || 0)
-        if (!(row.item_id in synced)) synced[row.item_id] = value
-      })
-
-      // Migrate dữ liệu cũ từ localStorage nếu album chưa có dữ liệu cloud.
-      const hasCloudRows = (data || []).length > 0
-      if (!hasCloudRows && itemIds.length > 0) {
-        try {
-          const saved = localStorage.getItem('dinhthong_image_ratings')
-          const local = saved ? JSON.parse(saved) : {}
-          const legacy = itemIds
-            .map(id => [id, Number(local?.[id] || 0)] as [string, number])
-            .filter(([, stars]) => stars > 0)
-
-          if (legacy.length > 0) {
-            await Promise.all(
-              legacy.map(([imageId, stars]) =>
-                supabase.from('gallery_photo_selections').upsert({
-                  album_id: folderId,
-                  item_id: imageId,
-                  stars,
-                  updated_at: new Date().toISOString(),
-                }, { onConflict: 'album_id,item_id' })
-              )
-            )
-            legacy.forEach(([imageId, stars]) => { synced[imageId] = stars })
-          }
-        } catch {}
-      }
-
-      setRatings(prev => {
-        const next = { ...prev }
-        itemIds.forEach(id => delete next[id])
-        Object.entries(synced).forEach(([id, stars]) => {
-          if (Number(stars) > 0) next[id] = Number(stars)
-        })
-        return next
-      })
-      localStorage.setItem('dinhthong_image_ratings', JSON.stringify(synced))
-      return synced
-    } catch (e) {
-      console.warn('Lỗi đồng bộ lựa chọn ảnh:', e)
-      return {} as Record<string, number>
-    }
-  }
-
-  const saveSyncedRating = async (folderId: string, imageId: string, stars: number) => {
-    if (!folderId || !imageId) return
-
-    try {
-      if (stars <= 0) {
-        const { error } = await supabase
-          .from('gallery_photo_selections')
-          .delete()
-          .eq('album_id', folderId)
-          .eq('item_id', imageId)
-        if (error) throw error
-      } else {
-        const { error } = await supabase
-          .from('gallery_photo_selections')
-          .upsert({
-            album_id: folderId,
-            item_id: imageId,
-            stars: Number(stars),
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'album_id,item_id' })
-        if (error) throw error
-      }
-    } catch (e) {
-      console.warn('Lỗi lưu lựa chọn ảnh lên Supabase:', e)
-    }
-  }
-
   const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
   const subFolders = visibleItems.filter(item => item.type === 'folder')
   const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
@@ -438,17 +328,25 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const commentedImagesList = visibleItems.filter(img => img.type !== 'folder' && comments[img.id] && comments[img.id].trim() !== '')
   const commentTextListContent = commentedImagesList.map(img => `${img.name} - ${comments[img.id]}`).join('\n')
 
-  let separator = '\n'
-  if (!useNewline) {
+  let separator = ' '
+  if (useNewline) {
+    separator = '\n'
+  } else {
     let sep = ''
     if (useComma) sep += ','
     if (useSpace) sep += ' '
-    if (!useComma && !useSpace) sep = ' '
+    if (!sep) sep = ' '
     separator = sep
   }
+
+  const displaySelectedFileName = (name: string) => {
+    if (useFileExtension) return name
+    return name.replace(/\.[^/.]+$/, '')
+  }
+
   const textFileContent = selectedImagesList.map(img => {
     const cmt = comments[img.id] ? ` (Ghi chú: ${comments[img.id]})` : ''
-    return `${img.name}${cmt}`
+    return `${displaySelectedFileName(img.name)}${cmt}`
   }).join(separator)
 
   const filteredAlbums = (albums || []).filter(album => album && album.title && album.title.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -641,7 +539,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  const fetchAlbumImages = async (driveUrl: string, folderId?: string) => {
+  const fetchAlbumImages = async (driveUrl: string) => {
     setLoadingImages(true)
     setStarFilter('all')
     setCurrentPage(1)
@@ -651,18 +549,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const data = await res.json()
       const files = data.files || []
       setItems(files)
-
-      const effectiveFolderId = folderId || (folderHistory.length > 0
-        ? folderHistory[folderHistory.length - 1].id
-        : selectedAlbum?.id || '')
-
-      if (effectiveFolderId) {
-        const mediaItemIds = files
-          .filter((f: any) => f && f.type !== 'folder')
-          .map((f: any) => f.id)
-        await fetchSyncedRatings(effectiveFolderId, mediaItemIds)
-      }
-
       return files
     } catch (e) {
       console.error(e)
@@ -1054,29 +940,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setPanPosition({ x: 0, y: 0 })
   }
 
-  const handleClearAllSelections = async () => {
-    if (!confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) return
-
-    const folderId = currentActiveFolderId
-    if (folderId) {
-      try {
-        const { error } = await supabase
-          .from('gallery_photo_selections')
-          .delete()
-          .eq('album_id', folderId)
-        if (error) throw error
-      } catch (e: any) {
-        alert('Lỗi xóa lựa chọn: ' + (e?.message || e))
-        return
-      }
+  const handleClearAllSelections = () => {
+    if (confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) {
+      setRatings({})
+      localStorage.removeItem('dinhthong_image_ratings')
     }
-
-    setRatings(prev => {
-      const next = { ...prev }
-      mediaFiles.forEach(item => delete next[item.id])
-      return next
-    })
-    localStorage.removeItem('dinhthong_image_ratings')
   }
 
   const handleToggleSelectAlbum = (id: string, e: React.MouseEvent) => {
@@ -1106,28 +974,21 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     })
   }
 
-  const handleRateImage = async (imageId: string, stars: number) => {
+  const handleRateImage = (imageId: string, stars: number) => {
     const maxSel = Number(activeSetting?.max_select || 0)
     const isCurrentlyRated = (ratings[imageId] || 0) > 0
 
     if (stars > 0 && !isCurrentlyRated) {
-      const currentMediaIds = new Set(mediaFiles.map(item => item.id))
-      const currentRatedCount = Object.entries(ratings)
-        .filter(([id, value]) => currentMediaIds.has(id) && Number(value) > 0).length
+      const currentRatedCount = Object.values(ratings).filter(s => s > 0).length
       if (maxSel > 0 && currentRatedCount >= maxSel) {
         alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
         return
       }
     }
 
-    const newRatings = { ...ratings }
-    if (stars > 0) newRatings[imageId] = stars
-    else delete newRatings[imageId]
-
+    const newRatings = { ...ratings, [imageId]: stars }
     setRatings(newRatings)
     localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
-
-    await saveSyncedRating(currentActiveFolderId, imageId, stars)
   }
 
   const handleBatchDelete = async () => {
@@ -1246,13 +1107,81 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  const handleShareFolder = (folderId: string, e?: React.MouseEvent) => {
+  const handleShareFolder = async (folderId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
+    if (!folderId) return
+
     const numericCode = toNumericCode(folderId)
     const shareUrl = `${window.location.origin}/s/${numericCode}`
-    navigator.clipboard.writeText(shareUrl)
+
+    // Lưu ánh xạ mã chia sẻ -> Drive folder ID thật để link /s/xxxxxx
+    // có thể khôi phục đúng thư mục, kể cả thư mục con không nằm trong albums.
+    try {
+      const folderName = customNames[folderId] || items.find((item) => item.id === folderId)?.name || folderId
+      const parentDriveUrl = `https://drive.google.com/drive/folders/${folderId}`
+      const { error } = await supabase
+        .from('known_drive_folders')
+        .upsert(
+          [{ id: folderId, name: folderName, parent_url: parentDriveUrl }],
+          { onConflict: 'id' }
+        )
+
+      if (error) {
+        console.warn('Không lưu được ánh xạ link chia sẻ:', error.message)
+      }
+    } catch (err) {
+      console.warn('Không lưu được ánh xạ link chia sẻ:', err)
+    }
+
+    await navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(folderId)
     setTimeout(() => setShareCopiedId(null), 2500)
+  }
+
+  const resolveSharedFolderId = async (sharedCode: string, albumList: Album[]) => {
+    if (!sharedCode) return null
+
+    // 1. Album đã có trong bảng albums.
+    const matchedAlbum = (albumList || []).find(
+      (a) =>
+        a.id === sharedCode ||
+        toNumericCode(a.id) === sharedCode ||
+        extractDriveId(a.driveUrl) === sharedCode
+    )
+    if (matchedAlbum) return {
+      id: matchedAlbum.id,
+      title: matchedAlbum.title,
+      driveUrl: matchedAlbum.driveUrl,
+      album: matchedAlbum,
+    }
+
+    // 2. Thư mục con / thư mục sâu đã từng được chia sẻ hoặc đồng bộ.
+    try {
+      const { data, error } = await supabase
+        .from('known_drive_folders')
+        .select('id, name, parent_url')
+
+      if (!error && Array.isArray(data)) {
+        const matched = data.find((row: any) =>
+          row &&
+          row.id &&
+          (row.id === sharedCode || toNumericCode(String(row.id)) === sharedCode)
+        )
+
+        if (matched) {
+          return {
+            id: String(matched.id),
+            title: String(matched.name || matched.id),
+            driveUrl: String(matched.parent_url || `https://drive.google.com/drive/folders/${matched.id}`),
+            album: null as Album | null,
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Không thể giải mã link chia sẻ từ known_drive_folders:', err)
+    }
+
+    return null
   }
 
   const handleOpenSubFolder = (folderItem: MediaItem) => {
@@ -1265,7 +1194,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setIsLocked(true)
     } else {
       setIsLocked(false)
-      fetchAlbumImages(folderDriveUrl, folderItem.id)
+      fetchAlbumImages(folderDriveUrl)
     }
   }
 
@@ -1278,7 +1207,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           setIsLocked(true)
         } else {
           setIsLocked(false)
-          fetchAlbumImages(selectedAlbum.driveUrl, selectedAlbum.id)
+          fetchAlbumImages(selectedAlbum.driveUrl)
         }
       }
     } else {
@@ -1289,7 +1218,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         setIsLocked(true)
       } else {
         setIsLocked(false)
-        fetchAlbumImages(target.driveUrl, target.id)
+        fetchAlbumImages(target.driveUrl)
       }
     }
   }
@@ -1303,7 +1232,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         setIsLocked(true)
       } else {
         setIsLocked(false)
-        fetchAlbumImages(prev.driveUrl, prev.id)
+        fetchAlbumImages(prev.driveUrl)
       }
     } else if (folderHistory.length === 1 && selectedAlbum) {
       setFolderHistory([])
@@ -1312,7 +1241,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         setIsLocked(true)
       } else {
         setIsLocked(false)
-        fetchAlbumImages(selectedAlbum.driveUrl, selectedAlbum.id)
+        fetchAlbumImages(selectedAlbum.driveUrl)
       }
     } else {
       if (!isSharedGuest) {
@@ -1330,7 +1259,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setIsLocked(true)
     } else {
       setIsLocked(false)
-      fetchAlbumImages(album.driveUrl, album.id)
+      fetchAlbumImages(album.driveUrl)
     }
   }
 
@@ -1362,10 +1291,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setIsLocked(false)
       setPasswordError(false)
       const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
-      if (targetUrl) {
-        const targetId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
-        fetchAlbumImages(targetUrl, targetId)
-      }
+      if (targetUrl) fetchAlbumImages(targetUrl)
     } else {
       setPasswordError(true)
     }
@@ -1634,27 +1560,60 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
         if (sharedId) {
           setIsSharedGuest(true)
-          const matchedAlbum = fAlbums.find(a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.driveUrl) === sharedId)
 
-          if (matchedAlbum) {
-            setSelectedAlbum(matchedAlbum)
+          // Không được coi mã 6 số là Drive ID thật.
+          // Luôn giải mã /s/xxxxxx -> ID thư mục Drive từ albums hoặc known_drive_folders.
+          const resolvedShare = await resolveSharedFolderId(sharedId, fAlbums)
+
+          if (resolvedShare) {
+            const realFolderId = resolvedShare.id
+            const resolvedTitle = customNames[realFolderId] || resolvedShare.title || 'DinhThong Album'
+            const resolvedDriveUrl = resolvedShare.driveUrl || `https://drive.google.com/drive/folders/${realFolderId}`
+
+            const resolvedAlbum: Album = resolvedShare.album || {
+              id: realFolderId,
+              title: resolvedTitle,
+              coverUrl: '',
+              driveUrl: resolvedDriveUrl,
+              password: '',
+              max_select: 0,
+              allow_comments: true,
+              enable_watermark: false,
+            }
+
+            setSelectedAlbum(resolvedAlbum)
             setFolderHistory([])
-            const currentPass = fSettings[matchedAlbum.id]?.password || matchedAlbum.password
+
+            const currentPass =
+              fSettings[realFolderId]?.password ||
+              resolvedAlbum.password ||
+              ''
+
             if (currentPass) {
               setIsLocked(true)
             } else {
-              await fetchAlbumImages(matchedAlbum.driveUrl, matchedAlbum.id)
+              await fetchAlbumImages(resolvedDriveUrl)
             }
           } else {
-            let realFolderId = sharedId
-            let adminSetTitle = customNames[sharedId] || ''
+            // Giữ khả năng tương thích với link cũ chỉ khi sharedId thực sự là Drive ID.
+            // Nếu là mã 6 số nhưng không có ánh xạ, không được tạo URL Drive giả từ mã đó.
+            const looksLikeNumericShareCode = /^\d{6}$/.test(sharedId)
 
+            if (looksLikeNumericShareCode) {
+              console.error('Link chia sẻ không tìm thấy ánh xạ Drive ID:', sharedId)
+              setLoading(false)
+              alert('Link album này không còn ánh xạ tới thư mục Drive. Vui lòng tạo lại link chia sẻ từ Admin.')
+              return
+            }
+
+            const realFolderId = extractDriveId(sharedId)
+            const adminSetTitle = customNames[realFolderId] || ''
             const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
             const fallbackAlbum: Album = {
               id: realFolderId,
               title: adminSetTitle || 'DinhThong Album',
               coverUrl: '',
-              driveUrl: folderDriveUrl
+              driveUrl: folderDriveUrl,
             }
 
             setSelectedAlbum(fallbackAlbum)
@@ -1662,7 +1621,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             if (subPass) {
               setIsLocked(true)
             } else {
-              await fetchAlbumImages(folderDriveUrl, realFolderId)
+              await fetchAlbumImages(folderDriveUrl)
             }
           }
         } else {
@@ -1689,6 +1648,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           checkAllMasterFolders(masterFolders, false, knownSet)
         }
 
+        const savedRatings = localStorage.getItem('dinhthong_image_ratings')
+        if (savedRatings) {
+          try { setRatings(JSON.parse(savedRatings)) } catch {}
+        }
       } catch (e) {
         console.error('Lỗi khởi tạo:', e)
       } finally {
@@ -1698,20 +1661,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     initData()
   }, [])
-
-  useEffect(() => {
-    const folderId = currentActiveFolderId
-    if (!folderId || loadingImages) return
-
-    const refresh = async () => {
-      const currentMediaIds = mediaFiles.map(item => item.id)
-      await fetchSyncedRatings(folderId, currentMediaIds)
-    }
-
-    refresh()
-    const interval = window.setInterval(refresh, 8000)
-    return () => window.clearInterval(interval)
-  }, [currentActiveFolderId, loadingImages, items.length])
 
   useEffect(() => {
     if (previewMedia) {
@@ -2952,23 +2901,23 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             </div>
 
             <div className="my-4 space-y-3">
-              <div className="flex items-center gap-3 text-xs">
-                <label className="flex items-center gap-1 cursor-pointer">
+              <div className="flex items-center gap-4 text-xs flex-wrap">
+                <label className="flex items-center gap-1 cursor-pointer select-none">
+                  <input type="checkbox" checked={useComma} onChange={(e) => setUseComma(e.target.checked)} className="rounded text-emerald-600" />
+                  <span>Dấu phẩy</span>
+                </label>
+                <label className="flex items-center gap-1 cursor-pointer select-none">
+                  <input type="checkbox" checked={useSpace} onChange={(e) => setUseSpace(e.target.checked)} className="rounded text-emerald-600" />
+                  <span>Khoảng cách</span>
+                </label>
+                <label className="flex items-center gap-1 cursor-pointer select-none">
                   <input type="checkbox" checked={useNewline} onChange={(e) => setUseNewline(e.target.checked)} className="rounded text-emerald-600" />
                   <span>Xuống dòng</span>
                 </label>
-                {!useNewline && (
-                  <>
-                    <label className="flex items-center gap-1 cursor-pointer">
-                      <input type="checkbox" checked={useComma} onChange={(e) => setUseComma(e.target.checked)} className="rounded text-emerald-600" />
-                      <span>Dấu phẩy</span>
-                    </label>
-                    <label className="flex items-center gap-1 cursor-pointer">
-                      <input type="checkbox" checked={useSpace} onChange={(e) => setUseSpace(e.target.checked)} className="rounded text-emerald-600" />
-                      <span>Dấu cách</span>
-                    </label>
-                  </>
-                )}
+                <label className="flex items-center gap-1 cursor-pointer select-none">
+                  <input type="checkbox" checked={useFileExtension} onChange={(e) => setUseFileExtension(e.target.checked)} className="rounded text-emerald-600" />
+                  <span>Đuôi file</span>
+                </label>
               </div>
 
               <textarea
