@@ -397,7 +397,23 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const cleanName = customerName.trim()
     const setting = getFolderSettingFromState(folderId)
     const collectCustomerInfo = Boolean(setting.collect_customer_info)
+
+    // Album yêu cầu nhập tên: tuyệt đối không gọi RPC kiểm tra giới hạn khi chưa có tên.
+    // Việc gọi RPC với tên rỗng sẽ khiến giới hạn bị chặn trước khi khách kịp nhập tên.
+    if (collectCustomerInfo && !cleanName) {
+      setGuestAccessDenied(false)
+      return { allowed: false, viewerCount: guestViewerCount, trackingUnavailable: false, waitingForName: true }
+    }
+
     const maxViewers = Number(setting.max_viewers || selectedAlbum?.max_viewers || 0)
+
+    // QUAN TRỌNG: album yêu cầu nhập tên thì tuyệt đối không kiểm tra giới hạn
+    // khi chưa có tên. Chỉ sau khi khách bấm 'Tiếp tục' mới chạy phần này.
+    if (collectCustomerInfo && !cleanName) {
+      setGuestAccessDenied(false)
+      setGuestCanSelect(false)
+      return { allowed: true, viewerCount: 0, trackingUnavailable: false, waitingForName: true }
+    }
 
     try {
       // Khi album thu thập tên khách, giới hạn người xem được tính theo TÊN.
@@ -2506,13 +2522,21 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   useEffect(() => {
     if (!isSharedGuest || !guestId || !currentActiveFolderId) return
+
+    const setting = getFolderSettingFromState(currentActiveFolderId)
+    const requiresName = Boolean(setting.collect_customer_info)
+
+    // Khi album yêu cầu nhập tên, không heartbeat/kiểm tra giới hạn bằng tên rỗng.
+    // Chỉ heartbeat sau khi khách đã nhập tên hợp lệ và được phép vào album.
+    if (requiresName && (!guestCustomerName.trim() || showGuestNameModal)) return
+
     const heartbeat = async () => {
       await registerGuestViewer(currentActiveFolderId, guestCustomerName)
     }
     heartbeat()
     const interval = window.setInterval(heartbeat, 60000)
     return () => window.clearInterval(interval)
-  }, [isSharedGuest, guestId, currentActiveFolderId, guestCustomerName])
+  }, [isSharedGuest, guestId, currentActiveFolderId, guestCustomerName, showGuestNameModal, folderSettingsMap])
 
   useEffect(() => {
     if (isSharedGuest) return
@@ -3780,7 +3804,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
-      {guestAccessDenied && isSharedGuest && (
+      {guestAccessDenied && !showGuestNameModal && isSharedGuest && (
         <div className="fixed inset-0 z-[61] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
             <h3 className="font-serif font-bold text-lg">Album đã đủ số người xem</h3>
