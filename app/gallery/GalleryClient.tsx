@@ -319,10 +319,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const currentActiveFolderId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
   const currentActiveFolderTitle = customNames[currentActiveFolderId] || (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : (selectedAlbum?.title || ''))
 
-  // ID Gốc của link chia sẻ (để luôn đếm 1 khách duy nhất dù duyệt qua các thư mục con)
   const guestRootAlbumId = selectedAlbum?.id || currentActiveFolderId
 
-  // Cấu hình áp dụng riêng biệt cho thư mục hiện tại đang mở
   const activeSetting: FolderSettings = folderSettingsMap[currentActiveFolderId] || {
     id: currentActiveFolderId,
     title: currentActiveFolderTitle,
@@ -386,7 +384,106 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const getGuestIdentityStorageKey = (folderId: string) => `dinhthong_gallery_guest_name_${folderId}`
 
-  // HÀM KIỂM TRA KHÁCH VÀ ĐẾM NGƯỜI XEM (LUÔN TÍNH THEO ROOT ID KHI CHIA SẺ)
+  const getMonthlyCleanWarning = () => {
+    const today = new Date()
+    const currentDate = today.getDate()
+
+    if (currentDate >= 27 && currentDate < 30) {
+      const daysLeft = 30 - currentDate
+      return `Chú ý: Còn ${daysLeft} ngày nữa (ngày 30) hệ thống sẽ tự động xóa sạch dữ liệu khách truy cập và ảnh đã chọn của tháng này!`
+    }
+    if (currentDate === 30) {
+      return `Hôm nay là ngày 30: Dữ liệu khách truy cập và ảnh đã chọn tháng này sẽ được dọn sạch!`
+    }
+    return null
+  }
+
+  useEffect(() => {
+    if (isSharedGuest) return
+
+    const checkAndTriggerMonthlyClean = async () => {
+      const today = new Date()
+      const currentDate = today.getDate()
+      const currentMonthKey = `${today.getFullYear()}-${today.getMonth() + 1}`
+      const lastCleanMonth = localStorage.getItem('dinhthong_last_monthly_clean')
+
+      if (currentDate >= 30 && lastCleanMonth !== currentMonthKey) {
+        try {
+          const res = await fetch('/api/admin/clean-data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'monthly_auto_clean' }),
+          })
+          if (res.ok) {
+            localStorage.setItem('dinhthong_last_monthly_clean', currentMonthKey)
+            await fetchNotifications()
+            if (currentActiveFolderId) {
+              await fetchSelectionsForFolder(currentActiveFolderId, true)
+              await fetchGuestSelections(currentActiveFolderId)
+            }
+          }
+        } catch (e) {
+          console.error('Lỗi khi tự động dọn dẹp định kỳ ngày 30:', e)
+        }
+      }
+    }
+
+    checkAndTriggerMonthlyClean()
+  }, [isSharedGuest, currentActiveFolderId])
+
+  const handleDeleteAllGuestSelectionsFromAllAlbums = async () => {
+    if (!confirm('CẢNH BÁO: Bạn có chắc chắn muốn XÓA TẤT CẢ ảnh khách đã chọn từ TẤT CẢ các album trên hệ thống không? Hành động này không thể hoàn tác!')) {
+      return
+    }
+
+    try {
+      const res = await fetch('/api/admin/clean-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_all_guest_selections' }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi khi xóa.')
+
+      alert('Đã xóa thành công tất cả ảnh khách chọn trên toàn bộ các album!')
+      await fetchNotifications()
+      if (currentActiveFolderId) {
+        await fetchSelectionsForFolder(currentActiveFolderId, true)
+        await fetchGuestSelections(currentActiveFolderId)
+      }
+    } catch (e: any) {
+      alert('Lỗi: ' + e.message)
+    }
+  }
+
+  const handleDeleteGuestSelectionsInCurrentAlbum = async () => {
+    if (!confirm(`Bạn có chắc chắn muốn xóa toàn bộ ảnh khách đã chọn trong "${currentActiveFolderTitle}" không?`)) {
+      return
+    }
+
+    try {
+      const res = await fetch('/api/admin/clean-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          action: 'delete_album_guest_selections',
+          albumId: currentActiveFolderId 
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi khi xóa.')
+
+      alert('Đã xóa thành công ảnh khách chọn trong album này!')
+      await fetchNotifications()
+      await fetchSelectionsForFolder(currentActiveFolderId, true)
+      await fetchGuestSelections(currentActiveFolderId)
+    } catch (e: any) {
+      alert('Lỗi: ' + e.message)
+    }
+  }
+
   const registerGuestViewer = async (folderId: string, customerName = '') => {
     const targetAlbumId = isSharedGuest ? (guestRootAlbumId || folderId) : folderId
     if (!targetAlbumId || !guestId) return { allowed: true, viewerCount: 0, trackingUnavailable: true }
@@ -1549,7 +1646,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     })
   }
 
-  // CHỌN ẢNH VỚI GIỚI HẠN RIÊNG BIỆT CHO TỪNG THƯ MỤC / ALBUM
   const handleRateImage = async (imageId: string, stars: number) => {
     if (isSharedGuest && !guestCanSelect) {
       alert(activeSetting.collect_customer_info ? 'Vui lòng nhập tên để bắt đầu chọn ảnh.' : 'Vui lòng chờ xác thực quyền truy cập.')
@@ -1559,13 +1655,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const maxSel = isSharedGuest ? Number(activeSetting?.max_select || 0) : 0
     const isCurrentlyRated = (ratings[imageId] || 0) > 0
 
-    // Kiểm tra giới hạn số ảnh chọn CHỈ TRONG THƯ MỤC HIỆN TẠI ĐANG MỞ
     if (isSharedGuest && stars > 0 && !isCurrentlyRated) {
       const currentMediaIds = new Set(mediaFiles.map(item => item.id))
       const currentRatedCount = Object.entries(ratings).filter(([id, value]) => currentMediaIds.has(id) && Number(value) > 0).length
       
       if (maxSel > 0 && currentRatedCount >= maxSel) {
-        alert(`Thư mục "${currentActiveFolderTitle}" chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
+        alert(`Thư mục "${currentActiveFolderTitle}" chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ bớt ảnh khác trước khi chọn thêm.`)
         return
       }
     }
@@ -1742,7 +1837,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
-  // MỞ THƯ MỤC CON: VÀO THẲNG, KHÔNG HỎI LẠI TÊN VÀ KHÔNG ĐẾM THÀNH NGƯỜI MỚI
   const handleOpenSubFolder = (folderItem: MediaItem) => {
     const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
     const displayName = customNames[folderItem.id] || folderItem.name
@@ -2220,7 +2314,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return null
   }
 
-  // Khởi tạo và đồng bộ
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
@@ -2391,7 +2484,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return () => window.clearInterval(interval)
   }, [currentActiveFolderId, isSharedGuest, isAdminPanelOpen, isAdmin, user?.email])
 
-  // Heartbeat duy trì trạng thái xem của khách
   useEffect(() => {
     if (!isSharedGuest || !guestId || !guestRootAlbumId) return
 
@@ -2713,6 +2805,22 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
       {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
+        
+        {/* BANNER CẢNH BÁO ĐỊNH KỲ NGÀY 30 */}
+        {!isSharedGuest && getMonthlyCleanWarning() && (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <Bell className="w-5 h-5 flex-shrink-0 animate-bounce text-amber-500" />
+              <p className="text-xs sm:text-sm font-semibold">
+                {getMonthlyCleanWarning()}
+              </p>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 px-2.5 py-1 rounded-full flex-shrink-0">
+              Định kỳ tháng
+            </span>
+          </div>
+        )}
+
         {!selectedAlbum ? (
           <div>
             <section className="relative rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl min-h-[260px] sm:min-h-[385px] flex items-center mb-8 sm:mb-12 group">
@@ -2745,6 +2853,20 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
               {!isSharedGuest && (
                 <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleDeleteAllGuestSelectionsFromAllAlbums}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-2xs cursor-pointer ${
+                      isDarkMode 
+                        ? 'bg-red-500/10 hover:bg-red-500/20 border-red-500/30 text-red-400' 
+                        : 'bg-red-50 hover:bg-red-100 border-red-200 text-red-700'
+                    }`}
+                    title="Xóa toàn bộ ảnh khách đã chọn từ tất cả các album"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                    <span>Xóa Ảnh Chọn (Tất Cả Album)</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => checkAllMasterFolders(masterFoldersList, true)}
@@ -2964,6 +3086,15 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               <div className="flex items-center gap-2 flex-wrap">
                 {!isSharedGuest && (
                   <>
+                    <button
+                      onClick={handleDeleteGuestSelectionsInCurrentAlbum}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 border border-red-500/20 transition cursor-pointer shadow-2xs"
+                      title="Xóa toàn bộ ảnh khách đã chọn trong album này"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                      <span>Xóa ảnh khách chọn</span>
+                    </button>
+
                     <button
                       onClick={handleOpenCurrentFolderSetting}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition cursor-pointer shadow-2xs"
@@ -3847,7 +3978,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
-      {/* MODAL CÀI ĐẶT RIÊNG ALBUM */}
+      {/* MODAL CÀI ĐẶT RIÊNG CHO TỪNG THƯ MỤC / ALBUM */}
       {editingFolderSetting && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
