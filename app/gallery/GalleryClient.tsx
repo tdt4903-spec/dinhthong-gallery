@@ -254,6 +254,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [commentCopied, setCommentCopied] = useState(false)
   const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
   const [isSharedGuest, setIsSharedGuest] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [guestId, setGuestId] = useState('')
+  const [guestSelectionRows, setGuestSelectionRows] = useState<any[]>([])
+  const [isLoadingGuestSelections, setIsLoadingGuestSelections] = useState(false)
 
   const [isLocked, setIsLocked] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
@@ -314,6 +318,25 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     enable_watermark: selectedAlbum?.enable_watermark ?? false
   }
 
+  const getActorKey = (guestMode = isSharedGuest) => {
+    if (guestMode) {
+      return guestId || 'guest'
+    }
+    return (user?.email || 'unknown-user').trim().toLowerCase()
+  }
+
+  const getGuestBrowserId = () => {
+    if (typeof window === 'undefined') return ''
+    const storageKey = 'dinhthong_gallery_guest_id'
+    const existing = localStorage.getItem(storageKey)
+    if (existing) return existing
+    const generated = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    localStorage.setItem(storageKey, generated)
+    return generated
+  }
+
   const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
   const subFolders = visibleItems.filter(item => item.type === 'folder')
   const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
@@ -325,6 +348,20 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   })
 
   const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
+
+  // Với Admin: ưu tiên danh sách khách chọn mới nhất để mục TXT nhận đúng file khách đã chọn.
+  // Nếu chưa có khách chọn thì giữ nguyên danh sách lựa chọn của Admin.
+  const latestGuestActor = !isSharedGuest ? guestSelectionRows[0]?.actor_key : null
+  const guestSelectedImagesList = latestGuestActor
+    ? visibleItems.filter(img =>
+        img.type !== 'folder' &&
+        guestSelectionRows.some(
+          row => row.actor_key === latestGuestActor && row.item_id === img.id && Number(row.stars) > 0
+        )
+      )
+    : []
+  const txtSelectedImagesList = guestSelectedImagesList.length > 0 ? guestSelectedImagesList : selectedImagesList
+
   const commentedImagesList = visibleItems.filter(img => img.type !== 'folder' && comments[img.id] && comments[img.id].trim() !== '')
   const commentTextListContent = commentedImagesList.map(img => `${img.name} - ${comments[img.id]}`).join('\n')
 
@@ -344,7 +381,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return name.replace(/\.[^/.]+$/, '')
   }
 
-  const textFileContent = selectedImagesList.map(img => {
+  const textFileContent = txtSelectedImagesList.map(img => {
     const cmt = comments[img.id] ? ` (Ghi chú: ${comments[img.id]})` : ''
     return `${displaySelectedFileName(img.name)}${cmt}`
   }).join(separator)
@@ -422,11 +459,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return {}
   }
 
-  const fetchKnownFolderIds = async () => {
+  const fetchKnownFolderIds = async (): Promise<Set<string>> => {
     try {
       const { data } = await supabase.from('known_drive_folders').select('id')
       if (data) {
-        const idSet = new Set(data.map((item: any) => item.id))
+        const idSet = new Set<string>(data.map((item: any) => String(item.id)))
         setKnownFolderIds(idSet)
         return idSet
       }
@@ -539,7 +576,166 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  const fetchAlbumImages = async (driveUrl: string) => {
+  const fetchSelectionsForFolder = async (folderId: string, force = false, itemIds: string[] = [], guestMode = isSharedGuest) => {
+    if (!folderId) return {} as Record<string, number>
+
+    const actor = getActorKey()
+    const scope = guestMode ? 'guest' : (isAdmin ? 'default' : 'user')
+    const actorKey = guestMode ? actor : (isAdmin ? 'admin' : actor)
+
+    // Khách share link dùng localStorage để khôi phục lựa chọn của chính trình duyệt,
+    // còn bản ghi cloud chỉ dùng để báo ngược về Admin.
+    if (guestMode) {
+      try {
+        const saved = localStorage.getItem('dinhthong_image_ratings')
+        const localRatings = saved ? JSON.parse(saved) : {}
+        const nextRatings: Record<string, number> = {}
+        itemIds.forEach(id => {
+          const value = Number(localRatings?.[id] || 0)
+          if (value > 0) nextRatings[id] = value
+        })
+        setRatings(prev => {
+          const next = { ...prev }
+          itemIds.forEach(id => delete next[id])
+          Object.keys(nextRatings).forEach(id => { next[id] = nextRatings[id] })
+          return next
+        })
+        return nextRatings
+      } catch {
+        return {} as Record<string, number>
+      }
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('gallery_photo_selections')
+        .select('item_id, stars, scope, actor_key, updated_at')
+        .eq('album_id', folderId)
+        .in('scope', ['default', 'user'])
+        .order('updated_at', { ascending: false })
+
+      if (error) {
+        console.error('Lỗi tải trạng thái chọn ảnh:', error)
+        return {} as Record<string, number>
+      }
+
+      const nextRatings: Record<string, number> = {}
+      const rows = data || []
+
+      // Mặc định lấy lựa chọn của Admin.
+      rows.forEach((row: any) => {
+        if (row.scope === 'default' && row.actor_key === 'admin' && !(row.item_id in nextRatings)) {
+          nextRatings[row.item_id] = Number(row.stars || 0)
+        }
+      })
+
+      const hasDefaultRows = rows.some((row: any) => row.scope === 'default' && row.actor_key === 'admin')
+      const hasUserRows = rows.some((row: any) => row.scope === 'user' && row.actor_key === actorKey)
+
+      // Dữ liệu cũ chỉ nằm trong localStorage sẽ được chuyển sang Supabase một lần
+      // cho đúng tài khoản / vai trò hiện tại.
+      if (itemIds.length > 0 && !hasDefaultRows && !hasUserRows) {
+        try {
+          const savedRatings = localStorage.getItem('dinhthong_image_ratings')
+          const oldLocal = savedRatings ? JSON.parse(savedRatings) : {}
+          const legacyEntries = itemIds
+            .map(id => [id, Number(oldLocal?.[id] || 0)] as [string, number])
+            .filter(([, value]) => value > 0)
+
+          if (legacyEntries.length > 0) {
+            await Promise.all(legacyEntries.map(([id, value]) => saveSelectionToCloud(folderId, id, value)))
+            legacyEntries.forEach(([id, value]) => { nextRatings[id] = value })
+          }
+        } catch {}
+      }
+
+      // Nếu tài khoản có lựa chọn riêng, lựa chọn riêng ghi đè lựa chọn mặc định.
+      if (!isAdmin) {
+        ;(data || []).forEach((row: any) => {
+          if (row.scope === 'user' && row.actor_key === actorKey) {
+            nextRatings[row.item_id] = Number(row.stars || 0)
+          }
+        })
+      }
+
+      if (!force && Object.keys(nextRatings).length === 0) {
+        const savedRatings = localStorage.getItem('dinhthong_image_ratings')
+        if (savedRatings) {
+          try {
+            const local = JSON.parse(savedRatings)
+            if (local && typeof local === 'object') return local
+          } catch {}
+        }
+      }
+
+      setRatings(prev => {
+        // Thay chính xác trạng thái của thư mục hiện tại để khi Admin xóa/đổi
+        // lựa chọn, các tài khoản khác cũng cập nhật theo, không giữ dữ liệu cũ.
+        const next = { ...prev }
+        itemIds.forEach(id => delete next[id])
+        Object.keys(nextRatings).forEach(id => { next[id] = nextRatings[id] })
+        return next
+      })
+
+      localStorage.setItem('dinhthong_image_ratings', JSON.stringify(nextRatings))
+      return nextRatings
+    } catch (e) {
+      console.error('Lỗi đồng bộ lựa chọn ảnh:', e)
+      return {} as Record<string, number>
+    }
+  }
+
+  const saveSelectionToCloud = async (folderId: string, imageId: string, stars: number) => {
+    if (!folderId || !imageId) return
+
+    const actor = getActorKey()
+    const scope = isSharedGuest ? 'guest' : (isAdmin ? 'default' : 'user')
+    const actorKey = isSharedGuest ? actor : (isAdmin ? 'admin' : actor)
+
+    try {
+      const payload: any = {
+        album_id: folderId,
+        item_id: imageId,
+        scope,
+        actor_key: actorKey,
+        stars: Number(stars || 0),
+        updated_at: new Date().toISOString(),
+      }
+      if (isSharedGuest) payload.guest_label = `Khách ${actor.slice(0, 6).toUpperCase()}`
+
+      const { error } = await supabase
+        .from('gallery_photo_selections')
+        .upsert(payload, { onConflict: 'album_id,item_id,scope,actor_key' })
+
+      if (error) throw error
+    } catch (e) {
+      console.error('Lỗi lưu lựa chọn ảnh:', e)
+    }
+  }
+
+  const fetchGuestSelections = async (folderId: string) => {
+    if (!folderId || isSharedGuest) return
+    setIsLoadingGuestSelections(true)
+    try {
+      const { data, error } = await supabase
+        .from('gallery_photo_selections')
+        .select('album_id, item_id, stars, actor_key, guest_label, updated_at')
+        .eq('album_id', folderId)
+        .eq('scope', 'guest')
+        .gt('stars', 0)
+        .order('updated_at', { ascending: false })
+
+      if (error) throw error
+      setGuestSelectionRows(data || [])
+    } catch (e) {
+      console.error('Lỗi tải lựa chọn của khách:', e)
+      setGuestSelectionRows([])
+    } finally {
+      setIsLoadingGuestSelections(false)
+    }
+  }
+
+  const fetchAlbumImages = async (driveUrl: string, folderId?: string, guestMode = isSharedGuest) => {
     setLoadingImages(true)
     setStarFilter('all')
     setCurrentPage(1)
@@ -549,6 +745,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const data = await res.json()
       const files = data.files || []
       setItems(files)
+      const effectiveFolderId = folderId || (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : selectedAlbum?.id || '')
+      if (effectiveFolderId) {
+        const mediaItemIds = files.filter((f: any) => f && f.type !== 'folder').map((f: any) => f.id)
+        await fetchSelectionsForFolder(effectiveFolderId, true, mediaItemIds, guestMode)
+        if (!guestMode) await fetchGuestSelections(effectiveFolderId)
+      }
       return files
     } catch (e) {
       console.error(e)
@@ -940,10 +1142,32 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setPanPosition({ x: 0, y: 0 })
   }
 
-  const handleClearAllSelections = () => {
-    if (confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) {
-      setRatings({})
+  const handleClearAllSelections = async () => {
+    if (!confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) return
+
+    const folderId = currentActiveFolderId
+    const scope = isSharedGuest ? 'guest' : (isAdmin ? 'default' : 'user')
+    const actorKey = isSharedGuest ? getActorKey() : (isAdmin ? 'admin' : getActorKey())
+
+    try {
+      if (folderId) {
+        const { error } = await supabase
+          .from('gallery_photo_selections')
+          .delete()
+          .eq('album_id', folderId)
+          .eq('scope', scope)
+          .eq('actor_key', actorKey)
+        if (error) throw error
+      }
+      setRatings(prev => {
+        const next = { ...prev }
+        mediaFiles.forEach(item => delete next[item.id])
+        return next
+      })
       localStorage.removeItem('dinhthong_image_ratings')
+      if (!isSharedGuest) await fetchGuestSelections(folderId)
+    } catch (e: any) {
+      alert('Lỗi xóa lựa chọn: ' + (e?.message || e))
     }
   }
 
@@ -974,12 +1198,13 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     })
   }
 
-  const handleRateImage = (imageId: string, stars: number) => {
+  const handleRateImage = async (imageId: string, stars: number) => {
     const maxSel = Number(activeSetting?.max_select || 0)
     const isCurrentlyRated = (ratings[imageId] || 0) > 0
 
     if (stars > 0 && !isCurrentlyRated) {
-      const currentRatedCount = Object.values(ratings).filter(s => s > 0).length
+      const currentMediaIds = new Set(mediaFiles.map(item => item.id))
+      const currentRatedCount = Object.entries(ratings).filter(([id, value]) => currentMediaIds.has(id) && Number(value) > 0).length
       if (maxSel > 0 && currentRatedCount >= maxSel) {
         alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
         return
@@ -989,6 +1214,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const newRatings = { ...ratings, [imageId]: stars }
     setRatings(newRatings)
     localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
+
+    const folderId = currentActiveFolderId
+    if (folderId) {
+      await saveSelectionToCloud(folderId, imageId, stars)
+      if (!isSharedGuest && isAdminPanelOpen) await fetchGuestSelections(folderId)
+    }
   }
 
   const handleBatchDelete = async () => {
@@ -1107,81 +1338,13 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  const handleShareFolder = async (folderId: string, e?: React.MouseEvent) => {
+  const handleShareFolder = (folderId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
-    if (!folderId) return
-
     const numericCode = toNumericCode(folderId)
     const shareUrl = `${window.location.origin}/s/${numericCode}`
-
-    // Lưu ánh xạ mã chia sẻ -> Drive folder ID thật để link /s/xxxxxx
-    // có thể khôi phục đúng thư mục, kể cả thư mục con không nằm trong albums.
-    try {
-      const folderName = customNames[folderId] || items.find((item) => item.id === folderId)?.name || folderId
-      const parentDriveUrl = `https://drive.google.com/drive/folders/${folderId}`
-      const { error } = await supabase
-        .from('known_drive_folders')
-        .upsert(
-          [{ id: folderId, name: folderName, parent_url: parentDriveUrl }],
-          { onConflict: 'id' }
-        )
-
-      if (error) {
-        console.warn('Không lưu được ánh xạ link chia sẻ:', error.message)
-      }
-    } catch (err) {
-      console.warn('Không lưu được ánh xạ link chia sẻ:', err)
-    }
-
-    await navigator.clipboard.writeText(shareUrl)
+    navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(folderId)
     setTimeout(() => setShareCopiedId(null), 2500)
-  }
-
-  const resolveSharedFolderId = async (sharedCode: string, albumList: Album[]) => {
-    if (!sharedCode) return null
-
-    // 1. Album đã có trong bảng albums.
-    const matchedAlbum = (albumList || []).find(
-      (a) =>
-        a.id === sharedCode ||
-        toNumericCode(a.id) === sharedCode ||
-        extractDriveId(a.driveUrl) === sharedCode
-    )
-    if (matchedAlbum) return {
-      id: matchedAlbum.id,
-      title: matchedAlbum.title,
-      driveUrl: matchedAlbum.driveUrl,
-      album: matchedAlbum,
-    }
-
-    // 2. Thư mục con / thư mục sâu đã từng được chia sẻ hoặc đồng bộ.
-    try {
-      const { data, error } = await supabase
-        .from('known_drive_folders')
-        .select('id, name, parent_url')
-
-      if (!error && Array.isArray(data)) {
-        const matched = data.find((row: any) =>
-          row &&
-          row.id &&
-          (row.id === sharedCode || toNumericCode(String(row.id)) === sharedCode)
-        )
-
-        if (matched) {
-          return {
-            id: String(matched.id),
-            title: String(matched.name || matched.id),
-            driveUrl: String(matched.parent_url || `https://drive.google.com/drive/folders/${matched.id}`),
-            album: null as Album | null,
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Không thể giải mã link chia sẻ từ known_drive_folders:', err)
-    }
-
-    return null
   }
 
   const handleOpenSubFolder = (folderItem: MediaItem) => {
@@ -1194,7 +1357,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setIsLocked(true)
     } else {
       setIsLocked(false)
-      fetchAlbumImages(folderDriveUrl)
+      fetchAlbumImages(folderDriveUrl, folderItem.id)
     }
   }
 
@@ -1207,7 +1370,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           setIsLocked(true)
         } else {
           setIsLocked(false)
-          fetchAlbumImages(selectedAlbum.driveUrl)
+          fetchAlbumImages(selectedAlbum.driveUrl, selectedAlbum.id)
         }
       }
     } else {
@@ -1218,7 +1381,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         setIsLocked(true)
       } else {
         setIsLocked(false)
-        fetchAlbumImages(target.driveUrl)
+        fetchAlbumImages(target.driveUrl, target.id)
       }
     }
   }
@@ -1232,7 +1395,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         setIsLocked(true)
       } else {
         setIsLocked(false)
-        fetchAlbumImages(prev.driveUrl)
+        fetchAlbumImages(prev.driveUrl, prev.id)
       }
     } else if (folderHistory.length === 1 && selectedAlbum) {
       setFolderHistory([])
@@ -1241,7 +1404,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         setIsLocked(true)
       } else {
         setIsLocked(false)
-        fetchAlbumImages(selectedAlbum.driveUrl)
+        fetchAlbumImages(selectedAlbum.driveUrl, selectedAlbum.id)
       }
     } else {
       if (!isSharedGuest) {
@@ -1259,7 +1422,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setIsLocked(true)
     } else {
       setIsLocked(false)
-      fetchAlbumImages(album.driveUrl)
+      fetchAlbumImages(album.driveUrl, album.id)
     }
   }
 
@@ -1285,13 +1448,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     router.replace('/')
   }
 
-  const handleCheckPassword = (e: React.FormEvent) => {
+  const handleCheckPassword = async (e: React.FormEvent) => {
     e.preventDefault()
     if (passwordInput.trim() === activeSetting.password?.trim()) {
       setIsLocked(false)
       setPasswordError(false)
       const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
-      if (targetUrl) fetchAlbumImages(targetUrl)
+      if (targetUrl) {
+        const targetId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
+        await fetchAlbumImages(targetUrl, targetId)
+      }
     } else {
       setPasswordError(true)
     }
@@ -1551,7 +1717,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const initData = async () => {
       try {
         await fetchHiddenItemIds()
-        const knownSet = await fetchKnownFolderIds()
+        const knownSet: Set<string> = await fetchKnownFolderIds()
         await fetchCustomNames()
         await fetchCustomCovers()
         const fComments = await fetchComments()
@@ -1560,68 +1726,78 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
         if (sharedId) {
           setIsSharedGuest(true)
+          const browserGuestId = getGuestBrowserId()
+          setGuestId(browserGuestId)
+          const matchedAlbum = fAlbums.find(a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.driveUrl) === sharedId)
 
-          // Không được coi mã 6 số là Drive ID thật.
-          // Luôn giải mã /s/xxxxxx -> ID thư mục Drive từ albums hoặc known_drive_folders.
-          const resolvedShare = await resolveSharedFolderId(sharedId, fAlbums)
-
-          if (resolvedShare) {
-            const realFolderId = resolvedShare.id
-            const resolvedTitle = customNames[realFolderId] || resolvedShare.title || 'DinhThong Album'
-            const resolvedDriveUrl = resolvedShare.driveUrl || `https://drive.google.com/drive/folders/${realFolderId}`
-
-            const resolvedAlbum: Album = resolvedShare.album || {
-              id: realFolderId,
-              title: resolvedTitle,
-              coverUrl: '',
-              driveUrl: resolvedDriveUrl,
-              password: '',
-              max_select: 0,
-              allow_comments: true,
-              enable_watermark: false,
-            }
-
-            setSelectedAlbum(resolvedAlbum)
+          if (matchedAlbum) {
+            setSelectedAlbum(matchedAlbum)
             setFolderHistory([])
-
-            const currentPass =
-              fSettings[realFolderId]?.password ||
-              resolvedAlbum.password ||
-              ''
-
+            const currentPass = fSettings[matchedAlbum.id]?.password || matchedAlbum.password
             if (currentPass) {
               setIsLocked(true)
             } else {
-              await fetchAlbumImages(resolvedDriveUrl)
+              await fetchAlbumImages(matchedAlbum.driveUrl, matchedAlbum.id, true)
             }
           } else {
-            // Giữ khả năng tương thích với link cũ chỉ khi sharedId thực sự là Drive ID.
-            // Nếu là mã 6 số nhưng không có ánh xạ, không được tạo URL Drive giả từ mã đó.
-            const looksLikeNumericShareCode = /^\d{6}$/.test(sharedId)
+            // Link /s/xxxxxx của thư mục con: giải mã mã 6 số về Drive ID thật
+            // từ known_drive_folders thay vì dùng mã share làm Drive ID.
+            let resolvedFolderId = ''
+            let resolvedDriveUrl = ''
+            let resolvedTitle = ''
 
-            if (looksLikeNumericShareCode) {
-              console.error('Link chia sẻ không tìm thấy ánh xạ Drive ID:', sharedId)
+            try {
+              const { data: knownRows, error: knownError } = await supabase
+                .from('known_drive_folders')
+                .select('id, name, parent_url')
+
+              if (!knownError && Array.isArray(knownRows)) {
+                const matched = knownRows.find((row: any) =>
+                  row?.id && (
+                    String(row.id) === String(sharedId) ||
+                    toNumericCode(String(row.id)) === String(sharedId)
+                  )
+                )
+                if (matched) {
+                  resolvedFolderId = String(matched.id)
+                  resolvedDriveUrl = String(matched.parent_url || `https://drive.google.com/drive/folders/${matched.id}`)
+                  resolvedTitle = String(
+                    customNames[resolvedFolderId] ||
+                    (matched.name && String(matched.name) !== resolvedFolderId ? matched.name : 'DinhThong Album')
+                  )
+                }
+              }
+            } catch (err) {
+              console.warn('Không thể tra cứu thư mục share:', err)
+            }
+
+            // Fallback cho link cũ chứa trực tiếp Drive ID thật.
+            if (!resolvedFolderId && String(sharedId).length > 10) {
+              resolvedFolderId = String(sharedId)
+              resolvedDriveUrl = `https://drive.google.com/drive/folders/${resolvedFolderId}`
+              resolvedTitle = customNames[resolvedFolderId] || 'DinhThong Album'
+            }
+
+            if (!resolvedFolderId) {
+              alert('Link album không còn hợp lệ hoặc chưa được đồng bộ. Vui lòng tạo lại link chia sẻ từ Admin.')
               setLoading(false)
-              alert('Link album này không còn ánh xạ tới thư mục Drive. Vui lòng tạo lại link chia sẻ từ Admin.')
               return
             }
 
-            const realFolderId = extractDriveId(sharedId)
-            const adminSetTitle = customNames[realFolderId] || ''
-            const folderDriveUrl = `https://drive.google.com/drive/folders/${realFolderId}`
             const fallbackAlbum: Album = {
-              id: realFolderId,
-              title: adminSetTitle || 'DinhThong Album',
+              id: resolvedFolderId,
+              title: resolvedTitle || 'DinhThong Album',
               coverUrl: '',
-              driveUrl: folderDriveUrl,
+              driveUrl: resolvedDriveUrl
             }
 
             setSelectedAlbum(fallbackAlbum)
-            const subPass = fSettings[realFolderId]?.password
+            setFolderHistory([])
+            const subPass = fSettings[resolvedFolderId]?.password
             if (subPass) {
               setIsLocked(true)
             } else {
-              await fetchAlbumImages(folderDriveUrl)
+              await fetchAlbumImages(resolvedDriveUrl, resolvedFolderId, true)
             }
           }
         } else {
@@ -1633,7 +1809,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           }
 
           const loggedInEmail = sessionData.session.user.email
-          const { data: whitelist, error } = await supabase.from('allowed_emails').select('email').eq('email', loggedInEmail).single()
+          const { data: whitelist, error } = await supabase.from('allowed_emails').select('email, full_name, is_admin').eq('email', loggedInEmail).single()
 
           if (error || !whitelist) {
             alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
@@ -1644,13 +1820,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           }
 
           setUser(sessionData.session.user)
+          setIsAdmin(Boolean((whitelist as any)?.is_admin))
           const masterFolders = await fetchMasterFoldersList()
           checkAllMasterFolders(masterFolders, false, knownSet)
         }
 
-        const savedRatings = localStorage.getItem('dinhthong_image_ratings')
-        if (savedRatings) {
-          try { setRatings(JSON.parse(savedRatings)) } catch {}
+        if (!sharedId) {
+          const savedRatings = localStorage.getItem('dinhthong_image_ratings')
+          if (savedRatings) {
+            try { setRatings(JSON.parse(savedRatings)) } catch {}
+          }
         }
       } catch (e) {
         console.error('Lỗi khởi tạo:', e)
@@ -1663,6 +1842,29 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }, [])
 
   useEffect(() => {
+    const folderId = currentActiveFolderId
+    if (!folderId || loadingImages) return
+
+    const refresh = async () => {
+      const currentMediaIds = mediaFiles.map(item => item.id)
+      await fetchSelectionsForFolder(folderId, true, currentMediaIds)
+      if (!isSharedGuest && isAdminPanelOpen) await fetchGuestSelections(folderId)
+    }
+
+    refresh()
+    const interval = window.setInterval(refresh, 8000)
+    return () => window.clearInterval(interval)
+  }, [currentActiveFolderId, isSharedGuest, isAdminPanelOpen, isAdmin, user?.email])
+
+  const getSafeTabTitle = (title: string, fallback = 'DinhThong Gallery') => {
+    const clean = (title || '').trim()
+    if (!clean) return fallback
+    // Không để Drive ID dài hoặc mã share 6 số xuất hiện làm tên tab.
+    if (/^[a-zA-Z0-9_-]{20,}$/.test(clean) || /^\d{6}$/.test(clean)) return fallback
+    return clean
+  }
+
+  useEffect(() => {
     if (previewMedia) {
       const fileName = customNames[previewMedia.id] || previewMedia.name
       document.title = `${fileName} - Dinh Thong Gallery`
@@ -1671,9 +1873,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setPanPosition({ x: 0, y: 0 })
     } else if (folderHistory.length > 0) {
       const currentFolder = folderHistory[folderHistory.length - 1]
-      document.title = `${currentFolder.title} - Dinh Thong Gallery`
+      document.title = `${getSafeTabTitle(customNames[currentFolder.id] || currentFolder.title)} - Dinh Thong Gallery`
     } else if (selectedAlbum) {
-      document.title = `${selectedAlbum.title} - Dinh Thong Gallery`
+      document.title = `${getSafeTabTitle(customNames[selectedAlbum.id] || selectedAlbum.title)} - Dinh Thong Gallery`
     } else {
       document.title = 'Dinh Thong Gallery'
     }
@@ -2931,12 +3133,18 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               />
             </div>
 
+            {!isSharedGuest && guestSelectedImagesList.length > 0 && (
+              <p className="mb-3 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                Đã nhận {guestSelectedImagesList.length} ảnh khách chọn từ link chia sẻ.
+              </p>
+            )}
+
             <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-white/10">
-              <span className="text-xs text-gray-400">{selectedImagesList.length} tệp đã chọn</span>
+              <span className="text-xs text-gray-400">{txtSelectedImagesList.length} tệp đã chọn</span>
               <div className="flex gap-2">
                 <button
                   onClick={() => handleCopyText(textFileContent)}
-                  disabled={selectedImagesList.length === 0}
+                  disabled={txtSelectedImagesList.length === 0}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 transition cursor-pointer disabled:opacity-50"
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -2944,7 +3152,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </button>
                 <button
                   onClick={handleDownloadTxt}
-                  disabled={selectedImagesList.length === 0}
+                  disabled={txtSelectedImagesList.length === 0}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow transition cursor-pointer disabled:opacity-50"
                 >
                   <Download className="w-3.5 h-3.5" />
