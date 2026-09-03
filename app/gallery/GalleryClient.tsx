@@ -313,6 +313,117 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     enable_watermark: selectedAlbum?.enable_watermark ?? false
   }
 
+  // Đồng bộ lựa chọn ảnh dùng chung trên Supabase.
+  // Không phụ thuộc vào tài khoản nào: khách share link, Admin và các tài khoản nội bộ
+  // đều nhìn thấy cùng trạng thái chọn sao của album hiện tại.
+  const fetchSyncedRatings = async (folderId: string, itemIds: string[] = []) => {
+    if (!folderId) return {} as Record<string, number>
+
+    try {
+      const { data, error } = await supabase
+        .from('gallery_photo_selections')
+        .select('item_id, stars, updated_at')
+        .eq('album_id', folderId)
+        .order('updated_at', { ascending: false })
+
+      if (error) {
+        console.warn('Không đọc được đồng bộ lựa chọn ảnh:', error.message)
+        const saved = localStorage.getItem('dinhthong_image_ratings')
+        try {
+          const local = saved ? JSON.parse(saved) : {}
+          const fallback: Record<string, number> = {}
+          itemIds.forEach(id => {
+            const value = Number(local?.[id] || 0)
+            if (value > 0) fallback[id] = value
+          })
+          setRatings(prev => {
+            const next = { ...prev }
+            itemIds.forEach(id => delete next[id])
+            Object.assign(next, fallback)
+            return next
+          })
+          return fallback
+        } catch {
+          return {} as Record<string, number>
+        }
+      }
+
+      const synced: Record<string, number> = {}
+      ;(data || []).forEach((row: any) => {
+        if (!row?.item_id) return
+        const value = Number(row.stars || 0)
+        if (!(row.item_id in synced)) synced[row.item_id] = value
+      })
+
+      // Migrate dữ liệu cũ từ localStorage nếu album chưa có dữ liệu cloud.
+      const hasCloudRows = (data || []).length > 0
+      if (!hasCloudRows && itemIds.length > 0) {
+        try {
+          const saved = localStorage.getItem('dinhthong_image_ratings')
+          const local = saved ? JSON.parse(saved) : {}
+          const legacy = itemIds
+            .map(id => [id, Number(local?.[id] || 0)] as [string, number])
+            .filter(([, stars]) => stars > 0)
+
+          if (legacy.length > 0) {
+            await Promise.all(
+              legacy.map(([imageId, stars]) =>
+                supabase.from('gallery_photo_selections').upsert({
+                  album_id: folderId,
+                  item_id: imageId,
+                  stars,
+                  updated_at: new Date().toISOString(),
+                }, { onConflict: 'album_id,item_id' })
+              )
+            )
+            legacy.forEach(([imageId, stars]) => { synced[imageId] = stars })
+          }
+        } catch {}
+      }
+
+      setRatings(prev => {
+        const next = { ...prev }
+        itemIds.forEach(id => delete next[id])
+        Object.entries(synced).forEach(([id, stars]) => {
+          if (Number(stars) > 0) next[id] = Number(stars)
+        })
+        return next
+      })
+      localStorage.setItem('dinhthong_image_ratings', JSON.stringify(synced))
+      return synced
+    } catch (e) {
+      console.warn('Lỗi đồng bộ lựa chọn ảnh:', e)
+      return {} as Record<string, number>
+    }
+  }
+
+  const saveSyncedRating = async (folderId: string, imageId: string, stars: number) => {
+    if (!folderId || !imageId) return
+
+    try {
+      if (stars <= 0) {
+        const { error } = await supabase
+          .from('gallery_photo_selections')
+          .delete()
+          .eq('album_id', folderId)
+          .eq('item_id', imageId)
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from('gallery_photo_selections')
+          .upsert({
+            album_id: folderId,
+            item_id: imageId,
+            stars: Number(stars),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'album_id,item_id' })
+        if (error) throw error
+      }
+    } catch (e) {
+      console.warn('Lỗi lưu lựa chọn ảnh lên Supabase:', e)
+    }
+  }
+
   const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
   const subFolders = visibleItems.filter(item => item.type === 'folder')
   const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
@@ -530,7 +641,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  const fetchAlbumImages = async (driveUrl: string) => {
+  const fetchAlbumImages = async (driveUrl: string, folderId?: string) => {
     setLoadingImages(true)
     setStarFilter('all')
     setCurrentPage(1)
@@ -540,6 +651,18 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const data = await res.json()
       const files = data.files || []
       setItems(files)
+
+      const effectiveFolderId = folderId || (folderHistory.length > 0
+        ? folderHistory[folderHistory.length - 1].id
+        : selectedAlbum?.id || '')
+
+      if (effectiveFolderId) {
+        const mediaItemIds = files
+          .filter((f: any) => f && f.type !== 'folder')
+          .map((f: any) => f.id)
+        await fetchSyncedRatings(effectiveFolderId, mediaItemIds)
+      }
+
       return files
     } catch (e) {
       console.error(e)
@@ -931,11 +1054,29 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setPanPosition({ x: 0, y: 0 })
   }
 
-  const handleClearAllSelections = () => {
-    if (confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) {
-      setRatings({})
-      localStorage.removeItem('dinhthong_image_ratings')
+  const handleClearAllSelections = async () => {
+    if (!confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) return
+
+    const folderId = currentActiveFolderId
+    if (folderId) {
+      try {
+        const { error } = await supabase
+          .from('gallery_photo_selections')
+          .delete()
+          .eq('album_id', folderId)
+        if (error) throw error
+      } catch (e: any) {
+        alert('Lỗi xóa lựa chọn: ' + (e?.message || e))
+        return
+      }
     }
+
+    setRatings(prev => {
+      const next = { ...prev }
+      mediaFiles.forEach(item => delete next[item.id])
+      return next
+    })
+    localStorage.removeItem('dinhthong_image_ratings')
   }
 
   const handleToggleSelectAlbum = (id: string, e: React.MouseEvent) => {
@@ -965,21 +1106,28 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     })
   }
 
-  const handleRateImage = (imageId: string, stars: number) => {
+  const handleRateImage = async (imageId: string, stars: number) => {
     const maxSel = Number(activeSetting?.max_select || 0)
     const isCurrentlyRated = (ratings[imageId] || 0) > 0
 
     if (stars > 0 && !isCurrentlyRated) {
-      const currentRatedCount = Object.values(ratings).filter(s => s > 0).length
+      const currentMediaIds = new Set(mediaFiles.map(item => item.id))
+      const currentRatedCount = Object.entries(ratings)
+        .filter(([id, value]) => currentMediaIds.has(id) && Number(value) > 0).length
       if (maxSel > 0 && currentRatedCount >= maxSel) {
         alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
         return
       }
     }
 
-    const newRatings = { ...ratings, [imageId]: stars }
+    const newRatings = { ...ratings }
+    if (stars > 0) newRatings[imageId] = stars
+    else delete newRatings[imageId]
+
     setRatings(newRatings)
     localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
+
+    await saveSyncedRating(currentActiveFolderId, imageId, stars)
   }
 
   const handleBatchDelete = async () => {
@@ -1117,7 +1265,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setIsLocked(true)
     } else {
       setIsLocked(false)
-      fetchAlbumImages(folderDriveUrl)
+      fetchAlbumImages(folderDriveUrl, folderItem.id)
     }
   }
 
@@ -1130,7 +1278,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           setIsLocked(true)
         } else {
           setIsLocked(false)
-          fetchAlbumImages(selectedAlbum.driveUrl)
+          fetchAlbumImages(selectedAlbum.driveUrl, selectedAlbum.id)
         }
       }
     } else {
@@ -1141,7 +1289,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         setIsLocked(true)
       } else {
         setIsLocked(false)
-        fetchAlbumImages(target.driveUrl)
+        fetchAlbumImages(target.driveUrl, target.id)
       }
     }
   }
@@ -1155,7 +1303,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         setIsLocked(true)
       } else {
         setIsLocked(false)
-        fetchAlbumImages(prev.driveUrl)
+        fetchAlbumImages(prev.driveUrl, prev.id)
       }
     } else if (folderHistory.length === 1 && selectedAlbum) {
       setFolderHistory([])
@@ -1164,7 +1312,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         setIsLocked(true)
       } else {
         setIsLocked(false)
-        fetchAlbumImages(selectedAlbum.driveUrl)
+        fetchAlbumImages(selectedAlbum.driveUrl, selectedAlbum.id)
       }
     } else {
       if (!isSharedGuest) {
@@ -1182,7 +1330,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setIsLocked(true)
     } else {
       setIsLocked(false)
-      fetchAlbumImages(album.driveUrl)
+      fetchAlbumImages(album.driveUrl, album.id)
     }
   }
 
@@ -1214,7 +1362,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setIsLocked(false)
       setPasswordError(false)
       const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
-      if (targetUrl) fetchAlbumImages(targetUrl)
+      if (targetUrl) {
+        const targetId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
+        fetchAlbumImages(targetUrl, targetId)
+      }
     } else {
       setPasswordError(true)
     }
@@ -1492,7 +1643,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             if (currentPass) {
               setIsLocked(true)
             } else {
-              await fetchAlbumImages(matchedAlbum.driveUrl)
+              await fetchAlbumImages(matchedAlbum.driveUrl, matchedAlbum.id)
             }
           } else {
             let realFolderId = sharedId
@@ -1511,7 +1662,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             if (subPass) {
               setIsLocked(true)
             } else {
-              await fetchAlbumImages(folderDriveUrl)
+              await fetchAlbumImages(folderDriveUrl, realFolderId)
             }
           }
         } else {
@@ -1538,10 +1689,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           checkAllMasterFolders(masterFolders, false, knownSet)
         }
 
-        const savedRatings = localStorage.getItem('dinhthong_image_ratings')
-        if (savedRatings) {
-          try { setRatings(JSON.parse(savedRatings)) } catch {}
-        }
       } catch (e) {
         console.error('Lỗi khởi tạo:', e)
       } finally {
@@ -1551,6 +1698,20 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     initData()
   }, [])
+
+  useEffect(() => {
+    const folderId = currentActiveFolderId
+    if (!folderId || loadingImages) return
+
+    const refresh = async () => {
+      const currentMediaIds = mediaFiles.map(item => item.id)
+      await fetchSyncedRatings(folderId, currentMediaIds)
+    }
+
+    refresh()
+    const interval = window.setInterval(refresh, 8000)
+    return () => window.clearInterval(interval)
+  }, [currentActiveFolderId, loadingImages, items.length])
 
   useEffect(() => {
     if (previewMedia) {
