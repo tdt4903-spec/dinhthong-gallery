@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 import { 
   Search, Sun, Moon, Plus, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, Lock as LockIcon, ZoomIn, ZoomOut, RotateCcw, Send
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, Lock as LockIcon, ZoomIn, ZoomOut, RotateCcw, Send, Bell
 } from 'lucide-react'
 
 interface MediaItem {
@@ -30,6 +30,8 @@ interface Album {
   max_select?: number
   allow_comments?: boolean
   enable_watermark?: boolean
+  collect_customer_info?: boolean
+  max_viewers?: number
 }
 
 interface FolderSettings {
@@ -39,6 +41,8 @@ interface FolderSettings {
   max_select?: number
   allow_comments?: boolean
   enable_watermark?: boolean
+  collect_customer_info?: boolean
+  max_viewers?: number
 }
 
 interface MasterFolderItem {
@@ -258,6 +262,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [guestId, setGuestId] = useState('')
   const [guestSelectionRows, setGuestSelectionRows] = useState<any[]>([])
   const [isLoadingGuestSelections, setIsLoadingGuestSelections] = useState(false)
+  const [showGuestNameModal, setShowGuestNameModal] = useState(false)
+  const [guestNameInput, setGuestNameInput] = useState('')
+  const [guestCustomerName, setGuestCustomerName] = useState('')
+  const [guestCanSelect, setGuestCanSelect] = useState(false)
+  const [guestViewerCount, setGuestViewerCount] = useState(0)
+  const [guestAccessDenied, setGuestAccessDenied] = useState(false)
+  const [notificationItems, setNotificationItems] = useState<any[]>([])
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false)
 
   const [isLocked, setIsLocked] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
@@ -315,7 +327,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     password: selectedAlbum?.password || '',
     max_select: selectedAlbum?.max_select || 0,
     allow_comments: selectedAlbum?.allow_comments ?? true,
-    enable_watermark: selectedAlbum?.enable_watermark ?? false
+    enable_watermark: selectedAlbum?.enable_watermark ?? false,
+    collect_customer_info: selectedAlbum?.collect_customer_info ?? false,
+    max_viewers: selectedAlbum?.max_viewers ?? 0
   }
 
   const getActorKey = (guestMode = isSharedGuest) => {
@@ -366,6 +380,137 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         folderHistory: Array.isArray(parsed.folderHistory) ? parsed.folderHistory : [],
       } as { selectedAlbum: { id: string; title?: string; driveUrl: string } | null; folderHistory: FolderBreadcrumb[] }
     } catch { return null }
+  }
+
+  const getGuestIdentityStorageKey = (folderId: string) => `dinhthong_gallery_guest_name_${folderId}`
+
+  const registerGuestViewer = async (folderId: string, customerName = '') => {
+    if (!folderId || !guestId) return { allowed: false, viewerCount: 0 }
+    try {
+      const { data, error } = await supabase.rpc('register_gallery_album_viewer', {
+        p_album_id: folderId,
+        p_visitor_id: guestId,
+        p_customer_name: customerName.trim(),
+        p_max_viewers: Number(folderSettingsMap[folderId]?.max_viewers || selectedAlbum?.max_viewers || 0),
+      })
+      if (error) throw error
+      const result = Array.isArray(data) ? data[0] : data
+      const allowed = Boolean(result?.allowed)
+      const viewerCount = Number(result?.viewer_count || 0)
+      setGuestViewerCount(viewerCount)
+      if (!allowed) {
+        setGuestAccessDenied(true)
+      }
+      return { allowed, viewerCount }
+    } catch (e) {
+      console.error('Lỗi ghi nhận lượt xem album:', e)
+      return { allowed: false, viewerCount: 0 }
+    }
+  }
+
+  const getFolderSettingFromState = (folderId: string, fallback?: any) => ({
+    ...folderSettingsMap[folderId],
+    ...(fallback || {}),
+  })
+
+  const startGuestEntry = async (folderId: string) => {
+    if (!folderId) return false
+    const setting = getFolderSettingFromState(folderId)
+    const collect = Boolean(setting.collect_customer_info)
+    const savedName = typeof window !== 'undefined' ? (localStorage.getItem(getGuestIdentityStorageKey(folderId)) || '') : ''
+
+    if (collect) {
+      if (savedName.trim()) {
+        setGuestCustomerName(savedName.trim())
+        const result = await registerGuestViewer(folderId, savedName.trim())
+        if (!result.allowed) return false
+        setGuestCanSelect(true)
+        return true
+      }
+      setGuestNameInput('')
+      setShowGuestNameModal(true)
+      return false
+    }
+
+    const result = await registerGuestViewer(folderId, '')
+    if (!result.allowed) return false
+    setGuestCustomerName('')
+    setGuestCanSelect(false)
+    return true
+  }
+
+  const finalizeGuestEntry = async () => {
+    const cleanName = guestNameInput.trim()
+    if (!cleanName) return
+    if (cleanName.length > 100) {
+      alert('Tên không được dài quá 100 ký tự.')
+      return
+    }
+    const folderId = currentActiveFolderId
+    if (!folderId) return
+    try {
+      localStorage.setItem(getGuestIdentityStorageKey(folderId), cleanName)
+    } catch {}
+    setGuestCustomerName(cleanName)
+    const result = await registerGuestViewer(folderId, cleanName)
+    if (!result.allowed) return
+    setGuestCanSelect(true)
+    setShowGuestNameModal(false)
+    setGuestNameInput('')
+    const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
+    if (targetUrl) await fetchAlbumImages(targetUrl, folderId, true)
+  }
+
+  const fetchNotifications = async () => {
+    if (isSharedGuest) return
+    try {
+      const [{ data: guestRows }, { data: visitorRows }] = await Promise.all([
+        supabase.from('gallery_photo_selections').select('album_id, item_id, stars, actor_key, guest_label, updated_at').eq('scope', 'guest').gt('stars', 0).order('updated_at', { ascending: false }),
+        supabase.from('gallery_album_visitors').select('album_id, visitor_id, customer_name, last_seen_at, updated_at').order('last_seen_at', { ascending: false }),
+      ])
+
+      const latestByAlbumActor: Record<string, any> = {}
+      ;(guestRows || []).forEach((row: any) => {
+        const key = `${row.album_id}::${row.actor_key}`
+        if (!latestByAlbumActor[key]) latestByAlbumActor[key] = row
+      })
+      const latestActorPerAlbum: Record<string, { actor: string; updated_at: string }> = {}
+      Object.values(latestByAlbumActor).forEach((row: any) => {
+        const old = latestActorPerAlbum[row.album_id]
+        if (!old || new Date(row.updated_at).getTime() > new Date(old.updated_at).getTime()) {
+          latestActorPerAlbum[row.album_id] = { actor: row.actor_key, updated_at: row.updated_at }
+        }
+      })
+
+      const guestCountByAlbum: Record<string, number> = {}
+      Object.keys(latestActorPerAlbum).forEach(albumId => {
+        const actor = latestActorPerAlbum[albumId].actor
+        guestCountByAlbum[albumId] = (guestRows || []).filter((r: any) => r.album_id === albumId && r.actor_key === actor && Number(r.stars) > 0).length
+      })
+
+      const viewerCountByAlbum: Record<string, number> = {}
+      ;(visitorRows || []).forEach((row: any) => {
+        viewerCountByAlbum[row.album_id] = (viewerCountByAlbum[row.album_id] || 0) + 1
+      })
+
+      const notices = (albums || []).map((album) => {
+        const max = Number(folderSettingsMap[album.id]?.max_select || album.max_select || 0)
+        const chosen = Number(guestCountByAlbum[album.id] || 0)
+        const viewers = Number(viewerCountByAlbum[album.id] || 0)
+        return {
+          albumId: album.id,
+          title: customNames[album.id] || album.title,
+          chosen,
+          max,
+          viewers,
+          full: max > 0 && chosen >= max,
+        }
+      }).filter((item) => item.full || item.viewers > 0)
+
+      setNotificationItems(notices)
+    } catch (e) {
+      console.error('Lỗi tải thông báo:', e)
+    }
   }
 
   const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
@@ -490,7 +635,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             password: f.password || '',
             max_select: Number(f.max_select || 0),
             allow_comments: f.allow_comments ?? true,
-            enable_watermark: f.enable_watermark ?? false
+            enable_watermark: f.enable_watermark ?? false,
+            collect_customer_info: f.collect_customer_info ?? false,
+            max_viewers: Number(f.max_viewers || 0)
           }
         })
         setFolderSettingsMap(map)
@@ -742,7 +889,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         stars: Number(stars || 0),
         updated_at: new Date().toISOString(),
       }
-      if (isSharedGuest) payload.guest_label = `Khách ${actor.slice(0, 6).toUpperCase()}`
+      if (isSharedGuest) payload.guest_label = guestCustomerName.trim() || `Khách ${actor.slice(0, 6).toUpperCase()}`
 
       const { error } = await supabase
         .from('gallery_photo_selections')
@@ -1184,11 +1331,19 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const handleClearAllSelections = async () => {
-    if (!confirm('Bạn có chắc muốn xóa tất cả các đánh giá sao của các tệp trong album này không?')) return
+    if (!confirm('Bạn có chắc muốn xóa tất cả các ảnh đã chọn trong album này không?')) return
 
     const folderId = currentActiveFolderId
-    const scope = isSharedGuest ? 'guest' : (isAdmin ? 'default' : 'user')
-    const actorKey = isSharedGuest ? getActorKey() : (isAdmin ? 'admin' : getActorKey())
+    let scope = isSharedGuest ? 'guest' : 'default'
+    let actorKey = isSharedGuest ? getActorKey() : 'admin'
+
+    // Ở giao diện Admin, nút này phải xóa đúng bộ lựa chọn đang hiển thị.
+    // Nếu đang có lựa chọn của khách từ link chia sẻ thì xóa bộ của khách gần nhất,
+    // thay vì xóa một bộ mặc định không được hiển thị.
+    if (!isSharedGuest && latestGuestActor && hasLatestGuestSelections) {
+      scope = 'guest'
+      actorKey = latestGuestActor
+    }
 
     try {
       if (folderId) {
@@ -1206,7 +1361,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         return next
       })
       localStorage.removeItem('dinhthong_image_ratings')
-      if (!isSharedGuest) await fetchGuestSelections(folderId)
+      if (!isSharedGuest) { await fetchGuestSelections(folderId); await fetchNotifications() }
     } catch (e: any) {
       alert('Lỗi xóa lựa chọn: ' + (e?.message || e))
     }
@@ -1224,6 +1379,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const handleToggleSelectItem = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
+    if (isSharedGuest) return
     const maxSel = Number(activeSetting?.max_select || 0)
     
     if (maxSel > 0 && !selectedItemIds.has(id) && selectedItemIds.size >= maxSel) {
@@ -1240,10 +1396,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const handleRateImage = async (imageId: string, stars: number) => {
-    const maxSel = Number(activeSetting?.max_select || 0)
+    if (isSharedGuest && !guestCanSelect) {
+      alert(activeSetting.collect_customer_info ? 'Vui lòng nhập tên để bắt đầu chọn ảnh.' : 'Album này không mở chức năng chọn ảnh cho khách.')
+      return
+    }
+    const maxSel = isSharedGuest ? Number(activeSetting?.max_select || 0) : 0
     const isCurrentlyRated = (ratings[imageId] || 0) > 0
 
-    if (stars > 0 && !isCurrentlyRated) {
+    if (isSharedGuest && stars > 0 && !isCurrentlyRated) {
       const currentMediaIds = new Set(mediaFiles.map(item => item.id))
       const currentRatedCount = Object.entries(ratings).filter(([id, value]) => currentMediaIds.has(id) && Number(value) > 0).length
       if (maxSel > 0 && currentRatedCount >= maxSel) {
@@ -1259,7 +1419,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const folderId = currentActiveFolderId
     if (folderId) {
       await saveSelectionToCloud(folderId, imageId, stars)
-      if (!isSharedGuest && isAdminPanelOpen) await fetchGuestSelections(folderId)
+      if (!isSharedGuest) { if (isAdminPanelOpen) await fetchGuestSelections(folderId); await fetchNotifications() }
     }
   }
 
@@ -1337,7 +1497,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       password: activeSetting.password || '',
       max_select: activeSetting.max_select || 0,
       allow_comments: activeSetting.allow_comments ?? true,
-      enable_watermark: activeSetting.enable_watermark ?? false
+      enable_watermark: activeSetting.enable_watermark ?? false,
+      collect_customer_info: activeSetting.collect_customer_info ?? false,
+      max_viewers: activeSetting.max_viewers ?? 0
     })
   }
 
@@ -1352,7 +1514,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         password: editingFolderSetting.password?.trim() || '',
         max_select: Number(editingFolderSetting.max_select || 0),
         allow_comments: editingFolderSetting.allow_comments ?? true,
-        enable_watermark: editingFolderSetting.enable_watermark ?? false
+        enable_watermark: editingFolderSetting.enable_watermark ?? false,
+        collect_customer_info: editingFolderSetting.collect_customer_info ?? false,
+        max_viewers: Math.max(0, Number(editingFolderSetting.max_viewers || 0))
       }
 
       await supabase.from('folder_settings').upsert(payload, { onConflict: 'id' })
@@ -1431,6 +1595,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const fSetting = folderSettingsMap[folderItem.id]
     if (fSetting?.password && isSharedGuest) {
       setIsLocked(true)
+    } else if (isSharedGuest) {
+      setIsLocked(false)
+      startGuestEntry(folderItem.id).then((entered) => { if (entered) fetchAlbumImages(folderDriveUrl, folderItem.id, true) })
     } else {
       setIsLocked(false)
       fetchAlbumImages(folderDriveUrl, folderItem.id)
@@ -1544,7 +1711,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
       if (targetUrl) {
         const targetId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
-        await fetchAlbumImages(targetUrl, targetId)
+        if (isSharedGuest) {
+          const entered = await startGuestEntry(targetId)
+          if (entered) await fetchAlbumImages(targetUrl, targetId, true)
+        } else {
+          await fetchAlbumImages(targetUrl, targetId)
+        }
       }
     } else {
       setPasswordError(true)
@@ -1933,7 +2105,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             if (currentPass) {
               setIsLocked(true)
             } else {
-              await fetchAlbumImages(matchedAlbum.driveUrl, matchedAlbum.id, true)
+              const entered = await startGuestEntry(matchedAlbum.id)
+              if (entered) await fetchAlbumImages(matchedAlbum.driveUrl, matchedAlbum.id, true)
             }
           } else {
             const resolved = await resolveSharedFolder(sharedId)
@@ -1957,7 +2130,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             if (subPass) {
               setIsLocked(true)
             } else {
-              await fetchAlbumImages(resolved.driveUrl, resolved.id, true)
+              const entered = await startGuestEntry(resolved.id)
+              if (entered) await fetchAlbumImages(resolved.driveUrl, resolved.id, true)
             }
           }
         } else {
@@ -2042,6 +2216,23 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const interval = window.setInterval(refresh, 8000)
     return () => window.clearInterval(interval)
   }, [currentActiveFolderId, isSharedGuest, isAdminPanelOpen, isAdmin, user?.email])
+
+  useEffect(() => {
+    if (!isSharedGuest || !guestId || !currentActiveFolderId) return
+    const heartbeat = async () => {
+      await registerGuestViewer(currentActiveFolderId, guestCustomerName)
+    }
+    heartbeat()
+    const interval = window.setInterval(heartbeat, 60000)
+    return () => window.clearInterval(interval)
+  }, [isSharedGuest, guestId, currentActiveFolderId, guestCustomerName])
+
+  useEffect(() => {
+    if (isSharedGuest) return
+    fetchNotifications()
+    const interval = window.setInterval(fetchNotifications, 15000)
+    return () => window.clearInterval(interval)
+  }, [isSharedGuest, albums.length, Object.keys(folderSettingsMap).length])
 
   useEffect(() => {
     if (previewMedia) {
@@ -2273,6 +2464,22 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             )}
 
             <div className="flex items-center gap-1.5 pl-1.5 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
+              {!isSharedGuest && (
+                <button
+                  type="button"
+                  onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }}
+                  className={`relative p-2 rounded-full border transition cursor-pointer flex-shrink-0 ${isDarkMode ? 'border-white/10 hover:bg-white/10 text-white' : 'border-gray-200 hover:bg-gray-100 text-gray-600'}`}
+                  title="Thông báo album"
+                >
+                  <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  {notificationItems.filter((n) => n.full).length > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                      {notificationItems.filter((n) => n.full).length}
+                    </span>
+                  )}
+                </button>
+              )}
+
               <button
                 onClick={handleToggleDarkMode}
                 className={`p-2 rounded-full border transition cursor-pointer flex-shrink-0 ${
@@ -2572,7 +2779,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   <p className="text-xs text-gray-400">
                     {loadingImages ? 'Vui lòng đợi' : `${subFolders.length} thư mục, ${mediaFiles.length} hình ảnh`}
                   </p>
-                  {activeSetting.max_select ? (
+                  {isSharedGuest && activeSetting.max_select ? (
                     <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                       Chọn tối đa: {activeSetting.max_select} ảnh
                     </span>
@@ -2873,13 +3080,15 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   </>
                                 )}
 
-                                <button
-                                  onClick={(e) => handleToggleSelectItem(item.id, e)}
-                                  className="absolute bottom-2 left-2 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
-                                  title={isChecked ? 'Bỏ chọn' : 'Chọn tệp'}
-                                >
-                                  {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
-                                </button>
+                                {!isSharedGuest && (
+                                  <button
+                                    onClick={(e) => handleToggleSelectItem(item.id, e)}
+                                    className="absolute bottom-2 left-2 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
+                                    title={isChecked ? 'Bỏ chọn' : 'Chọn tệp'}
+                                  >
+                                    {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
+                                  </button>
+                                )}
 
                                 {!isSharedGuest && (
                                   <button
@@ -3265,6 +3474,34 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
+      {showGuestNameModal && isSharedGuest && (
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
+            <div className="w-12 h-1 rounded-full bg-emerald-600 mx-auto mb-5" />
+            <h3 className="font-serif font-bold text-lg text-center">Nhập tên của bạn</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2 mb-5">Thông tin này giúp Admin biết ai đang chọn ảnh trong album.</p>
+            <input
+              autoFocus
+              value={guestNameInput}
+              onChange={(e) => setGuestNameInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') finalizeGuestEntry() }}
+              placeholder="Họ và tên"
+              className={`w-full px-4 py-3 rounded-2xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'}`}
+            />
+            <button onClick={finalizeGuestEntry} className="w-full mt-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">Tiếp tục</button>
+          </div>
+        </div>
+      )}
+
+      {guestAccessDenied && isSharedGuest && (
+        <div className="fixed inset-0 z-[61] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
+            <h3 className="font-serif font-bold text-lg">Album đã đủ số người xem</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Admin đã đặt giới hạn người xem cho album này. Vui lòng liên hệ Admin.</p>
+          </div>
+        </div>
+      )}
+
       {/* POPUP XEM DANH SÁCH ẢNH ĐÃ CHỌN (TXT) */}
       {isAdminPanelOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -3314,7 +3551,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
             {!isSharedGuest && guestSelectedImagesList.length > 0 && (
               <p className="mb-3 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                Đã nhận {guestSelectedImagesList.length} ảnh khách chọn từ link chia sẻ.
+                Đã nhận {guestSelectedImagesList.length} ảnh khách chọn từ link chia sẻ{latestGuestActor && guestSelectionRows.find((r: any) => r.actor_key === latestGuestActor)?.guest_label ? ` — ${guestSelectionRows.find((r: any) => r.actor_key === latestGuestActor)?.guest_label}` : ''}.
               </p>
             )}
 
@@ -3338,6 +3575,26 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   <span>Lưu file TXT</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isNotificationOpen && !isSharedGuest && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setIsNotificationOpen(false)}>
+          <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2"><Bell className="w-5 h-5 text-emerald-500" /><h3 className="font-serif font-bold text-base">Thông báo album</h3></div>
+              <button onClick={() => setIsNotificationOpen(false)} className="p-1 rounded-full text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="mt-4 space-y-3 max-h-[55vh] overflow-y-auto">
+              {notificationItems.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-8">Chưa có thông báo.</p>
+              ) : notificationItems.map((item) => (
+                <button key={item.albumId} type="button" onClick={() => { const target = albums.find((a) => a.id === item.albumId); if (target) handleOpenAlbum(target); setIsNotificationOpen(false) }} className={`w-full text-left p-4 rounded-2xl border transition ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-100 hover:bg-emerald-50'}`}>
+                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="font-semibold text-sm truncate">{item.title}</div><div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Đang có {item.viewers} người xem</div></div>{item.full && <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">Đủ ảnh: {item.chosen}/{item.max}</span>}</div>
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -3410,6 +3667,29 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, max_select: Number(e.target.value) })} 
                     placeholder="0 = Vô hạn" 
                     className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-2 pt-2">
+                  <input
+                    type="checkbox"
+                    checked={editingFolderSetting.collect_customer_info ?? false}
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, collect_customer_info: e.target.checked })}
+                    className="rounded text-emerald-600"
+                  />
+                  <span>Thu thập thông tin khách hàng</span>
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Giới hạn số người xem:</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editingFolderSetting.max_viewers || 0}
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, max_viewers: Math.max(0, Number(e.target.value)) })}
+                    placeholder="0 = Không giới hạn"
+                    className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}
                   />
                 </div>
               </div>
