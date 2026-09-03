@@ -407,14 +407,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     const maxViewers = Number(setting.max_viewers || selectedAlbum?.max_viewers || 0)
 
-    // QUAN TRỌNG: album yêu cầu nhập tên thì tuyệt đối không kiểm tra giới hạn
-    // khi chưa có tên. Chỉ sau khi khách bấm 'Tiếp tục' mới chạy phần này.
-    if (collectCustomerInfo && !cleanName) {
-      setGuestAccessDenied(false)
-      setGuestCanSelect(false)
-      return { allowed: true, viewerCount: 0, trackingUnavailable: false, waitingForName: true }
-    }
-
     try {
       // Khi album thu thập tên khách, giới hạn người xem được tính theo TÊN.
       // Cùng một tên đã từng vào album chỉ tính là 1 người, kể cả dùng trình duyệt
@@ -2526,17 +2518,19 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const setting = getFolderSettingFromState(currentActiveFolderId)
     const requiresName = Boolean(setting.collect_customer_info)
 
-    // Khi album yêu cầu nhập tên, không heartbeat/kiểm tra giới hạn bằng tên rỗng.
-    // Chỉ heartbeat sau khi khách đã nhập tên hợp lệ và được phép vào album.
-    if (requiresName && (!guestCustomerName.trim() || showGuestNameModal)) return
+    // TUYỆT ĐỐI không heartbeat khi album yêu cầu nhập tên mà khách chưa
+    // được xác nhận. guestCanSelect chỉ chuyển true sau khi finalizeGuestEntry()
+    // kiểm tra tên với dữ liệu gallery_album_visitors và cho phép vào.
+    if (requiresName && (!guestCanSelect || !guestCustomerName.trim() || showGuestNameModal)) return
 
     const heartbeat = async () => {
+      if (requiresName && (!guestCanSelect || !guestCustomerName.trim() || showGuestNameModal)) return
       await registerGuestViewer(currentActiveFolderId, guestCustomerName)
     }
     heartbeat()
     const interval = window.setInterval(heartbeat, 60000)
     return () => window.clearInterval(interval)
-  }, [isSharedGuest, guestId, currentActiveFolderId, guestCustomerName, showGuestNameModal, folderSettingsMap])
+  }, [isSharedGuest, guestId, currentActiveFolderId, guestCustomerName, guestCanSelect, showGuestNameModal, folderSettingsMap])
 
   useEffect(() => {
     if (isSharedGuest) return
