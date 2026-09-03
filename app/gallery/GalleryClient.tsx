@@ -384,14 +384,15 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const getGuestIdentityStorageKey = (folderId: string) => `dinhthong_gallery_guest_name_${folderId}`
 
-  const registerGuestViewer = async (folderId: string, customerName = '') => {
+  const registerGuestViewer = async (folderId: string, customerName = '', settingsOverride?: Partial<FolderSettings>) => {
     if (!folderId || !guestId) return { allowed: false, viewerCount: 0 }
+    const setting = { ...(folderSettingsMap[folderId] || {}), ...(settingsOverride || {}) }
     try {
       const { data, error } = await supabase.rpc('register_gallery_album_viewer', {
         p_album_id: folderId,
         p_visitor_id: guestId,
         p_customer_name: customerName.trim(),
-        p_max_viewers: Number(folderSettingsMap[folderId]?.max_viewers || selectedAlbum?.max_viewers || 0),
+        p_max_viewers: Number(setting?.max_viewers || selectedAlbum?.max_viewers || 0),
       })
       if (error) throw error
       const result = Array.isArray(data) ? data[0] : data
@@ -413,16 +414,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     ...(fallback || {}),
   })
 
-  const startGuestEntry = async (folderId: string) => {
+  const startGuestEntry = async (folderId: string, settingsOverride?: Partial<FolderSettings>) => {
     if (!folderId) return false
-    const setting = getFolderSettingFromState(folderId)
+    const setting = { ...getFolderSettingFromState(folderId), ...(settingsOverride || {}) }
     const collect = Boolean(setting.collect_customer_info)
     const savedName = typeof window !== 'undefined' ? (localStorage.getItem(getGuestIdentityStorageKey(folderId)) || '') : ''
 
     if (collect) {
       if (savedName.trim()) {
         setGuestCustomerName(savedName.trim())
-        const result = await registerGuestViewer(folderId, savedName.trim())
+        const result = await registerGuestViewer(folderId, savedName.trim(), setting)
         if (!result.allowed) return false
         setGuestCanSelect(true)
         return true
@@ -1527,7 +1528,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       }
 
       if (folderHistory.length === 0 && selectedAlbum?.id === editingFolderSetting.id) {
-        await supabase.from('albums').update({ ...payload, title: newTitle || selectedAlbum.title }).eq('id', editingFolderSetting.id)
+        // Các tùy chọn dành riêng cho link khách được lưu ở folder_settings.
+        // Chỉ cập nhật title trong albums để không phụ thuộc việc bảng albums
+        // có các cột mới hay không.
+        const { error: albumTitleError } = await supabase
+          .from('albums')
+          .update({ title: newTitle || selectedAlbum.title })
+          .eq('id', editingFolderSetting.id)
+        if (albumTitleError) throw albumTitleError
         await fetchAlbumsFromSupabase()
       }
 
@@ -2105,7 +2113,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             if (currentPass) {
               setIsLocked(true)
             } else {
-              const entered = await startGuestEntry(matchedAlbum.id)
+              const entered = await startGuestEntry(matchedAlbum.id, fSettings[matchedAlbum.id])
               if (entered) await fetchAlbumImages(matchedAlbum.driveUrl, matchedAlbum.id, true)
             }
           } else {
@@ -2130,7 +2138,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             if (subPass) {
               setIsLocked(true)
             } else {
-              const entered = await startGuestEntry(resolved.id)
+              const entered = await startGuestEntry(resolved.id, fSettings[resolved.id])
               if (entered) await fetchAlbumImages(resolved.driveUrl, resolved.id, true)
             }
           }
@@ -2209,7 +2217,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const refresh = async () => {
       const currentMediaIds = mediaFiles.map(item => item.id)
       await fetchSelectionsForFolder(folderId, true, currentMediaIds)
-      if (!isSharedGuest && isAdminPanelOpen) await fetchGuestSelections(folderId)
+      if (!isSharedGuest) await fetchGuestSelections(folderId)
     }
 
     refresh()
@@ -2247,7 +2255,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     } else if (selectedAlbum) {
       document.title = (customNames[selectedAlbum.id] || selectedAlbum.title || 'DinhThong Gallery').trim()
     } else {
-      document.title = 'Dinh Thong Gallery'
+      document.title = 'DinhThong Gallery'
     }
   }, [previewMedia, folderHistory, selectedAlbum, customNames, comments])
 
@@ -2851,14 +2859,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       ))}
                     </div>
 
-                    {selectedImagesList.length > 0 && (
+                    {!isSharedGuest && displaySelectedImagesList.length > 0 && (
                       <button
                         onClick={handleClearAllSelections}
                         className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 transition cursor-pointer"
-                        title="Xóa tất cả đánh giá sao"
+                        title="Xóa tất cả ảnh chọn"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                        <span>Xóa ({selectedImagesList.length})</span>
+                        <span>Xóa tất cả ({displaySelectedImagesList.length})</span>
                       </button>
                     )}
                   </>
