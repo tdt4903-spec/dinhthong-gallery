@@ -341,25 +341,35 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const subFolders = visibleItems.filter(item => item.type === 'folder')
   const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
 
+  const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
+
+  // Khi Admin đã nhận được lựa chọn từ khách gần nhất, dùng lựa chọn đó làm trạng thái
+  // hiển thị trên bộ lọc sao và ngôi sao của từng ảnh. Nếu chưa có khách chọn thì
+  // giữ nguyên trạng thái lựa chọn hiện tại của Admin.
+  const latestGuestActor = !isSharedGuest ? guestSelectionRows[0]?.actor_key : null
+  const latestGuestRatings = latestGuestActor
+    ? guestSelectionRows.reduce((acc: Record<string, number>, row: any) => {
+        if (row.actor_key === latestGuestActor) {
+          acc[row.item_id] = Number(row.stars || 0)
+        }
+        return acc
+      }, {})
+    : {}
+  const hasLatestGuestSelections = Object.values(latestGuestRatings).some(stars => Number(stars) > 0)
+  const displayRatings = !isSharedGuest && hasLatestGuestSelections ? latestGuestRatings : ratings
+
   const filteredMediaFiles = mediaFiles.filter(img => {
     if (starFilter === 'all') return true
-    const imgStar = ratings[img.id] || 0
+    const imgStar = displayRatings[img.id] || 0
     return imgStar === starFilter
   })
 
-  const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
-
-  // Với Admin: ưu tiên danh sách khách chọn mới nhất để mục TXT nhận đúng file khách đã chọn.
-  // Nếu chưa có khách chọn thì giữ nguyên danh sách lựa chọn của Admin.
-  const latestGuestActor = !isSharedGuest ? guestSelectionRows[0]?.actor_key : null
-  const guestSelectedImagesList = latestGuestActor
-    ? visibleItems.filter(img =>
-        img.type !== 'folder' &&
-        guestSelectionRows.some(
-          row => row.actor_key === latestGuestActor && row.item_id === img.id && Number(row.stars) > 0
-        )
-      )
+  const guestSelectedImagesList = hasLatestGuestSelections
+    ? visibleItems.filter(img => img.type !== 'folder' && Number(latestGuestRatings[img.id] || 0) > 0)
     : []
+  const displaySelectedImagesList = !isSharedGuest && hasLatestGuestSelections
+    ? guestSelectedImagesList
+    : selectedImagesList
   const txtSelectedImagesList = guestSelectedImagesList.length > 0 ? guestSelectedImagesList : selectedImagesList
 
   const commentedImagesList = visibleItems.filter(img => img.type !== 'folder' && comments[img.id] && comments[img.id].trim() !== '')
@@ -2128,7 +2138,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   <ClipboardList className="w-3.5 h-3.5" />
                   <span>Ảnh chọn</span>
                   <span className="bg-emerald-800 px-1.5 py-0.5 rounded-full text-[10px]">
-                    {selectedImagesList.length}
+                    {displaySelectedImagesList.length}
                   </span>
                 </button>
               </>
@@ -2728,7 +2738,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       {paginatedImages
                         .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map((item) => {
-                          const currentStar = ratings[item.id] || 0
+                          const currentStar = displayRatings[item.id] || 0
                           const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`
                           const displayName = customNames[item.id] || item.name
                           const isChecked = selectedItemIds.has(item.id)
