@@ -91,40 +91,6 @@ const toNumericCode = (str: string) => {
   return String(Math.abs(hash) % 900000 + 100000)
 }
 
-// Link chia sẻ mới mang theo ID Drive + tên thư mục đã mã hóa để mở trực tiếp,
-// không phụ thuộc việc thư mục con đã được đồng bộ vào known_drive_folders hay chưa.
-// Vẫn giữ mã 6 số ở path để các link cũ không thay đổi.
-const encodeSharePayload = (folderId: string, title: string) => {
-  if (typeof window === 'undefined') return ''
-  try {
-    const raw = JSON.stringify({ id: String(folderId), title: String(title || '') })
-    const bytes = new TextEncoder().encode(raw)
-    let binary = ''
-    bytes.forEach((b) => { binary += String.fromCharCode(b) })
-    return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
-  } catch {
-    return ''
-  }
-}
-
-const decodeSharePayload = (payload: string | null) => {
-  if (!payload) return null
-  try {
-    const padded = payload.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((payload.length + 3) % 4)
-    const binary = window.atob(padded)
-    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0))
-    const raw = new TextDecoder().decode(bytes)
-    const parsed = JSON.parse(raw)
-    if (!parsed?.id) return null
-    return {
-      id: String(parsed.id),
-      title: String(parsed.title || ''),
-    }
-  } catch {
-    return null
-  }
-}
-
 function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }) {
   return (
     <div className={`flex items-center justify-center p-3 rounded-2xl bg-[#FFF6EB] dark:bg-[#2A2016] shadow-sm ${className}`}>
@@ -419,26 +385,40 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const getGuestIdentityStorageKey = (folderId: string) => `dinhthong_gallery_guest_name_${folderId}`
 
   const registerGuestViewer = async (folderId: string, customerName = '') => {
-    if (!folderId || !guestId) return { allowed: false, viewerCount: 0 }
+    if (!folderId || !guestId) return { allowed: true, viewerCount: 0, trackingUnavailable: true }
+
+    const maxViewers = Number(
+      folderSettingsMap[folderId]?.max_viewers ||
+      selectedAlbum?.max_viewers ||
+      0
+    )
+
     try {
       const { data, error } = await supabase.rpc('register_gallery_album_viewer', {
         p_album_id: folderId,
         p_visitor_id: guestId,
         p_customer_name: customerName.trim(),
-        p_max_viewers: Number(folderSettingsMap[folderId]?.max_viewers || selectedAlbum?.max_viewers || 0),
+        p_max_viewers: maxViewers,
       })
+
       if (error) throw error
+
       const result = Array.isArray(data) ? data[0] : data
-      const allowed = Boolean(result?.allowed)
+      const allowed = result?.allowed !== false
       const viewerCount = Number(result?.viewer_count || 0)
       setGuestViewerCount(viewerCount)
+
       if (!allowed) {
         setGuestAccessDenied(true)
       }
-      return { allowed, viewerCount }
+
+      return { allowed, viewerCount, trackingUnavailable: false }
     } catch (e) {
-      console.error('Lỗi ghi nhận lượt xem album:', e)
-      return { allowed: false, viewerCount: 0 }
+      // Không để lỗi hệ thống theo dõi người xem làm album share bị trắng.
+      // Nếu RPC không tồn tại/chưa có policy, khách vẫn phải xem được album.
+      // Khi có giới hạn người xem, việc giới hạn sẽ được giao cho backend khi RPC hoạt động.
+      console.warn('Không ghi nhận được lượt xem album:', e)
+      return { allowed: true, viewerCount: 0, trackingUnavailable: true }
     }
   }
 
@@ -963,9 +943,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setCurrentPage(1)
     setSelectedItemIds(new Set())
     try {
-      const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}`)
-      const data = await res.json()
-      const files = data.files || []
+      const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}&_t=${Date.now()}`, { cache: 'no-store' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data?.error || `Không thể tải nội dung album (HTTP ${res.status})`)
+      }
+      const files = Array.isArray(data?.files) ? data.files : []
       setItems(files)
       const effectiveFolderId = folderId || (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : selectedAlbum?.id || '')
       if (effectiveFolderId) {
@@ -1600,7 +1583,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           albumItem?.driveUrl ||
           `https://drive.google.com/drive/folders/${cleanId}`
 
-    // Vẫn lưu mapping để các link cũ hoạt động, nhưng link mới không phụ thuộc mapping.
+    // Ghi mapping ngay khi Admin tạo/chia sẻ link. Không cần cài đặt album trước.
     try {
       await supabase
         .from('known_drive_folders')
@@ -1612,20 +1595,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       console.warn('Không lưu được mapping share folder:', err)
     }
 
-    // Giữ path 6 số như cũ, đồng thời gắn payload trực tiếp của thư mục.
-    // Khách mở link mới sẽ dùng payload trước, nên không bị lỗi với thư mục con chưa sync.
     const numericCode = toNumericCode(cleanId)
-    const sharePayload = encodeSharePayload(cleanId, folderName)
-    const shareUrl = sharePayload
-      ? `${window.location.origin}/s/${numericCode}?d=${encodeURIComponent(sharePayload)}`
-      : `${window.location.origin}/s/${numericCode}`
-
-    try {
-      await navigator.clipboard.writeText(shareUrl)
-    } catch {
-      // Clipboard có thể bị chặn; vẫn hiển thị trạng thái đã tạo link.
-    }
-
+    const shareUrl = `${window.location.origin}/s/${numericCode}`
+    await navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(folderId)
     setTimeout(() => setShareCopiedId(null), 2500)
   }
@@ -2031,9 +2003,13 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         )
         if (matched) {
           const folderId = String(matched.id)
+          const mappedUrl = String(matched.parent_url || '')
+          const driveUrl = mappedUrl.includes('/folders/')
+            ? mappedUrl
+            : `https://drive.google.com/drive/folders/${folderId}`
           return {
             id: folderId,
-            driveUrl: String(matched.parent_url || `https://drive.google.com/drive/folders/${folderId}`),
+            driveUrl,
             title: String(customNames[folderId] || matched.name || 'DinhThong Album'),
           }
         }
@@ -2125,7 +2101,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const isShortRoute = pathParts[0] === 's'
     const params = new URLSearchParams(window.location.search)
     const sharedId = isShortRoute ? pathParts[1] : params.get('id')
-    const encodedSharePayload = isShortRoute ? decodeSharePayload(params.get('d')) : null
 
     const initData = async () => {
       try {
@@ -2142,31 +2117,36 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           setIsSharedGuest(true)
           const browserGuestId = getGuestBrowserId()
           setGuestId(browserGuestId)
+          // Với link /s/XXXXXX, ưu tiên mapping đã lưu khi Admin bấm Chia sẻ.
+          // Như vậy link chỉ cần 6 số nhưng vẫn trỏ đúng Drive ID thật.
+          let matchedAlbum = fAlbums.find(a => a.id === sharedId || extractDriveId(a.driveUrl) === sharedId)
 
-          // Link mới: dùng ID Drive được nhúng trực tiếp trong payload.
-          // Không cần album phải tồn tại trong bảng albums/known_drive_folders.
-          if (encodedSharePayload?.id) {
-            const directId = encodedSharePayload.id
-            const directTitle = encodedSharePayload.title || customNames[directId] || 'DinhThong Album'
-            const directDriveUrl = `https://drive.google.com/drive/folders/${directId}`
-            const directAlbum: Album = {
-              id: directId,
-              title: directTitle,
-              coverUrl: '',
-              driveUrl: directDriveUrl,
-            }
+          if (!matchedAlbum) {
+            try {
+              const { data: knownRows } = await supabase
+                .from('known_drive_folders')
+                .select('id, name, parent_url')
 
-            setSelectedAlbum(directAlbum)
-            setFolderHistory([])
-            const currentPass = fSettings[directId]?.password
-            if (currentPass) {
-              setIsLocked(true)
-            } else {
-              const entered = await startGuestEntry(directId)
-              if (entered) await fetchAlbumImages(directDriveUrl, directId, true)
+              const known = (knownRows || []).find((row: any) =>
+                row?.id && toNumericCode(String(row.id)) === sharedId
+              )
+
+              if (known) {
+                matchedAlbum = {
+                  id: String(known.id),
+                  title: String(customNames[String(known.id)] || known.name || 'DinhThong Album'),
+                  coverUrl: '',
+                  driveUrl: String(known.parent_url || `https://drive.google.com/drive/folders/${known.id}`),
+                }
+              }
+            } catch (e) {
+              console.warn('Không đọc được mapping share:', e)
             }
-          } else {
-          const matchedAlbum = fAlbums.find(a => a.id === sharedId || toNumericCode(a.id) === sharedId || extractDriveId(a.driveUrl) === sharedId)
+          }
+
+          if (!matchedAlbum) {
+            matchedAlbum = fAlbums.find(a => toNumericCode(a.id) === sharedId)
+          }
 
           if (matchedAlbum) {
             setSelectedAlbum(matchedAlbum)
@@ -2203,7 +2183,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               const entered = await startGuestEntry(resolved.id)
               if (entered) await fetchAlbumImages(resolved.driveUrl, resolved.id, true)
             }
-          }
           }
         } else {
           const { data: sessionData } = await supabase.auth.getSession()
