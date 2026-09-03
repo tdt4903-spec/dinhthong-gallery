@@ -319,6 +319,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const currentActiveFolderId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
   const currentActiveFolderTitle = customNames[currentActiveFolderId] || (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : (selectedAlbum?.title || ''))
 
+  // ID Gốc của link chia sẻ (để luôn đếm 1 khách duy nhất dù duyệt qua các thư mục con)
+  const guestRootAlbumId = selectedAlbum?.id || currentActiveFolderId
+
+  // Cấu hình áp dụng riêng biệt cho thư mục hiện tại đang mở
   const activeSetting: FolderSettings = folderSettingsMap[currentActiveFolderId] || {
     id: currentActiveFolderId,
     title: currentActiveFolderTitle,
@@ -382,16 +386,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const getGuestIdentityStorageKey = (folderId: string) => `dinhthong_gallery_guest_name_${folderId}`
 
-  // HÀM KIỂM TRA KHÁCH TRUY CẬP VÀ GIỚI HẠN QUA BACKEND
+  // HÀM KIỂM TRA KHÁCH VÀ ĐẾM NGƯỜI XEM (LUÔN TÍNH THEO ROOT ID KHI CHIA SẺ)
   const registerGuestViewer = async (folderId: string, customerName = '') => {
-    if (!folderId || !guestId) return { allowed: true, viewerCount: 0, trackingUnavailable: true }
+    const targetAlbumId = isSharedGuest ? (guestRootAlbumId || folderId) : folderId
+    if (!targetAlbumId || !guestId) return { allowed: true, viewerCount: 0, trackingUnavailable: true }
 
     const cleanName = customerName.trim()
-    const setting = getFolderSettingFromState(folderId)
-    const collectCustomerInfo = Boolean(setting.collect_customer_info)
+    const setting = getFolderSettingFromState(targetAlbumId)
+    const collectCustomerInfo = Boolean(setting.collect_customer_info ?? selectedAlbum?.collect_customer_info)
     const maxViewers = Number(setting.max_viewers || selectedAlbum?.max_viewers || 0)
 
-    // Nếu album yêu cầu nhập tên mà chưa có tên thì chờ, không chặn sớm
     if (collectCustomerInfo && !cleanName) {
       setGuestAccessDenied(false)
       return { allowed: false, viewerCount: guestViewerCount, trackingUnavailable: false, waitingForName: true }
@@ -402,7 +406,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          albumId: folderId,
+          albumId: targetAlbumId,
           visitorId: guestId,
           customerName: cleanName || `Khách ${guestId.slice(0, 6).toUpperCase()}`,
           maxViewers: maxViewers,
@@ -433,27 +437,35 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   })
 
   const startGuestEntry = async (folderId: string, fallbackSetting?: Partial<FolderSettings>) => {
-    if (!folderId) return false
-    const setting = getFolderSettingFromState(folderId, fallbackSetting)
-    const collect = Boolean(setting.collect_customer_info)
+    const rootId = guestRootAlbumId || folderId
+    if (!rootId) return false
+
+    const setting = getFolderSettingFromState(rootId, fallbackSetting)
+    const collect = Boolean(setting.collect_customer_info ?? selectedAlbum?.collect_customer_info)
     const savedName = typeof window !== 'undefined'
-      ? (localStorage.getItem(getGuestIdentityStorageKey(folderId)) || '')
+      ? (localStorage.getItem(getGuestIdentityStorageKey(rootId)) || '')
       : ''
 
     setGuestAccessDenied(false)
-    setGuestCanSelect(false)
 
     if (collect) {
-      // Luôn yêu cầu khách nhập tên trước khi kiểm tra giới hạn
+      if (guestCustomerName.trim()) {
+        const result = await registerGuestViewer(rootId, guestCustomerName.trim())
+        if (result.allowed) {
+          setGuestCanSelect(true)
+          return true
+        }
+      }
+
       setGuestNameInput(savedName.trim())
       setShowGuestNameModal(true)
       return false
     }
 
-    const result = await registerGuestViewer(folderId, '')
+    const result = await registerGuestViewer(rootId, '')
     if (!result.allowed) return false
     setGuestCustomerName('')
-    setGuestCanSelect(false)
+    setGuestCanSelect(true)
     return true
   }
 
@@ -467,15 +479,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       alert('Tên không được dài quá 100 ký tự.')
       return
     }
-    const folderId = currentActiveFolderId
-    if (!folderId) return
+    const rootId = guestRootAlbumId || currentActiveFolderId
+    if (!rootId) return
 
     setGuestAccessDenied(false)
 
-    // Xác thực qua server:
-    // - Tên trùng: Cho vào album.
-    // - Tên mới: Nếu đủ số lượng -> báo đầy, nếu chưa -> lưu và cho vào.
-    const result = await registerGuestViewer(folderId, cleanName)
+    const result = await registerGuestViewer(rootId, cleanName)
     if (!result.allowed) {
       setGuestCanSelect(false)
       setShowGuestNameModal(false)
@@ -489,11 +498,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setGuestNameInput('')
 
     try {
-      localStorage.setItem(getGuestIdentityStorageKey(folderId), cleanName)
+      localStorage.setItem(getGuestIdentityStorageKey(rootId), cleanName)
     } catch {}
 
     const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
-    if (targetUrl) await fetchAlbumImages(targetUrl, folderId, true)
+    if (targetUrl) await fetchAlbumImages(targetUrl, currentActiveFolderId, true)
   }
 
   const getNotificationClearTime = () => {
@@ -1540,19 +1549,23 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     })
   }
 
+  // CHỌN ẢNH VỚI GIỚI HẠN RIÊNG BIỆT CHO TỪNG THƯ MỤC / ALBUM
   const handleRateImage = async (imageId: string, stars: number) => {
     if (isSharedGuest && !guestCanSelect) {
-      alert(activeSetting.collect_customer_info ? 'Vui lòng nhập tên để bắt đầu chọn ảnh.' : 'Album này không mở chức năng chọn ảnh cho khách.')
+      alert(activeSetting.collect_customer_info ? 'Vui lòng nhập tên để bắt đầu chọn ảnh.' : 'Vui lòng chờ xác thực quyền truy cập.')
       return
     }
+
     const maxSel = isSharedGuest ? Number(activeSetting?.max_select || 0) : 0
     const isCurrentlyRated = (ratings[imageId] || 0) > 0
 
+    // Kiểm tra giới hạn số ảnh chọn CHỈ TRONG THƯ MỤC HIỆN TẠI ĐANG MỞ
     if (isSharedGuest && stars > 0 && !isCurrentlyRated) {
       const currentMediaIds = new Set(mediaFiles.map(item => item.id))
       const currentRatedCount = Object.entries(ratings).filter(([id, value]) => currentMediaIds.has(id) && Number(value) > 0).length
+      
       if (maxSel > 0 && currentRatedCount >= maxSel) {
-        alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
+        alert(`Thư mục "${currentActiveFolderTitle}" chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
         return
       }
     }
@@ -1729,6 +1742,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setTimeout(() => setShareCopiedId(null), 2500)
   }
 
+  // MỞ THƯ MỤC CON: VÀO THẲNG, KHÔNG HỎI LẠI TÊN VÀ KHÔNG ĐẾM THÀNH NGƯỜI MỚI
   const handleOpenSubFolder = (folderItem: MediaItem) => {
     const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
     const displayName = customNames[folderItem.id] || folderItem.name
@@ -1739,12 +1753,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const fSetting = folderSettingsMap[folderItem.id]
     if (fSetting?.password && isSharedGuest) {
       setIsLocked(true)
-    } else if (isSharedGuest) {
-      setIsLocked(false)
-      startGuestEntry(folderItem.id).then((entered) => { if (entered) fetchAlbumImages(folderDriveUrl, folderItem.id, true) })
     } else {
       setIsLocked(false)
-      fetchAlbumImages(folderDriveUrl, folderItem.id)
+      fetchAlbumImages(folderDriveUrl, folderItem.id, isSharedGuest)
     }
   }
 
@@ -2209,7 +2220,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return null
   }
 
-  // Khởi tạo và load dữ liệu
+  // Khởi tạo và đồng bộ
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
@@ -2380,23 +2391,23 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return () => window.clearInterval(interval)
   }, [currentActiveFolderId, isSharedGuest, isAdminPanelOpen, isAdmin, user?.email])
 
-  // Heartbeat duy trì trạng thái xem của khách sau khi đã vào được album
+  // Heartbeat duy trì trạng thái xem của khách
   useEffect(() => {
-    if (!isSharedGuest || !guestId || !currentActiveFolderId) return
+    if (!isSharedGuest || !guestId || !guestRootAlbumId) return
 
-    const setting = getFolderSettingFromState(currentActiveFolderId)
-    const requiresName = Boolean(setting.collect_customer_info)
+    const setting = getFolderSettingFromState(guestRootAlbumId)
+    const requiresName = Boolean(setting.collect_customer_info ?? selectedAlbum?.collect_customer_info)
 
     if (requiresName && (!guestCanSelect || !guestCustomerName.trim() || showGuestNameModal)) return
 
     const heartbeat = async () => {
       if (requiresName && (!guestCanSelect || !guestCustomerName.trim() || showGuestNameModal)) return
-      await registerGuestViewer(currentActiveFolderId, guestCustomerName)
+      await registerGuestViewer(guestRootAlbumId, guestCustomerName)
     }
     heartbeat()
     const interval = window.setInterval(heartbeat, 60000)
     return () => window.clearInterval(interval)
-  }, [isSharedGuest, guestId, currentActiveFolderId, guestCustomerName, guestCanSelect, showGuestNameModal, folderSettingsMap])
+  }, [isSharedGuest, guestId, guestRootAlbumId, guestCustomerName, guestCanSelect, showGuestNameModal, folderSettingsMap])
 
   useEffect(() => {
     if (isSharedGuest) return
@@ -2951,7 +2962,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {!isSharedGuest && mediaFiles.length > 0 && (
+                {!isSharedGuest && (
                   <>
                     <button
                       onClick={handleOpenCurrentFolderSetting}
