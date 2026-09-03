@@ -1809,7 +1809,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           }
 
           const loggedInEmail = sessionData.session.user.email
-          const { data: whitelist, error } = await supabase.from('allowed_emails').select('email, full_name, is_admin').eq('email', loggedInEmail).single()
+          const { data: whitelist, error } = await supabase.from('allowed_emails').select('email, full_name').eq('email', loggedInEmail).single()
 
           if (error || !whitelist) {
             alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
@@ -1820,7 +1820,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           }
 
           setUser(sessionData.session.user)
-          setIsAdmin(Boolean((whitelist as any)?.is_admin))
+          setIsAdmin(true)
           const masterFolders = await fetchMasterFoldersList()
           checkAllMasterFolders(masterFolders, false, knownSet)
         }
