@@ -270,6 +270,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [guestAccessDenied, setGuestAccessDenied] = useState(false)
   const [notificationItems, setNotificationItems] = useState<any[]>([])
   const [isNotificationOpen, setIsNotificationOpen] = useState(false)
+  const [notificationTab, setNotificationTab] = useState<'viewers' | 'full' | 'joined'>('viewers')
 
   const [isLocked, setIsLocked] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
@@ -427,9 +428,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     ...(fallback || {}),
   })
 
-  const startGuestEntry = async (folderId: string) => {
+  const startGuestEntry = async (folderId: string, fallbackSetting?: Partial<FolderSettings>) => {
     if (!folderId) return false
-    const setting = getFolderSettingFromState(folderId)
+    const setting = getFolderSettingFromState(folderId, fallbackSetting)
     const collect = Boolean(setting.collect_customer_info)
     const savedName = typeof window !== 'undefined' ? (localStorage.getItem(getGuestIdentityStorageKey(folderId)) || '') : ''
 
@@ -475,51 +476,171 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     if (targetUrl) await fetchAlbumImages(targetUrl, folderId, true)
   }
 
+  const getNotificationClearTime = () => {
+    if (typeof window === 'undefined') return 0
+    try {
+      return Number(window.localStorage.getItem('dinhthong_gallery_notifications_cleared_at') || 0)
+    } catch {
+      return 0
+    }
+  }
+
+  const clearNotifications = () => {
+    const now = Date.now()
+    try { localStorage.setItem('dinhthong_gallery_notifications_cleared_at', String(now)) } catch {}
+    setNotificationItems(prev => prev.map(item => ({ ...item, full: false, joined: [] })))
+    setNotificationTab('viewers')
+  }
+
+  const getNotificationTitle = (albumId: string, fallback = 'DinhThong Album') => {
+    const id = String(albumId || '')
+    return customNames[id] || albums.find(a => String(a.id) === id)?.title || id || fallback
+  }
+
+  const openNotificationAlbum = async (item: any) => {
+    const albumId = String(item?.albumId || '')
+    if (!albumId) return
+
+    const direct = albums.find(a => String(a.id) === albumId)
+    if (direct) {
+      handleOpenAlbum(direct)
+      setIsNotificationOpen(false)
+      return
+    }
+
+    const resolved = await resolveSharedFolder(albumId)
+    if (!resolved) {
+      alert('Không tìm thấy album/thư mục này trên Drive.')
+      return
+    }
+
+    const fallbackAlbum: Album = {
+      id: resolved.id,
+      title: resolved.title || getNotificationTitle(resolved.id),
+      coverUrl: '',
+      driveUrl: resolved.driveUrl,
+    }
+    setSelectedAlbum(fallbackAlbum)
+    setFolderHistory([])
+    setIsLocked(false)
+    setIsNotificationOpen(false)
+    await fetchAlbumImages(resolved.driveUrl, resolved.id)
+  }
+
+  const deleteViewerRecords = async (albumId?: string) => {
+    try {
+      const query = supabase.from('gallery_album_visitors').delete()
+      const { error } = albumId
+        ? await query.eq('album_id', albumId)
+        : await query.neq('album_id', '__never__')
+      if (error) throw error
+      await fetchNotifications()
+      setGuestViewerCount(0)
+      alert(albumId ? 'Đã xóa số lượng người xem của album này.' : 'Đã xóa toàn bộ số lượng người xem.')
+    } catch (e: any) {
+      alert('Lỗi xóa số người xem: ' + (e?.message || e))
+    }
+  }
+
   const fetchNotifications = async () => {
     if (isSharedGuest) return
     try {
-      const [{ data: guestRows }, { data: visitorRows }] = await Promise.all([
-        supabase.from('gallery_photo_selections').select('album_id, item_id, stars, actor_key, guest_label, updated_at').eq('scope', 'guest').gt('stars', 0).order('updated_at', { ascending: false }),
+      const clearedAt = getNotificationClearTime()
+      const [{ data: guestRows, error: guestError }, { data: visitorRows, error: visitorError }, { data: knownRows }] = await Promise.all([
+        supabase.from('gallery_photo_selections').select('album_id, item_id, stars, actor_key, guest_label, updated_at').eq('scope', 'guest').order('updated_at', { ascending: false }),
         supabase.from('gallery_album_visitors').select('album_id, visitor_id, customer_name, last_seen_at, updated_at').order('last_seen_at', { ascending: false }),
+        supabase.from('known_drive_folders').select('id, name, parent_url'),
       ])
+
+      if (guestError) throw guestError
+      if (visitorError) throw visitorError
+
+      const nameMap: Record<string, string> = { ...customNames }
+      ;(knownRows || []).forEach((row: any) => {
+        if (row?.id && row?.name) nameMap[String(row.id)] = String(row.name)
+      })
+
+      const getTitle = (id: string) => {
+        return nameMap[String(id)] || albums.find(a => String(a.id) === String(id))?.title || String(id)
+      }
+
+      // Viewer count: tên trùng nhau trong cùng album chỉ tính 1 người;
+      // nếu không có tên thì dùng visitor_id để phân biệt.
+      const viewerGroups: Record<string, any[]> = {}
+      ;(visitorRows || []).forEach((row: any) => {
+        const albumId = String(row.album_id || '')
+        const name = String(row.customer_name || '').trim()
+        const key = `${albumId}::${name ? `name:${name.toLocaleLowerCase()}` : `visitor:${row.visitor_id}`}`
+        if (!viewerGroups[key]) viewerGroups[key] = []
+        viewerGroups[key].push(row)
+      })
+
+      const viewerCountByAlbum: Record<string, number> = {}
+      const joinedByAlbum: Record<string, any[]> = {}
+      Object.values(viewerGroups).forEach((rows: any[]) => {
+        if (!rows.length) return
+        const row = rows.sort((a, b) => new Date(b.last_seen_at || b.updated_at || 0).getTime() - new Date(a.last_seen_at || a.updated_at || 0).getTime())[0]
+        const albumId = String(row.album_id || '')
+        viewerCountByAlbum[albumId] = (viewerCountByAlbum[albumId] || 0) + 1
+        if (!joinedByAlbum[albumId]) joinedByAlbum[albumId] = []
+        const joinedAt = new Date(row.updated_at || row.last_seen_at || Date.now()).getTime()
+        joinedByAlbum[albumId].push({
+          name: String(row.customer_name || '').trim() || `Khách ${String(row.visitor_id || '').slice(0, 6).toUpperCase()}`,
+          joinedAt,
+        })
+      })
 
       const latestByAlbumActor: Record<string, any> = {}
       ;(guestRows || []).forEach((row: any) => {
         const key = `${row.album_id}::${row.actor_key}`
-        if (!latestByAlbumActor[key]) latestByAlbumActor[key] = row
+        const time = new Date(row.updated_at || 0).getTime()
+        if (!latestByAlbumActor[key] || time > new Date(latestByAlbumActor[key].updated_at || 0).getTime()) {
+          latestByAlbumActor[key] = row
+        }
       })
+
       const latestActorPerAlbum: Record<string, { actor: string; updated_at: string }> = {}
       Object.values(latestByAlbumActor).forEach((row: any) => {
-        const old = latestActorPerAlbum[row.album_id]
-        if (!old || new Date(row.updated_at).getTime() > new Date(old.updated_at).getTime()) {
-          latestActorPerAlbum[row.album_id] = { actor: row.actor_key, updated_at: row.updated_at }
+        const albumId = String(row.album_id || '')
+        const old = latestActorPerAlbum[albumId]
+        if (!old || new Date(row.updated_at || 0).getTime() > new Date(old.updated_at || 0).getTime()) {
+          latestActorPerAlbum[albumId] = { actor: String(row.actor_key), updated_at: String(row.updated_at || '') }
         }
       })
 
-      const guestCountByAlbum: Record<string, number> = {}
-      Object.keys(latestActorPerAlbum).forEach(albumId => {
-        const actor = latestActorPerAlbum[albumId].actor
-        guestCountByAlbum[albumId] = (guestRows || []).filter((r: any) => r.album_id === albumId && r.actor_key === actor && Number(r.stars) > 0).length
-      })
-
-      const viewerCountByAlbum: Record<string, number> = {}
-      ;(visitorRows || []).forEach((row: any) => {
-        viewerCountByAlbum[row.album_id] = (viewerCountByAlbum[row.album_id] || 0) + 1
-      })
-
-      const notices = (albums || []).map((album) => {
-        const max = Number(folderSettingsMap[album.id]?.max_select || album.max_select || 0)
-        const chosen = Number(guestCountByAlbum[album.id] || 0)
-        const viewers = Number(viewerCountByAlbum[album.id] || 0)
-        return {
-          albumId: album.id,
-          title: customNames[album.id] || album.title,
-          chosen,
-          max,
-          viewers,
-          full: max > 0 && chosen >= max,
+      const fullByAlbum: Record<string, any> = {}
+      Object.entries(latestActorPerAlbum).forEach(([albumId, info]) => {
+        const selectedRows = (guestRows || []).filter((r: any) => String(r.album_id) === albumId && String(r.actor_key) === info.actor && Number(r.stars) > 0)
+        const max = Number(folderSettingsMap[albumId]?.max_select || albums.find(a => String(a.id) === albumId)?.max_select || 0)
+        const latestTime = Math.max(...selectedRows.map((r: any) => new Date(r.updated_at || 0).getTime()), 0)
+        if (max > 0 && selectedRows.length >= max) {
+          fullByAlbum[albumId] = {
+            albumId,
+            title: getTitle(albumId),
+            chosen: selectedRows.length,
+            max,
+            actor: info.actor,
+            guestLabel: selectedRows.find((r: any) => r.guest_label)?.guest_label || '',
+            updatedAt: latestTime,
+          }
         }
-      }).filter((item) => item.full || item.viewers > 0)
+      })
+
+      // Tập hợp cả album chính lẫn thư mục con đã từng xuất hiện trong dữ liệu visitor/selection.
+      const allAlbumIds = new Set<string>()
+      albums.forEach(a => allAlbumIds.add(String(a.id)))
+      ;(knownRows || []).forEach((r: any) => r?.id && allAlbumIds.add(String(r.id)))
+      ;(visitorRows || []).forEach((r: any) => r?.album_id && allAlbumIds.add(String(r.album_id)))
+      ;(guestRows || []).forEach((r: any) => r?.album_id && allAlbumIds.add(String(r.album_id)))
+
+      const notices = Array.from(allAlbumIds).map((albumId) => ({
+        albumId,
+        title: getTitle(albumId),
+        viewers: viewerCountByAlbum[albumId] || 0,
+        fullData: fullByAlbum[albumId] || null,
+        full: Boolean(fullByAlbum[albumId] && Number(fullByAlbum[albumId].updatedAt || 0) > clearedAt),
+        joined: (joinedByAlbum[albumId] || []).filter((row: any) => Number(row.joinedAt || 0) > clearedAt).sort((a: any, b: any) => b.joinedAt - a.joinedAt),
+      })).filter(item => item.viewers > 0 || item.full || item.joined.length > 0)
 
       setNotificationItems(notices)
     } catch (e) {
@@ -2155,7 +2276,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             if (currentPass) {
               setIsLocked(true)
             } else {
-              const entered = await startGuestEntry(matchedAlbum.id)
+              const entered = await startGuestEntry(matchedAlbum.id, fSettings[matchedAlbum.id])
               if (entered) await fetchAlbumImages(matchedAlbum.driveUrl, matchedAlbum.id, true)
             }
           } else {
@@ -2180,7 +2301,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             if (subPass) {
               setIsLocked(true)
             } else {
-              const entered = await startGuestEntry(resolved.id)
+              const entered = await startGuestEntry(resolved.id, fSettings[resolved.id])
               if (entered) await fetchAlbumImages(resolved.driveUrl, resolved.id, true)
             }
           }
@@ -2522,9 +2643,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   title="Thông báo album"
                 >
                   <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  {notificationItems.filter((n) => n.full).length > 0 && (
+                  {notificationItems.some((n) => n.full || (n.joined && n.joined.length > 0) || n.viewers > 0) && (
                     <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
-                      {notificationItems.filter((n) => n.full).length}
+                      {notificationItems.filter((n) => n.full || (n.joined && n.joined.length > 0) || n.viewers > 0).length}
                     </span>
                   )}
                 </button>
@@ -3632,19 +3753,71 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
       {isNotificationOpen && !isSharedGuest && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setIsNotificationOpen(false)}>
-          <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`} onClick={(e) => e.stopPropagation()}>
+          <div className={`w-full max-w-3xl rounded-3xl p-5 sm:p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
-              <div className="flex items-center gap-2"><Bell className="w-5 h-5 text-emerald-500" /><h3 className="font-serif font-bold text-base">Thông báo album</h3></div>
-              <button onClick={() => setIsNotificationOpen(false)} className="p-1 rounded-full text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              <div className="flex items-center gap-2"><Bell className="w-5 h-5 text-emerald-500" /><h3 className="font-serif font-bold text-base">Thông báo</h3></div>
+              <div className="flex items-center gap-2">
+                <button onClick={clearNotifications} className="px-3 py-2 rounded-xl bg-red-500/10 text-red-500 text-xs font-semibold hover:bg-red-500/20 transition">Xóa thông báo</button>
+                <button onClick={() => setIsNotificationOpen(false)} className="p-1 rounded-full text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              </div>
             </div>
-            <div className="mt-4 space-y-3 max-h-[55vh] overflow-y-auto">
-              {notificationItems.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-8">Chưa có thông báo.</p>
-              ) : notificationItems.map((item) => (
-                <button key={item.albumId} type="button" onClick={() => { const target = albums.find((a) => a.id === item.albumId); if (target) handleOpenAlbum(target); setIsNotificationOpen(false) }} className={`w-full text-left p-4 rounded-2xl border transition ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-100 hover:bg-emerald-50'}`}>
-                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="font-semibold text-sm truncate">{item.title}</div><div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Đang có {item.viewers} người xem</div></div>{item.full && <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">Đủ ảnh: {item.chosen}/{item.max}</span>}</div>
+
+            <div className="grid grid-cols-3 gap-2 mt-4">
+              {[
+                { id: 'viewers' as const, label: 'Số lượng người xem' },
+                { id: 'full' as const, label: 'Chọn đủ ảnh' },
+                { id: 'joined' as const, label: 'Khách gia nhập' },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setNotificationTab(tab.id)}
+                  className={`py-2.5 px-2 rounded-xl text-xs font-semibold transition ${notificationTab === tab.id ? 'bg-emerald-600 text-white shadow' : isDarkMode ? 'bg-white/5 text-gray-300 hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  {tab.label}
                 </button>
               ))}
+            </div>
+
+            <div className="mt-4 max-h-[60vh] overflow-y-auto space-y-3">
+              {notificationItems.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-10">Chưa có dữ liệu.</p>
+              ) : notificationTab === 'viewers' ? (
+                notificationItems.filter(item => item.viewers > 0).map(item => (
+                  <div key={`viewer-${item.albumId}`} className={`p-4 rounded-2xl border ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-100'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <button type="button" onClick={() => openNotificationAlbum(item)} className="min-w-0 text-left">
+                        <div className="font-semibold text-sm truncate">{item.title}</div>
+                      </button>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <span className="text-sm font-bold text-emerald-600">{item.viewers} người</span>
+                        <button type="button" onClick={() => deleteViewerRecords(item.albumId)} className="text-xs font-semibold text-red-500 hover:underline">Xóa</button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : notificationTab === 'full' ? (
+                notificationItems.filter(item => item.full).map(item => (
+                  <button key={`full-${item.albumId}`} type="button" onClick={() => openNotificationAlbum(item)} className={`w-full text-left p-4 rounded-2xl border transition ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-100 hover:bg-emerald-50'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0"><div className="font-semibold text-sm truncate">{item.title}</div><div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Khách{item.fullData?.guestLabel ? ` ${item.fullData.guestLabel}` : ''} đã chọn đủ ảnh</div></div>
+                      <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">{item.fullData?.chosen || 0}/{item.fullData?.max || 0}</span>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                notificationItems.flatMap(item => (item.joined || []).map((guest: any, idx: number) => ({ ...guest, albumId: item.albumId, title: item.title, key: `${item.albumId}-${guest.joinedAt}-${idx}` }))).map((guest: any) => (
+                  <button key={guest.key} type="button" onClick={() => openNotificationAlbum(guest)} className={`w-full text-left p-4 rounded-2xl border transition ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-100 hover:bg-emerald-50'}`}>
+                    <div className="font-semibold text-sm">{guest.name}</div>
+                    <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Đã gia nhập <strong>{guest.title}</strong> · {new Date(guest.joinedAt).toLocaleString('vi-VN')}</div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100 dark:border-white/10">
+              <button type="button" onClick={() => deleteViewerRecords()} className="px-4 py-2 rounded-xl bg-red-500/10 text-red-500 text-xs font-semibold hover:bg-red-500/20">Xóa số người xem</button>
+              <span className="text-[11px] text-gray-400">Số người trùng tên trong cùng album chỉ tính 1 người.</span>
             </div>
           </div>
         </div>
