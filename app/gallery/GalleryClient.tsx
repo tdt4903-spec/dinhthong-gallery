@@ -337,6 +337,37 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return generated
   }
 
+  const ADMIN_LOCATION_STORAGE_KEY = 'dinhthong_gallery_admin_location'
+
+  const persistAdminLocation = (album: Album | null, history: FolderBreadcrumb[]) => {
+    if (typeof window === 'undefined' || isSharedGuest) return
+    try {
+      window.sessionStorage.setItem(ADMIN_LOCATION_STORAGE_KEY, JSON.stringify({
+        selectedAlbum: album ? { id: album.id, title: album.title, driveUrl: album.driveUrl } : null,
+        folderHistory: history,
+      }))
+    } catch {}
+  }
+
+  const clearAdminLocation = () => {
+    if (typeof window === 'undefined') return
+    try { window.sessionStorage.removeItem(ADMIN_LOCATION_STORAGE_KEY) } catch {}
+  }
+
+  const readSavedAdminLocation = () => {
+    if (typeof window === 'undefined') return null
+    try {
+      const raw = window.sessionStorage.getItem(ADMIN_LOCATION_STORAGE_KEY)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object') return null
+      return {
+        selectedAlbum: parsed.selectedAlbum || null,
+        folderHistory: Array.isArray(parsed.folderHistory) ? parsed.folderHistory : [],
+      } as { selectedAlbum: { id: string; title?: string; driveUrl: string } | null; folderHistory: FolderBreadcrumb[] }
+    } catch { return null }
+  }
+
   const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
   const subFolders = visibleItems.filter(item => item.type === 'folder')
   const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
@@ -1393,7 +1424,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const handleOpenSubFolder = (folderItem: MediaItem) => {
     const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
     const displayName = customNames[folderItem.id] || folderItem.name
-    setFolderHistory(prev => [...prev, { id: folderItem.id, title: displayName, driveUrl: folderDriveUrl }])
+    const nextHistory = [...folderHistory, { id: folderItem.id, title: displayName, driveUrl: folderDriveUrl }]
+    setFolderHistory(nextHistory)
+    persistAdminLocation(selectedAlbum, nextHistory)
 
     const fSetting = folderSettingsMap[folderItem.id]
     if (fSetting?.password && isSharedGuest) {
@@ -1407,7 +1440,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const handleNavigateBreadcrumb = (index: number) => {
     if (index === -1) {
       if (selectedAlbum) {
-        setFolderHistory([])
+        const nextHistory: FolderBreadcrumb[] = []
+        setFolderHistory(nextHistory)
+        persistAdminLocation(selectedAlbum, nextHistory)
         const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
         if (mainPass && isSharedGuest) {
           setIsLocked(true)
@@ -1418,7 +1453,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       }
     } else {
       const target = folderHistory[index]
-      setFolderHistory(prev => prev.slice(0, index + 1))
+      const nextHistory = folderHistory.slice(0, index + 1)
+      setFolderHistory(nextHistory)
+      persistAdminLocation(selectedAlbum, nextHistory)
       const targetPass = folderSettingsMap[target.id]?.password
       if (targetPass && isSharedGuest) {
         setIsLocked(true)
@@ -1432,7 +1469,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const handleBackToParentFolder = () => {
     if (folderHistory.length > 1) {
       const prev = folderHistory[folderHistory.length - 2]
-      setFolderHistory(p => p.slice(0, -1))
+      const nextHistory = folderHistory.slice(0, -1)
+      setFolderHistory(nextHistory)
+      persistAdminLocation(selectedAlbum, nextHistory)
       const prevPass = folderSettingsMap[prev.id]?.password
       if (prevPass && isSharedGuest) {
         setIsLocked(true)
@@ -1441,7 +1480,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         fetchAlbumImages(prev.driveUrl, prev.id)
       }
     } else if (folderHistory.length === 1 && selectedAlbum) {
-      setFolderHistory([])
+      const nextHistory: FolderBreadcrumb[] = []
+      setFolderHistory(nextHistory)
+      persistAdminLocation(selectedAlbum, nextHistory)
       const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
       if (mainPass && isSharedGuest) {
         setIsLocked(true)
@@ -1452,13 +1493,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     } else {
       if (!isSharedGuest) {
         setSelectedAlbum(null)
+        clearAdminLocation()
       }
     }
   }
 
   const handleOpenAlbum = (album: Album) => {
+    const nextHistory: FolderBreadcrumb[] = []
     setSelectedAlbum(album)
-    setFolderHistory([])
+    setFolderHistory(nextHistory)
+    persistAdminLocation(album, nextHistory)
     const fSetting = folderSettingsMap[album.id]
     const currentPass = fSetting?.password || album.password
     if (currentPass && isSharedGuest) {
@@ -1487,6 +1531,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const handleSignOut = async () => {
+    clearAdminLocation()
     await supabase.auth.signOut()
     router.replace('/')
   }
@@ -1873,6 +1918,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         const fComments = await fetchComments()
         const fSettings = await fetchFolderSettings()
         const fAlbums = await fetchAlbumsFromSupabase()
+        const savedAdminLocation = !sharedId ? readSavedAdminLocation() : null
 
         if (sharedId) {
           setIsSharedGuest(true)
@@ -1935,6 +1981,33 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
           setUser(sessionData.session.user)
           setIsAdmin(false)
+
+          if (savedAdminLocation?.selectedAlbum) {
+            const saved = savedAdminLocation.selectedAlbum
+            const matchedAlbum = fAlbums.find(a => String(a.id) === String(saved.id))
+            const restoredAlbum: Album = matchedAlbum || {
+              id: String(saved.id),
+              title: String(saved.title || customNames[String(saved.id)] || 'DinhThong Album'),
+              coverUrl: '',
+              driveUrl: String(saved.driveUrl || `https://drive.google.com/drive/folders/${saved.id}`),
+            }
+            const restoredHistory = savedAdminLocation.folderHistory.filter((item: any) => item && item.id && item.driveUrl)
+            setSelectedAlbum(restoredAlbum)
+            setFolderHistory(restoredHistory)
+            setIsLocked(false)
+
+            const target = restoredHistory.length > 0
+              ? restoredHistory[restoredHistory.length - 1]
+              : { id: restoredAlbum.id, driveUrl: restoredAlbum.driveUrl }
+
+            const targetPass = fSettings[target.id]?.password
+            if (targetPass) {
+              setIsLocked(true)
+            } else {
+              await fetchAlbumImages(target.driveUrl, target.id, false)
+            }
+          }
+
           const masterFolders = await fetchMasterFoldersList()
           checkAllMasterFolders(masterFolders, false, knownSet)
         }
