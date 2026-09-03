@@ -167,9 +167,6 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// TẢI VIDEO ĐƠN TRỰC TIẾP TỪ GOOGLE DRIVE
-// Không đi qua Vercel để tối đa băng thông.
-// Lưu ý: một số file lớn có thể vẫn bị Google Drive yêu cầu xác nhận/quét virus.
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
   const directUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`
 
@@ -385,131 +382,46 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const getGuestIdentityStorageKey = (folderId: string) => `dinhthong_gallery_guest_name_${folderId}`
 
-  const normalizeGuestName = (value: string) =>
-    String(value || '')
-      .trim()
-      .replace(/\s+/g, ' ')
-      .toLocaleLowerCase('vi-VN')
-
+  // HÀM KIỂM TRA KHÁCH TRUY CẬP VÀ GIỚI HẠN QUA BACKEND
   const registerGuestViewer = async (folderId: string, customerName = '') => {
     if (!folderId || !guestId) return { allowed: true, viewerCount: 0, trackingUnavailable: true }
 
     const cleanName = customerName.trim()
     const setting = getFolderSettingFromState(folderId)
     const collectCustomerInfo = Boolean(setting.collect_customer_info)
+    const maxViewers = Number(setting.max_viewers || selectedAlbum?.max_viewers || 0)
 
-    // Album yêu cầu nhập tên: tuyệt đối không gọi RPC kiểm tra giới hạn khi chưa có tên.
-    // Việc gọi RPC với tên rỗng sẽ khiến giới hạn bị chặn trước khi khách kịp nhập tên.
+    // Nếu album yêu cầu nhập tên mà chưa có tên thì chờ, không chặn sớm
     if (collectCustomerInfo && !cleanName) {
       setGuestAccessDenied(false)
       return { allowed: false, viewerCount: guestViewerCount, trackingUnavailable: false, waitingForName: true }
     }
 
-    const maxViewers = Number(setting.max_viewers || selectedAlbum?.max_viewers || 0)
-
     try {
-      // Khi album thu thập tên khách, giới hạn người xem được tính theo TÊN.
-      // Cùng một tên đã từng vào album chỉ tính là 1 người, kể cả dùng trình duyệt
-      // hoặc thiết bị khác. Quan trọng: phải kiểm tra tên SAU KHI khách nhập tên,
-      // tránh báo "đã quá số người" trước khi biết đó có phải người cũ hay không.
-      if (collectCustomerInfo && cleanName) {
-        const { data: existingRows, error: existingError } = await supabase
-          .from('gallery_album_visitors')
-          .select('visitor_id, customer_name, last_seen_at, updated_at')
-          .eq('album_id', folderId)
-
-        if (existingError) throw existingError
-
-        const normalizedName = normalizeGuestName(cleanName)
-        const sameNamedVisitor = (existingRows || []).some((row: any) =>
-          normalizeGuestName(String(row?.customer_name || '')) === normalizedName
-        )
-
-        const uniqueKeys = new Set<string>()
-        ;(existingRows || []).forEach((row: any) => {
-          const rowName = normalizeGuestName(String(row?.customer_name || ''))
-          if (rowName) uniqueKeys.add(`name:${rowName}`)
-          else if (row?.visitor_id) uniqueKeys.add(`visitor:${String(row.visitor_id)}`)
-        })
-
-        // Người cùng tên luôn được phép vào lại, không làm tăng số người.
-        if (sameNamedVisitor) {
-          setGuestAccessDenied(false)
-          setGuestViewerCount(uniqueKeys.size)
-
-          // Cập nhật/ghi nhận lại lượt truy cập nhưng KHÔNG áp giới hạn lần nữa.
-          // p_max_viewers = 0 ở đây vì giới hạn đã được xử lý theo tên ở phía trên.
-          const { error: rpcError } = await supabase.rpc('register_gallery_album_viewer', {
-            p_album_id: folderId,
-            p_visitor_id: guestId,
-            p_customer_name: cleanName,
-            p_max_viewers: 0,
-          })
-          if (rpcError) console.warn('Không cập nhật được lượt vào lại:', rpcError)
-
-          return { allowed: true, viewerCount: uniqueKeys.size, trackingUnavailable: Boolean(rpcError) }
-        }
-
-        // Tên mới: chỉ chặn khi số người duy nhất đã đạt giới hạn.
-        if (maxViewers > 0 && uniqueKeys.size >= maxViewers) {
-          setGuestViewerCount(uniqueKeys.size)
-          setGuestAccessDenied(true)
-          return { allowed: false, viewerCount: uniqueKeys.size, trackingUnavailable: false }
-        }
-
-        // Tên mới còn chỗ: ghi nhận lượt vào. Không truyền max để tránh RPC đếm
-        // theo visitor_id thay vì tên, vì giới hạn của album này là giới hạn theo tên.
-        const { data, error } = await supabase.rpc('register_gallery_album_viewer', {
-          p_album_id: folderId,
-          p_visitor_id: guestId,
-          p_customer_name: cleanName,
-          p_max_viewers: 0,
-        })
-
-        if (error) throw error
-
-        const result = Array.isArray(data) ? data[0] : data
-        const reportedCount = Number(result?.viewer_count || 0)
-        const nextRows = [...(existingRows || []), { visitor_id: guestId, customer_name: cleanName }]
-        const nextUniqueKeys = new Set<string>()
-        nextRows.forEach((row: any) => {
-          const rowName = normalizeGuestName(String(row?.customer_name || ''))
-          if (rowName) nextUniqueKeys.add(`name:${rowName}`)
-          else if (row?.visitor_id) nextUniqueKeys.add(`visitor:${String(row.visitor_id)}`)
-        })
-        const viewerCount = nextUniqueKeys.size || reportedCount
-        setGuestAccessDenied(false)
-        setGuestViewerCount(viewerCount)
-        return { allowed: true, viewerCount, trackingUnavailable: false }
-      }
-
-      // Album không thu thập tên: giữ nguyên cơ chế theo visitor_id hiện tại.
-      const { data, error } = await supabase.rpc('register_gallery_album_viewer', {
-        p_album_id: folderId,
-        p_visitor_id: guestId,
-        p_customer_name: cleanName,
-        p_max_viewers: maxViewers,
+      const res = await fetch('/api/guest/register-viewer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          albumId: folderId,
+          visitorId: guestId,
+          customerName: cleanName || `Khách ${guestId.slice(0, 6).toUpperCase()}`,
+          maxViewers: maxViewers,
+        }),
       })
 
-      if (error) throw error
+      const result = await res.json().catch(() => ({}))
 
-      const result = Array.isArray(data) ? data[0] : data
-      const allowed = result?.allowed !== false
-      const viewerCount = Number(result?.viewer_count || 0)
-      setGuestViewerCount(viewerCount)
-
-      if (!allowed) {
+      if (!res.ok || result?.allowed === false) {
+        setGuestViewerCount(Number(result?.viewer_count || 0))
         setGuestAccessDenied(true)
-      } else {
-        setGuestAccessDenied(false)
+        return { allowed: false, viewerCount: Number(result?.viewer_count || 0), trackingUnavailable: false }
       }
 
-      return { allowed, viewerCount, trackingUnavailable: false }
+      const viewerCount = Number(result?.viewer_count || 0)
+      setGuestViewerCount(viewerCount)
+      setGuestAccessDenied(false)
+      return { allowed: true, viewerCount, trackingUnavailable: false }
     } catch (e) {
-      // Không để lỗi hệ thống theo dõi người xem làm album share bị trắng.
-      // Nếu RPC không tồn tại/chưa có policy, khách vẫn phải xem được album.
-      // Với album có giới hạn theo tên, chỉ lỗi thực sự khi không thể kiểm tra
-      // danh sách người xem; trong trường hợp này vẫn giữ khả năng xem album.
       console.warn('Không ghi nhận được lượt xem album:', e)
       return { allowed: true, viewerCount: 0, trackingUnavailable: true }
     }
@@ -532,10 +444,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setGuestCanSelect(false)
 
     if (collect) {
-      // Luôn yêu cầu khách xác nhận/nhập tên trước khi kiểm tra giới hạn.
-      // Không được báo "đã đủ số người" trước khi biết tên khách là gì.
-      // Nếu khách đã từng nhập tên trên thiết bị này thì chỉ dùng tên đó để
-      // điền sẵn vào ô nhập, KHÔNG tự động cho vào album.
+      // Luôn yêu cầu khách nhập tên trước khi kiểm tra giới hạn
       setGuestNameInput(savedName.trim())
       setShowGuestNameModal(true)
       return false
@@ -550,7 +459,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const finalizeGuestEntry = async () => {
     const cleanName = guestNameInput.trim()
-    if (!cleanName) return
+    if (!cleanName) {
+      alert('Vui lòng nhập tên của bạn.')
+      return
+    }
     if (cleanName.length > 100) {
       alert('Tên không được dài quá 100 ký tự.')
       return
@@ -558,29 +470,28 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const folderId = currentActiveFolderId
     if (!folderId) return
 
-    // Chưa lưu localStorage ở đây. Chỉ lưu sau khi máy chủ xác nhận
-    // tên này được phép vào album. Điều này ngăn lần sau tự động bypass
-    // màn hình nhập tên khi tên đó đã bị từ chối vì vượt giới hạn.
     setGuestAccessDenied(false)
-    setGuestCustomerName(cleanName)
 
+    // Xác thực qua server:
+    // - Tên trùng: Cho vào album.
+    // - Tên mới: Nếu đủ số lượng -> báo đầy, nếu chưa -> lưu và cho vào.
     const result = await registerGuestViewer(folderId, cleanName)
     if (!result.allowed) {
-      // Tên mới và album đã đủ người: sau khi nhập tên mới hiện thông báo.
-      // Tên trùng người đã khai báo sẽ được registerGuestViewer cho phép vào.
       setGuestCanSelect(false)
       setShowGuestNameModal(false)
       setGuestAccessDenied(true)
       return
     }
 
+    setGuestCustomerName(cleanName)
+    setGuestCanSelect(true)
+    setShowGuestNameModal(false)
+    setGuestNameInput('')
+
     try {
       localStorage.setItem(getGuestIdentityStorageKey(folderId), cleanName)
     } catch {}
 
-    setGuestCanSelect(true)
-    setShowGuestNameModal(false)
-    setGuestNameInput('')
     const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
     if (targetUrl) await fetchAlbumImages(targetUrl, folderId, true)
   }
@@ -688,8 +599,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         return nameMap[String(id)] || albums.find(a => String(a.id) === String(id))?.title || String(id)
       }
 
-      // Viewer count: tên trùng nhau trong cùng album chỉ tính 1 người;
-      // nếu không có tên thì dùng visitor_id để phân biệt.
       const viewerGroups: Record<string, any[]> = {}
       ;(visitorRows || []).forEach((row: any) => {
         const albumId = String(row.album_id || '')
@@ -750,7 +659,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         }
       })
 
-      // Tập hợp cả album chính lẫn thư mục con đã từng xuất hiện trong dữ liệu visitor/selection.
       const allAlbumIds = new Set<string>()
       albums.forEach(a => allAlbumIds.add(String(a.id)))
       ;(knownRows || []).forEach((r: any) => r?.id && allAlbumIds.add(String(r.id)))
@@ -778,9 +686,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
 
-  // Khi Admin đã nhận được lựa chọn từ khách gần nhất, dùng lựa chọn đó làm trạng thái
-  // hiển thị trên bộ lọc sao và ngôi sao của từng ảnh. Nếu chưa có khách chọn thì
-  // giữ nguyên trạng thái lựa chọn hiện tại của Admin.
   const latestGuestActor = !isSharedGuest ? guestSelectionRows[0]?.actor_key : null
   const latestGuestRatings = latestGuestActor
     ? guestSelectionRows.reduce((acc: Record<string, number>, row: any) => {
@@ -1030,8 +935,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const scope = guestMode ? 'guest' : (isAdmin ? 'default' : 'user')
     const actorKey = guestMode ? actor : (isAdmin ? 'admin' : actor)
 
-    // Khách share link dùng localStorage để khôi phục lựa chọn của chính trình duyệt,
-    // còn bản ghi cloud chỉ dùng để báo ngược về Admin.
     if (guestMode) {
       try {
         const saved = localStorage.getItem('dinhthong_image_ratings')
@@ -1069,7 +972,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const nextRatings: Record<string, number> = {}
       const rows = data || []
 
-      // Mặc định lấy lựa chọn của Admin.
       rows.forEach((row: any) => {
         if (row.scope === 'default' && row.actor_key === 'admin' && !(row.item_id in nextRatings)) {
           nextRatings[row.item_id] = Number(row.stars || 0)
@@ -1079,8 +981,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const hasDefaultRows = rows.some((row: any) => row.scope === 'default' && row.actor_key === 'admin')
       const hasUserRows = rows.some((row: any) => row.scope === 'user' && row.actor_key === actorKey)
 
-      // Dữ liệu cũ chỉ nằm trong localStorage sẽ được chuyển sang Supabase một lần
-      // cho đúng tài khoản / vai trò hiện tại.
       if (itemIds.length > 0 && !hasDefaultRows && !hasUserRows) {
         try {
           const savedRatings = localStorage.getItem('dinhthong_image_ratings')
@@ -1096,7 +996,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         } catch {}
       }
 
-      // Nếu tài khoản có lựa chọn riêng, lựa chọn riêng ghi đè lựa chọn mặc định.
       if (!isAdmin) {
         ;(data || []).forEach((row: any) => {
           if (row.scope === 'user' && row.actor_key === actorKey) {
@@ -1116,8 +1015,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       }
 
       setRatings(prev => {
-        // Thay chính xác trạng thái của thư mục hiện tại để khi Admin xóa/đổi
-        // lựa chọn, các tài khoản khác cũng cập nhật theo, không giữ dữ liệu cũ.
         const next = { ...prev }
         itemIds.forEach(id => delete next[id])
         Object.keys(nextRatings).forEach(id => { next[id] = nextRatings[id] })
@@ -1244,7 +1141,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     URL.revokeObjectURL(url)
   }
 
-  // TẢI 1 FILE: VIDEO TẢI NGUYÊN BẢN 100% QUA API PROXY URL VÀ TỰ ĐỘNG GIẢI PHÓNG TRẠNG THÁI
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1258,14 +1154,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
 
-      // NẾU LÀ VIDEO: GỌI TẢI TRỰC TIẾP KHÔNG MỞ TAB MỚI
       if (item.type === 'video') {
         triggerDirectBrowserDownload(item.id, exactFileName)
         setDownloadingId(null)
         return
       }
 
-      // NẾU LÀ HÌNH ẢNH: TẢI QUA PROXY ĐỂ ĐÓNG WATERMARK NẾU CÓ
       const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
       const proxyUrl = `/api/download?url=${encodeURIComponent(item.downloadUrl)}&name=${encodeURIComponent(exactFileName)}`
       const res = await fetch(proxyUrl)
@@ -1303,7 +1197,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  // TẢI TOÀN BỘ THƯ MỤC
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1338,20 +1231,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const videoFiles = targetFiles.filter(f => f.type === 'video')
       const imageFiles = targetFiles.filter(f => f.type === 'image')
 
-      // 1. Tải video bằng Native Download trực tiếp
       if (videoFiles.length > 0) {
         for (let i = 0; i < videoFiles.length; i++) {
           const v = videoFiles[i]
           const ext = 'mp4'
           const exactFileName = v.name.includes('.') ? v.name : `${v.name}.${ext}`
           triggerDirectBrowserDownload(v.id, exactFileName)
-          // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
-          // nhiều download liên tiếp khi tải cả album.
           await new Promise(resolve => setTimeout(resolve, 350))
         }
       }
 
-      // 2. Nén các file ảnh còn lại
       if (imageFiles.length > 0) {
         const zip = new JSZip()
         const total = imageFiles.length
@@ -1394,7 +1283,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  // TẢI ZIP CÁC MỤC ĐÃ TICK CHECKBOX
   const handleBatchDownload = async () => {
     if (zippingFolderId) return
     if (!selectedAlbum) {
@@ -1428,8 +1316,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         for (const v of videoFiles) {
           const exactFileName = v.name.includes('.') ? v.name : `${v.name}.mp4`
           triggerDirectBrowserDownload(v.id, exactFileName)
-          // Cho browser một nhịp xử lý mỗi download, tránh bị coi là spam
-          // nhiều download liên tiếp khi tải cả album.
           await new Promise(resolve => setTimeout(resolve, 350))
         }
 
@@ -1599,9 +1485,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     let scope = isSharedGuest ? 'guest' : 'default'
     let actorKey = isSharedGuest ? getActorKey() : 'admin'
 
-    // Ở giao diện Admin, nút này phải xóa đúng bộ lựa chọn đang hiển thị.
-    // Nếu đang có lựa chọn của khách từ link chia sẻ thì xóa bộ của khách gần nhất,
-    // thay vì xóa một bộ mặc định không được hiển thị.
     if (!isSharedGuest && latestGuestActor && hasLatestGuestSelections) {
       scope = 'guest'
       actorKey = latestGuestActor
@@ -1828,7 +1711,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           albumItem?.driveUrl ||
           `https://drive.google.com/drive/folders/${cleanId}`
 
-    // Ghi mapping ngay khi Admin tạo/chia sẻ link. Không cần cài đặt album trước.
     try {
       await supabase
         .from('known_drive_folders')
@@ -2180,14 +2062,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     })
   }
 
-  const handleSelectAllPending = () => {
-    if (selectedPendingIds.size === pendingSyncAlbums.length) {
-      setSelectedPendingIds(new Set())
-    } else {
-      setSelectedPendingIds(new Set(pendingSyncAlbums.map(f => f.id)))
-    }
-  }
-
   const handleConfirmSync = async () => {
     setIsSyncing(true)
     try {
@@ -2233,7 +2107,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const code = String(sharedCode || '').trim()
     if (!code) return null
 
-    // 1) Ưu tiên mapping đã lưu.
     try {
       const { data: knownRows, error: knownError } = await supabase
         .from('known_drive_folders')
@@ -2263,9 +2136,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       console.warn('Không đọc được mapping known_drive_folders:', err)
     }
 
-    // 2) Link cũ / link của thư mục con chưa từng được "cài đặt":
-    // quét trực tiếp cây Google Drive bắt đầu từ các Thư Mục Tổng.
-    // Khi tìm thấy đúng mã 6 số, lưu mapping lại để các lần sau mở nhanh.
     try {
       const { data: masterRows, error: masterError } = await supabase
         .from('master_folders')
@@ -2328,7 +2198,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       console.warn('Không thể quét cây Drive để tìm link share:', err)
     }
 
-    // 3) Fallback cho link cũ chứa trực tiếp Drive ID thật.
     if (code.length > 10) {
       return {
         id: code,
@@ -2340,7 +2209,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return null
   }
 
-  // Khởi tạo và đồng bộ
+  // Khởi tạo và load dữ liệu
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
     const isShortRoute = pathParts[0] === 's'
@@ -2353,7 +2222,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         const knownSet: Set<string> = await fetchKnownFolderIds()
         await fetchCustomNames()
         await fetchCustomCovers()
-        const fComments = await fetchComments()
+        await fetchComments()
         const fSettings = await fetchFolderSettings()
         const fAlbums = await fetchAlbumsFromSupabase()
         const savedAdminLocation = !sharedId ? readSavedAdminLocation() : null
@@ -2362,8 +2231,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           setIsSharedGuest(true)
           const browserGuestId = getGuestBrowserId()
           setGuestId(browserGuestId)
-          // Với link /s/XXXXXX, ưu tiên mapping đã lưu khi Admin bấm Chia sẻ.
-          // Như vậy link chỉ cần 6 số nhưng vẫn trỏ đúng Drive ID thật.
+
           let matchedAlbum = fAlbums.find(a => a.id === sharedId || extractDriveId(a.driveUrl) === sharedId)
 
           if (!matchedAlbum) {
@@ -2512,15 +2380,13 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return () => window.clearInterval(interval)
   }, [currentActiveFolderId, isSharedGuest, isAdminPanelOpen, isAdmin, user?.email])
 
+  // Heartbeat duy trì trạng thái xem của khách sau khi đã vào được album
   useEffect(() => {
     if (!isSharedGuest || !guestId || !currentActiveFolderId) return
 
     const setting = getFolderSettingFromState(currentActiveFolderId)
     const requiresName = Boolean(setting.collect_customer_info)
 
-    // TUYỆT ĐỐI không heartbeat khi album yêu cầu nhập tên mà khách chưa
-    // được xác nhận. guestCanSelect chỉ chuyển true sau khi finalizeGuestEntry()
-    // kiểm tra tên với dữ liệu gallery_album_visitors và cho phép vào.
     if (requiresName && (!guestCanSelect || !guestCustomerName.trim() || showGuestNameModal)) return
 
     const heartbeat = async () => {
@@ -2661,7 +2527,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   gallery
                 </span>
               </div>
-</div>
+            </div>
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
@@ -2825,17 +2691,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       </header>
 
       {!isSharedGuest && displayName.trim() && (
-        <div
-          className={`w-full border-b ${
-            isDarkMode ? 'border-white/10' : 'border-gray-100'
-          }`}
-        >
+        <div className={`w-full border-b ${isDarkMode ? 'border-white/10' : 'border-gray-100'}`}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 sm:py-3">
-            <p
-              className={`font-serif italic text-xs sm:text-sm leading-none truncate ${
-                isDarkMode ? 'text-gray-400' : 'text-gray-500'
-              }`}
-            >
+            <p className={`font-serif italic text-xs sm:text-sm leading-none truncate ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
               Xin chào {displayName.trim()}
             </p>
           </div>
@@ -3287,17 +3145,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                     className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
                                     title="Tải nén toàn bộ thư mục này"
                                   >
-                                  {isThisFolderZipping ? (
-                                    <>
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      <span>{zipProgress || 'Vui lòng đợi...'}</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Download className="w-3.5 h-3.5" />
-                                      <span>Tải</span>
-                                    </>
-                                  )}
+                                    {isThisFolderZipping ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>{zipProgress || 'Vui lòng đợi...'}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Download className="w-3.5 h-3.5" />
+                                        <span>Tải</span>
+                                      </>
+                                    )}
                                   </button>
                                 </div>
                               </div>
@@ -3480,7 +3338,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          {/* Header Lightbox */}
           <div className="flex items-center justify-between px-3 py-2 text-white/90 z-30">
             <div className="truncate max-w-[50vw]">
               <h4 className="text-xs sm:text-sm font-medium truncate">
@@ -3665,7 +3522,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
-      {/* MODAL XEM TẤT CẢ BÌNH LUẬN CỦA KHÁCH */}
+      {/* MODAL XEM TẤT CẢ BÌNH LUẬN */}
       {isCommentModalOpen && !isSharedGuest && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl border transition-all ${
@@ -3726,7 +3583,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
-      {/* THANH CÔNG CỤ NỔI KHI TICK CHỌN CHECKBOX */}
+      {/* THANH CÔNG CỤ NỔI KHI TICK CHỌN */}
       {currentSelectionCount > 0 && (
         <div className="fixed bottom-6 inset-x-0 z-40 flex justify-center px-4 animate-in slide-in-from-bottom-5 duration-200">
           <div className="flex items-center gap-2.5 sm:gap-4 px-4 sm:px-6 py-3 rounded-2xl bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white shadow-2xl border border-white/15">
@@ -3779,30 +3636,51 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
+      {/* MODAL YÊU CẦU NHẬP TÊN CHO KHÁCH */}
       {showGuestNameModal && isSharedGuest && (
         <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
             <div className="w-12 h-1 rounded-full bg-emerald-600 mx-auto mb-5" />
             <h3 className="font-serif font-bold text-lg text-center">Nhập tên của bạn</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2 mb-5">Thông tin này giúp Admin biết ai đang chọn ảnh trong album.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2 mb-5">Vui lòng nhập tên để bắt đầu xem và chọn ảnh trong album.</p>
             <input
               autoFocus
               value={guestNameInput}
               onChange={(e) => setGuestNameInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') finalizeGuestEntry() }}
-              placeholder="Họ và tên"
-              className={`w-full px-4 py-3 rounded-2xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-900'}`}
+              placeholder="Họ và tên của bạn..."
+              className={`w-full px-4 py-3 rounded-2xl border outline-none text-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' : 'bg-gray-50 border-gray-200 text-gray-900 focus:border-emerald-500'}`}
             />
-            <button onClick={finalizeGuestEntry} className="w-full mt-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">Tiếp tục</button>
+            <button 
+              onClick={finalizeGuestEntry} 
+              className="w-full mt-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-md transition cursor-pointer"
+            >
+              Tiếp tục vào Album
+            </button>
           </div>
         </div>
       )}
 
+      {/* MÀN HÌNH BÁO ĐẦY NGƯỜI TRUY CẬP CHO KHÁCH */}
       {guestAccessDenied && !showGuestNameModal && isSharedGuest && (
         <div className="fixed inset-0 z-[61] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
-            <h3 className="font-serif font-bold text-lg">Album đã đủ số người xem</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Admin đã đặt giới hạn người xem cho album này. Vui lòng liên hệ Admin.</p>
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-red-500/10 text-red-500 flex items-center justify-center mb-3">
+              <LockIcon className="w-7 h-7" />
+            </div>
+            <h3 className="font-serif font-bold text-lg">Đã Đủ Số Lượng Người Truy Cập</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              Album này đã đạt đến giới hạn số lượng khách truy cập cho phép. Nếu bạn là khách đã đăng ký trước đó, hãy thử nhập lại chính xác tên của mình.
+            </p>
+            <button
+              onClick={() => {
+                setGuestAccessDenied(false)
+                setShowGuestNameModal(true)
+              }}
+              className="mt-5 w-full py-2.5 rounded-2xl bg-gray-100 dark:bg-white/10 text-xs font-semibold hover:bg-gray-200 dark:hover:bg-white/20 transition cursor-pointer"
+            >
+              Nhập lại tên khác
+            </button>
           </div>
         </div>
       )}
@@ -3885,6 +3763,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
+      {/* MODAL THÔNG BÁO */}
       {isNotificationOpen && !isSharedGuest && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setIsNotificationOpen(false)}>
           <div className={`w-full max-w-3xl rounded-3xl p-5 sm:p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`} onClick={(e) => e.stopPropagation()}>
@@ -3957,7 +3836,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
-      {/* MODAL CÀI ĐẶT RIÊNG BIỆT CHO TỪNG THƯ MỤC / ALBUM */}
+      {/* MODAL CÀI ĐẶT RIÊNG ALBUM */}
       {editingFolderSetting && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
