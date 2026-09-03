@@ -515,11 +515,21 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const deleteViewerRecords = async (albumId?: string) => {
     try {
-      const query = supabase.from('gallery_album_visitors').delete()
-      const { error } = albumId
-        ? await query.eq('album_id', albumId)
-        : await query.neq('album_id', '__never__')
-      if (error) throw error
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) throw new Error('Phiên đăng nhập đã hết hạn.')
+
+      const res = await fetch('/api/admin/delete-viewers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ albumId: albumId || null }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload?.error || 'Không thể xóa số người xem.')
+
       await fetchNotifications()
       setGuestViewerCount(0)
       alert(albumId ? 'Đã xóa số lượng người xem của album này.' : 'Đã xóa toàn bộ số lượng người xem.')
@@ -594,21 +604,35 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         }
       })
 
+      const selectionByAlbum: Record<string, any> = {}
       const fullByAlbum: Record<string, any> = {}
       Object.entries(latestActorPerAlbum).forEach(([albumId, info]) => {
-        const selectedRows = (guestRows || []).filter((r: any) => String(r.album_id) === albumId && String(r.actor_key) === info.actor && Number(r.stars) > 0)
-        const max = Number(folderSettingsMap[albumId]?.max_select || albums.find(a => String(a.id) === albumId)?.max_select || 0)
-        const latestTime = Math.max(...selectedRows.map((r: any) => new Date(r.updated_at || 0).getTime()), 0)
+        const selectedRows = (guestRows || []).filter((r: any) =>
+          String(r.album_id) === albumId &&
+          String(r.actor_key) === info.actor &&
+          Number(r.stars) > 0
+        )
+        const max = Number(
+          folderSettingsMap[albumId]?.max_select ||
+          albums.find(a => String(a.id) === albumId)?.max_select || 0
+        )
+        const latestTime = Math.max(
+          ...selectedRows.map((r: any) => new Date(r.updated_at || 0).getTime()),
+          0
+        )
+        const guestLabel = selectedRows.find((r: any) => r.guest_label)?.guest_label || ''
+        selectionByAlbum[albumId] = {
+          albumId,
+          title: getTitle(albumId),
+          chosen: selectedRows.length,
+          max,
+          actor: info.actor,
+          guestLabel,
+          updatedAt: latestTime,
+          hasSelection: selectedRows.length > 0,
+        }
         if (max > 0 && selectedRows.length >= max) {
-          fullByAlbum[albumId] = {
-            albumId,
-            title: getTitle(albumId),
-            chosen: selectedRows.length,
-            max,
-            actor: info.actor,
-            guestLabel: selectedRows.find((r: any) => r.guest_label)?.guest_label || '',
-            updatedAt: latestTime,
-          }
+          fullByAlbum[albumId] = selectionByAlbum[albumId]
         }
       })
 
@@ -623,10 +647,18 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         albumId,
         title: getTitle(albumId),
         viewers: viewerCountByAlbum[albumId] || 0,
+        selectionData: selectionByAlbum[albumId] || null,
         fullData: fullByAlbum[albumId] || null,
         full: Boolean(fullByAlbum[albumId] && Number(fullByAlbum[albumId].updatedAt || 0) > clearedAt),
-        joined: (joinedByAlbum[albumId] || []).filter((row: any) => Number(row.joinedAt || 0) > clearedAt).sort((a: any, b: any) => b.joinedAt - a.joinedAt),
-      })).filter(item => item.viewers > 0 || item.full || item.joined.length > 0)
+        joined: (joinedByAlbum[albumId] || [])
+          .filter((row: any) => Number(row.joinedAt || 0) > clearedAt)
+          .sort((a: any, b: any) => b.joinedAt - a.joinedAt),
+      })).filter(item =>
+        item.viewers > 0 ||
+        Boolean(item.selectionData?.hasSelection) ||
+        item.full ||
+        item.joined.length > 0
+      )
 
       setNotificationItems(notices)
     } catch (e) {
@@ -3740,8 +3772,15 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                         <div className="font-semibold text-sm truncate">{item.title}</div>
                       </button>
                       <div className="flex items-center gap-3 flex-shrink-0">
-                        <span className="text-sm font-bold text-emerald-600">{item.viewers} người</span>
-                        <button type="button" onClick={() => deleteViewerRecords(item.albumId)} className="text-xs font-semibold text-red-500 hover:underline">Xóa</button>
+                        <div className="text-right">
+                          <span className="text-sm font-bold text-emerald-600 block">{item.viewers} người</span>
+                          {item.selectionData?.hasSelection && (
+                            <span className="text-[10px] text-gray-400 block mt-0.5">
+                              Đã chọn {item.selectionData.chosen}{item.selectionData.max > 0 ? `/${item.selectionData.max}` : ''} ảnh
+                            </span>
+                          )}
+                        </div>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); deleteViewerRecords(item.albumId) }} className="text-xs font-semibold text-red-500 hover:underline">Xóa</button>
                       </div>
                     </div>
                   </div>
@@ -3751,7 +3790,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   <button key={`full-${item.albumId}`} type="button" onClick={() => openNotificationAlbum(item)} className={`w-full text-left p-4 rounded-2xl border transition ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-100 hover:bg-emerald-50'}`}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0"><div className="font-semibold text-sm truncate">{item.title}</div><div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Khách{item.fullData?.guestLabel ? ` ${item.fullData.guestLabel}` : ''} đã chọn đủ ảnh</div></div>
-                      <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">{item.fullData?.chosen || 0}/{item.fullData?.max || 0}</span>
+                      <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">{item.fullData?.chosen || 0}/{item.fullData?.max || 0} ảnh</span>
                     </div>
                   </button>
                 ))
