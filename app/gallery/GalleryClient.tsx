@@ -1338,11 +1338,44 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  const handleShareFolder = (folderId: string, e?: React.MouseEvent) => {
+  const handleShareFolder = async (folderId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
-    const numericCode = toNumericCode(folderId)
+    if (!folderId) return
+
+    const cleanId = String(folderId)
+    const folderItem = (items || []).find((item: any) => String(item?.id) === cleanId)
+    const historyItem = (folderHistory || []).find((item: any) => String(item?.id) === cleanId)
+    const albumItem = (albums || []).find((item: any) => String(item?.id) === cleanId)
+
+    const folderName =
+      customNames[cleanId] ||
+      folderItem?.name ||
+      historyItem?.title ||
+      albumItem?.title ||
+      cleanId
+
+    const driveUrl =
+      folderItem?.type === 'folder'
+        ? `https://drive.google.com/drive/folders/${cleanId}`
+        : historyItem?.driveUrl ||
+          albumItem?.driveUrl ||
+          `https://drive.google.com/drive/folders/${cleanId}`
+
+    // Ghi mapping ngay khi Admin tạo/chia sẻ link. Không cần cài đặt album trước.
+    try {
+      await supabase
+        .from('known_drive_folders')
+        .upsert(
+          [{ id: cleanId, name: folderName, parent_url: driveUrl }],
+          { onConflict: 'id' }
+        )
+    } catch (err) {
+      console.warn('Không lưu được mapping share folder:', err)
+    }
+
+    const numericCode = toNumericCode(cleanId)
     const shareUrl = `${window.location.origin}/s/${numericCode}`
-    navigator.clipboard.writeText(shareUrl)
+    await navigator.clipboard.writeText(shareUrl)
     setShareCopiedId(folderId)
     setTimeout(() => setShareCopiedId(null), 2500)
   }
@@ -1707,6 +1740,113 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
+  const resolveSharedFolder = async (sharedCode: string) => {
+    const code = String(sharedCode || '').trim()
+    if (!code) return null
+
+    // 1) Ưu tiên mapping đã lưu.
+    try {
+      const { data: knownRows, error: knownError } = await supabase
+        .from('known_drive_folders')
+        .select('id, name, parent_url')
+
+      if (!knownError && Array.isArray(knownRows)) {
+        const matched = knownRows.find((row: any) =>
+          row?.id && (
+            String(row.id) === code ||
+            toNumericCode(String(row.id)) === code
+          )
+        )
+        if (matched) {
+          const folderId = String(matched.id)
+          return {
+            id: folderId,
+            driveUrl: String(matched.parent_url || `https://drive.google.com/drive/folders/${folderId}`),
+            title: String(customNames[folderId] || matched.name || 'DinhThong Album'),
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Không đọc được mapping known_drive_folders:', err)
+    }
+
+    // 2) Link cũ / link của thư mục con chưa từng được "cài đặt":
+    // quét trực tiếp cây Google Drive bắt đầu từ các Thư Mục Tổng.
+    // Khi tìm thấy đúng mã 6 số, lưu mapping lại để các lần sau mở nhanh.
+    try {
+      const { data: masterRows, error: masterError } = await supabase
+        .from('master_folders')
+        .select('id, name, url')
+
+      if (masterError || !Array.isArray(masterRows)) return null
+
+      const queue: Array<{ id: string; name: string; driveUrl: string }> = masterRows
+        .filter((row: any) => row?.url)
+        .map((row: any) => {
+          const id = String(row.id || extractDriveId(row.url) || '')
+          return {
+            id,
+            name: String(row.name || id),
+            driveUrl: String(row.url),
+          }
+        })
+        .filter((row) => row.id)
+
+      const visited = new Set<string>()
+      const MAX_FOLDERS = 1000
+
+      while (queue.length > 0 && visited.size < MAX_FOLDERS) {
+        const current = queue.shift()!
+        if (!current?.id || visited.has(current.id)) continue
+        visited.add(current.id)
+
+        if (current.id === code || toNumericCode(current.id) === code) {
+          const title = String(customNames[current.id] || current.name || 'DinhThong Album')
+          try {
+            await supabase
+              .from('known_drive_folders')
+              .upsert(
+                [{ id: current.id, name: title, parent_url: current.driveUrl }],
+                { onConflict: 'id' }
+              )
+          } catch {}
+          return { id: current.id, driveUrl: current.driveUrl, title }
+        }
+
+        const res = await fetch(`/api/drive?url=${encodeURIComponent(current.driveUrl)}&_t=${Date.now()}`, {
+          cache: 'no-store',
+        })
+        if (!res.ok) continue
+        const data = await res.json()
+        const children = Array.isArray(data?.files) ? data.files : []
+
+        for (const child of children) {
+          if (!child || child.type !== 'folder' || !child.id) continue
+          const childId = String(child.id)
+          if (visited.has(childId)) continue
+          queue.push({
+            id: childId,
+            name: String(child.name || childId),
+            driveUrl: `https://drive.google.com/drive/folders/${childId}`,
+          })
+        }
+      }
+    } catch (err) {
+      console.warn('Không thể quét cây Drive để tìm link share:', err)
+    }
+
+    // 3) Fallback cho link cũ chứa trực tiếp Drive ID thật.
+    if (code.length > 10) {
+      return {
+        id: code,
+        driveUrl: `https://drive.google.com/drive/folders/${code}`,
+        title: customNames[code] || 'DinhThong Album',
+      }
+    }
+
+    return null
+  }
+
   // Khởi tạo và đồng bộ
   useEffect(() => {
     const pathParts = window.location.pathname.split('/').filter(Boolean)
@@ -1740,64 +1880,28 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               await fetchAlbumImages(matchedAlbum.driveUrl, matchedAlbum.id, true)
             }
           } else {
-            // Link /s/xxxxxx của thư mục con: giải mã mã 6 số về Drive ID thật
-            // từ known_drive_folders thay vì dùng mã share làm Drive ID.
-            let resolvedFolderId = ''
-            let resolvedDriveUrl = ''
-            let resolvedTitle = ''
+            const resolved = await resolveSharedFolder(sharedId)
 
-            try {
-              const { data: knownRows, error: knownError } = await supabase
-                .from('known_drive_folders')
-                .select('id, name, parent_url')
-
-              if (!knownError && Array.isArray(knownRows)) {
-                const matched = knownRows.find((row: any) =>
-                  row?.id && (
-                    String(row.id) === String(sharedId) ||
-                    toNumericCode(String(row.id)) === String(sharedId)
-                  )
-                )
-                if (matched) {
-                  resolvedFolderId = String(matched.id)
-                  resolvedDriveUrl = String(matched.parent_url || `https://drive.google.com/drive/folders/${matched.id}`)
-                  resolvedTitle = String(
-                    customNames[resolvedFolderId] ||
-                    (matched.name && String(matched.name) !== resolvedFolderId ? matched.name : 'DinhThong Album')
-                  )
-                }
-              }
-            } catch (err) {
-              console.warn('Không thể tra cứu thư mục share:', err)
-            }
-
-            // Fallback cho link cũ chứa trực tiếp Drive ID thật.
-            if (!resolvedFolderId && String(sharedId).length > 10) {
-              resolvedFolderId = String(sharedId)
-              resolvedDriveUrl = `https://drive.google.com/drive/folders/${resolvedFolderId}`
-              resolvedTitle = customNames[resolvedFolderId] || 'DinhThong Album'
-            }
-
-            if (!resolvedFolderId) {
-              alert('Link album không còn hợp lệ hoặc chưa được đồng bộ. Vui lòng tạo lại link chia sẻ từ Admin.')
+            if (!resolved) {
+              alert('Link album không còn hợp lệ hoặc không tìm thấy thư mục Drive. Vui lòng tạo lại link chia sẻ từ Admin.')
               setLoading(false)
               return
             }
 
             const fallbackAlbum: Album = {
-              id: resolvedFolderId,
-              title: resolvedTitle || 'DinhThong Album',
+              id: resolved.id,
+              title: resolved.title || 'DinhThong Album',
               coverUrl: '',
-              driveUrl: resolvedDriveUrl
+              driveUrl: resolved.driveUrl,
             }
 
             setSelectedAlbum(fallbackAlbum)
             setFolderHistory([])
-            const subPass = fSettings[resolvedFolderId]?.password
+            const subPass = fSettings[resolved.id]?.password
             if (subPass) {
               setIsLocked(true)
             } else {
-              await fetchAlbumImages(resolvedDriveUrl, resolvedFolderId, true)
+              await fetchAlbumImages(resolved.driveUrl, resolved.id, true)
             }
           }
         } else {
@@ -1820,7 +1924,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           }
 
           setUser(sessionData.session.user)
-          setIsAdmin(true)
+          setIsAdmin(false)
           const masterFolders = await fetchMasterFoldersList()
           checkAllMasterFolders(masterFolders, false, knownSet)
         }
@@ -1856,14 +1960,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return () => window.clearInterval(interval)
   }, [currentActiveFolderId, isSharedGuest, isAdminPanelOpen, isAdmin, user?.email])
 
-  const getSafeTabTitle = (title: string, fallback = 'DinhThong Gallery') => {
-    const clean = (title || '').trim()
-    if (!clean) return fallback
-    // Không để Drive ID dài hoặc mã share 6 số xuất hiện làm tên tab.
-    if (/^[a-zA-Z0-9_-]{20,}$/.test(clean) || /^\d{6}$/.test(clean)) return fallback
-    return clean
-  }
-
   useEffect(() => {
     if (previewMedia) {
       const fileName = customNames[previewMedia.id] || previewMedia.name
@@ -1873,9 +1969,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setPanPosition({ x: 0, y: 0 })
     } else if (folderHistory.length > 0) {
       const currentFolder = folderHistory[folderHistory.length - 1]
-      document.title = `${getSafeTabTitle(customNames[currentFolder.id] || currentFolder.title)} - Dinh Thong Gallery`
+      document.title = (customNames[currentFolder.id] || currentFolder.title || 'DinhThong Gallery').trim()
     } else if (selectedAlbum) {
-      document.title = `${getSafeTabTitle(customNames[selectedAlbum.id] || selectedAlbum.title)} - Dinh Thong Gallery`
+      document.title = (customNames[selectedAlbum.id] || selectedAlbum.title || 'DinhThong Gallery').trim()
     } else {
       document.title = 'Dinh Thong Gallery'
     }
