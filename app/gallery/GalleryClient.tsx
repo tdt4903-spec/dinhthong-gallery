@@ -385,20 +385,101 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const getGuestIdentityStorageKey = (folderId: string) => `dinhthong_gallery_guest_name_${folderId}`
 
+  const normalizeGuestName = (value: string) =>
+    String(value || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toLocaleLowerCase('vi-VN')
+
   const registerGuestViewer = async (folderId: string, customerName = '') => {
     if (!folderId || !guestId) return { allowed: true, viewerCount: 0, trackingUnavailable: true }
 
-    const maxViewers = Number(
-      folderSettingsMap[folderId]?.max_viewers ||
-      selectedAlbum?.max_viewers ||
-      0
-    )
+    const cleanName = customerName.trim()
+    const setting = getFolderSettingFromState(folderId)
+    const collectCustomerInfo = Boolean(setting.collect_customer_info)
+    const maxViewers = Number(setting.max_viewers || selectedAlbum?.max_viewers || 0)
 
     try {
+      // Khi album thu thập tên khách, giới hạn người xem được tính theo TÊN.
+      // Cùng một tên đã từng vào album chỉ tính là 1 người, kể cả dùng trình duyệt
+      // hoặc thiết bị khác. Quan trọng: phải kiểm tra tên SAU KHI khách nhập tên,
+      // tránh báo "đã quá số người" trước khi biết đó có phải người cũ hay không.
+      if (collectCustomerInfo && cleanName) {
+        const { data: existingRows, error: existingError } = await supabase
+          .from('gallery_album_visitors')
+          .select('visitor_id, customer_name, last_seen_at, updated_at')
+          .eq('album_id', folderId)
+
+        if (existingError) throw existingError
+
+        const normalizedName = normalizeGuestName(cleanName)
+        const sameNamedVisitor = (existingRows || []).some((row: any) =>
+          normalizeGuestName(String(row?.customer_name || '')) === normalizedName
+        )
+
+        const uniqueKeys = new Set<string>()
+        ;(existingRows || []).forEach((row: any) => {
+          const rowName = normalizeGuestName(String(row?.customer_name || ''))
+          if (rowName) uniqueKeys.add(`name:${rowName}`)
+          else if (row?.visitor_id) uniqueKeys.add(`visitor:${String(row.visitor_id)}`)
+        })
+
+        // Người cùng tên luôn được phép vào lại, không làm tăng số người.
+        if (sameNamedVisitor) {
+          setGuestAccessDenied(false)
+          setGuestViewerCount(uniqueKeys.size)
+
+          // Cập nhật/ghi nhận lại lượt truy cập nhưng KHÔNG áp giới hạn lần nữa.
+          // p_max_viewers = 0 ở đây vì giới hạn đã được xử lý theo tên ở phía trên.
+          const { error: rpcError } = await supabase.rpc('register_gallery_album_viewer', {
+            p_album_id: folderId,
+            p_visitor_id: guestId,
+            p_customer_name: cleanName,
+            p_max_viewers: 0,
+          })
+          if (rpcError) console.warn('Không cập nhật được lượt vào lại:', rpcError)
+
+          return { allowed: true, viewerCount: uniqueKeys.size, trackingUnavailable: Boolean(rpcError) }
+        }
+
+        // Tên mới: chỉ chặn khi số người duy nhất đã đạt giới hạn.
+        if (maxViewers > 0 && uniqueKeys.size >= maxViewers) {
+          setGuestViewerCount(uniqueKeys.size)
+          setGuestAccessDenied(true)
+          return { allowed: false, viewerCount: uniqueKeys.size, trackingUnavailable: false }
+        }
+
+        // Tên mới còn chỗ: ghi nhận lượt vào. Không truyền max để tránh RPC đếm
+        // theo visitor_id thay vì tên, vì giới hạn của album này là giới hạn theo tên.
+        const { data, error } = await supabase.rpc('register_gallery_album_viewer', {
+          p_album_id: folderId,
+          p_visitor_id: guestId,
+          p_customer_name: cleanName,
+          p_max_viewers: 0,
+        })
+
+        if (error) throw error
+
+        const result = Array.isArray(data) ? data[0] : data
+        const reportedCount = Number(result?.viewer_count || 0)
+        const nextRows = [...(existingRows || []), { visitor_id: guestId, customer_name: cleanName }]
+        const nextUniqueKeys = new Set<string>()
+        nextRows.forEach((row: any) => {
+          const rowName = normalizeGuestName(String(row?.customer_name || ''))
+          if (rowName) nextUniqueKeys.add(`name:${rowName}`)
+          else if (row?.visitor_id) nextUniqueKeys.add(`visitor:${String(row.visitor_id)}`)
+        })
+        const viewerCount = nextUniqueKeys.size || reportedCount
+        setGuestAccessDenied(false)
+        setGuestViewerCount(viewerCount)
+        return { allowed: true, viewerCount, trackingUnavailable: false }
+      }
+
+      // Album không thu thập tên: giữ nguyên cơ chế theo visitor_id hiện tại.
       const { data, error } = await supabase.rpc('register_gallery_album_viewer', {
         p_album_id: folderId,
         p_visitor_id: guestId,
-        p_customer_name: customerName.trim(),
+        p_customer_name: cleanName,
         p_max_viewers: maxViewers,
       })
 
@@ -411,13 +492,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
       if (!allowed) {
         setGuestAccessDenied(true)
+      } else {
+        setGuestAccessDenied(false)
       }
 
       return { allowed, viewerCount, trackingUnavailable: false }
     } catch (e) {
       // Không để lỗi hệ thống theo dõi người xem làm album share bị trắng.
       // Nếu RPC không tồn tại/chưa có policy, khách vẫn phải xem được album.
-      // Khi có giới hạn người xem, việc giới hạn sẽ được giao cho backend khi RPC hoạt động.
+      // Với album có giới hạn theo tên, chỉ lỗi thực sự khi không thể kiểm tra
+      // danh sách người xem; trong trường hợp này vẫn giữ khả năng xem album.
       console.warn('Không ghi nhận được lượt xem album:', e)
       return { allowed: true, viewerCount: 0, trackingUnavailable: true }
     }
@@ -529,11 +613,26 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const deleteViewerRecords = async (albumId?: string) => {
     try {
-      const query = supabase.from('gallery_album_visitors').delete()
-      const { error } = albumId
-        ? await query.eq('album_id', albumId)
-        : await query.neq('album_id', '__never__')
-      if (error) throw error
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) {
+        throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
+      }
+
+      const res = await fetch('/api/admin/delete-viewers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(albumId ? { albumId } : {}),
+      })
+
+      const result = await res.json().catch(() => ({}))
+      if (!res.ok || !result?.ok) {
+        throw new Error(result?.error || `Không thể xóa người xem (HTTP ${res.status})`)
+      }
+
       await fetchNotifications()
       setGuestViewerCount(0)
       alert(albumId ? 'Đã xóa số lượng người xem của album này.' : 'Đã xóa toàn bộ số lượng người xem.')
