@@ -1,11 +1,22 @@
+import { Metadata } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import GalleryClient from '@/app/gallery/GalleryClient'
 
-export const dynamic = 'force-dynamic'
-export const revalidate = 0
+interface Props {
+  params: Promise<{ id: string }> | { id: string }
+}
 
-interface ShortPageProps {
-  params: Promise<{ id: string }>
+const getSecretKey = () =>
+  process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+
+const extractDriveId = (url: string) => {
+  if (!url) return ''
+  const clean = url.trim()
+  const matchFolder = clean.match(/folders\/([a-zA-Z0-9_-]+)/)
+  if (matchFolder && matchFolder[1]) return matchFolder[1]
+  const matchFile = clean.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  if (matchFile && matchFile[1]) return matchFile[1]
+  return clean.replace(/[^a-zA-Z0-9_-]/g, '')
 }
 
 const toNumericCode = (str: string) => {
@@ -19,109 +30,99 @@ const toNumericCode = (str: string) => {
   return String(Math.abs(hash) % 900000 + 100000)
 }
 
-const extractDriveId = (url: string) => {
-  if (!url) return ''
-  const clean = url.trim()
-  const matchD = clean.match(/\/d\/([a-zA-Z0-9_-]+)/)
-  if (matchD && matchD[1]) return matchD[1]
-  const matchIdParam = clean.match(/[?&]id=([a-zA-Z0-9_-]+)/)
-  if (matchIdParam && matchIdParam[1]) return matchIdParam[1]
-  const matchFolders = clean.match(/folders\/([a-zA-Z0-9_-]+)/)
-  if (matchFolders && matchFolders[1]) return matchFolders[1]
-  return clean.replace(/[^a-zA-Z0-9_-]/g, '')
-}
+// HÀM TẠO THUMBNAIL OPEN GRAPH ĐỂ GỬI LINK HIỆN ẢNH BÌA
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const resolvedParams = await Promise.resolve(params)
+  const sharedId = String(resolvedParams.id || '').trim()
 
-export async function generateMetadata({ params }: ShortPageProps) {
-  const { id: inputCode } = await params
-  let targetTitle = ''
-  let coverImageDriveId = ''
-  let targetRealId = inputCode
-  const baseUrl = 'https://dinhthong-gallery.vercel.app'
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const secretKey = getSecretKey()
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
+  let title = 'DinhThong Gallery'
+  let coverUrl = ''
 
-  // 1. Quét ảnh bìa từ bảng custom_covers
-  const { data: allCovers } = await supabase.from('custom_covers').select('id, cover_url')
-  if (allCovers) {
-    const matched = allCovers.find(c => c.id === inputCode || toNumericCode(c.id) === inputCode)
-    if (matched?.cover_url) {
-      coverImageDriveId = extractDriveId(matched.cover_url)
-      targetRealId = matched.id
-    }
-  }
+  if (supabaseUrl && secretKey && sharedId) {
+    try {
+      const admin = createClient(supabaseUrl, secretKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
 
-  // 2. Quét tên từ custom_item_names
-  const { data: allNames } = await supabase.from('custom_item_names').select('id, custom_name')
-  if (allNames) {
-    const matched = allNames.find(n => n.id === inputCode || toNumericCode(n.id) === inputCode || n.id === targetRealId)
-    if (matched?.custom_name) {
-      targetTitle = matched.custom_name
-    }
-  }
+      // 1. Tìm thông tin trong albums
+      const { data: albums } = await admin.from('albums').select('id, title, cover_url, drive_url')
+      let matched = (albums || []).find((a: any) => 
+        String(a.id) === sharedId || 
+        toNumericCode(String(a.id)) === sharedId || 
+        extractDriveId(a.drive_url) === sharedId
+      )
 
-  // 3. Quét bảng albums
-  if (!targetTitle || !coverImageDriveId) {
-    const { data: allAlbums } = await supabase.from('albums').select('id, title, cover_url')
-    if (allAlbums) {
-      const matched = allAlbums.find(a => a.id === inputCode || toNumericCode(a.id) === inputCode || a.id === targetRealId)
       if (matched) {
-        if (!targetTitle) targetTitle = matched.title
-        if (!coverImageDriveId && matched.cover_url) {
-          coverImageDriveId = extractDriveId(matched.cover_url)
+        title = matched.title || title
+        coverUrl = matched.cover_url || ''
+      }
+
+      // 2. Nếu là thư mục con, tìm trong known_drive_folders & custom_covers
+      if (!matched) {
+        const { data: knownRows } = await admin.from('known_drive_folders').select('id, name')
+        const matchedFolder = (knownRows || []).find((f: any) => 
+          String(f.id) === sharedId || toNumericCode(String(f.id)) === sharedId
+        )
+
+        if (matchedFolder) {
+          title = matchedFolder.name || title
+          const targetFolderId = String(matchedFolder.id)
+          const { data: customCover } = await admin
+            .from('custom_covers')
+            .select('cover_url')
+            .eq('id', targetFolderId)
+            .single()
+
+          if (customCover?.cover_url) {
+            coverUrl = customCover.cover_url
+          }
         }
       }
+    } catch (e) {
+      console.warn('Lỗi lấy metadata thumbnail:', e)
     }
   }
 
-  // 4. Quét bảng known_drive_folders
-  if (!targetTitle) {
-    const { data: allKnown } = await supabase.from('known_drive_folders').select('id, name')
-    if (allKnown) {
-      const matched = allKnown.find(k => k.id === inputCode || toNumericCode(k.id) === inputCode || k.id === targetRealId)
-      if (matched?.name) {
-        targetTitle = matched.name
-      }
+  // Chuẩn hóa định dạng ảnh để Zalo/Facebook/Messenger đọc được
+  let ogImageUrl = '/banner.jpg'
+  if (coverUrl) {
+    const driveId = extractDriveId(coverUrl)
+    if (driveId) {
+      // Dùng link thumbnail khổ lớn công khai chuẩn của Google CDN
+      ogImageUrl = `https://lh3.googleusercontent.com/d/${driveId}=w1200-h630-p-k-no`
+    } else {
+      ogImageUrl = coverUrl
     }
   }
-
-  const finalTitle = targetTitle 
-    ? `${targetTitle} - Dinh Thong Gallery` 
-    : 'Dinh Thong Gallery'
-
-  const directImageUrl = coverImageDriveId 
-    ? `https://lh3.googleusercontent.com/d/${coverImageDriveId}` 
-    : `${baseUrl}/banner.jpg`
 
   return {
-    title: finalTitle,
-    description: 'Khoảnh khắc lưu giữ cảm xúc',
-    metadataBase: new URL(baseUrl),
+    title: `${title} - DinhThong Gallery`,
+    description: `Xem và chọn ảnh chất lượng cao trong album ${title}`,
     openGraph: {
-      type: 'website',
-      url: `${baseUrl}/s/${inputCode}`,
-      title: finalTitle,
-      description: 'Khoảnh khắc lưu giữ cảm xúc',
-      siteName: 'Dinh Thong Gallery',
+      title: `${title} - DinhThong Gallery`,
+      description: `Xem và chọn ảnh chất lượng cao trong album ${title}`,
       images: [
         {
-          url: directImageUrl,
-          secureUrl: directImageUrl,
-          alt: finalTitle,
+          url: ogImageUrl,
+          width: 1200,
+          height: 630,
+          alt: title,
         },
       ],
+      type: 'website',
     },
     twitter: {
       card: 'summary_large_image',
-      title: finalTitle,
-      description: 'Khoảnh khắc lưu giữ cảm xúc',
-      images: [directImageUrl],
+      title: `${title} - DinhThong Gallery`,
+      description: `Xem và chọn ảnh chất lượng cao trong album ${title}`,
+      images: [ogImageUrl],
     },
   }
 }
 
-export default function ShortLinkPage() {
+export default async function SharedAlbumPage({ params }: Props) {
   return <GalleryClient />
 }
