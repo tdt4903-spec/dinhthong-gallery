@@ -70,7 +70,8 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
-const CLOUDFLARE_WORKER_URL = process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || "https://video-proxy.dinhthong.workers.dev"
+// Domain Cloudflare Worker (hoặc đặt biến NEXT_PUBLIC_MEDIA_PROXY_URL / NEXT_PUBLIC_VIDEO_PROXY_URL)
+const MEDIA_PROXY_URL = process.env.NEXT_PUBLIC_MEDIA_PROXY_URL || process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || ""
 
 const extractDriveId = (url: string) => {
   if (!url) return ''
@@ -169,15 +170,21 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// TẢI VIDEO QUA CLOUDFLARE WORKER /video ĐỂ STREAM TRỰC TIẾP, KHÔNG NHẢY QUA TAB DRIVE
+// 1. TẢI VIDEO: ƯU TIÊN WORKER /video, NẾU CHƯA CÓ DÙNG /api/drive?action=download (KHÔNG NHẢY QUA TAB QUÉT VIRUS)
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  const directUrl = `${CLOUDFLARE_WORKER_URL.replace(/\/+$/, '')}/video?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+  let downloadUrl = ''
+
+  if (MEDIA_PROXY_URL && !MEDIA_PROXY_URL.includes('dinhthong.workers.dev')) {
+    downloadUrl = `${MEDIA_PROXY_URL.replace(/\/+$/, '')}/video?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+  } else {
+    // Gọi API Drive chính thống alt=media, Google Drive API không bao giờ hiển thị trang quét virus
+    downloadUrl = `/api/drive?action=download&id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+  }
 
   const link = document.createElement('a')
-  link.href = directUrl
-  link.download = fileName
+  link.href = downloadUrl
+  link.setAttribute('download', fileName)
   link.style.display = 'none'
-  link.setAttribute('aria-hidden', 'true')
   document.body.appendChild(link)
   link.click()
 
@@ -185,7 +192,7 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
     if (document.body.contains(link)) {
       document.body.removeChild(link)
     }
-  }, 1500)
+  }, 2000)
 }
 
 interface GalleryClientProps {
@@ -322,7 +329,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const currentActiveFolderId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
   const currentActiveFolderTitle = customNames[currentActiveFolderId] || (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : (selectedAlbum?.title || ''))
 
-  // ID Gốc của link chia sẻ để đếm khách chuẩn xác duy nhất 1 lần
   const guestRootAlbumId = selectedAlbum?.id || currentActiveFolderId
 
   const activeSetting: FolderSettings = folderSettingsMap[currentActiveFolderId] || {
@@ -402,7 +408,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return null
   }
 
-  // Tự động dọn dẹp hàng tháng vào ngày 30
   useEffect(() => {
     if (isSharedGuest) return
 
@@ -1252,6 +1257,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     URL.revokeObjectURL(url)
   }
 
+  // 2. TẢI ẢNH ĐƠN / VIDEO:
+  // - Video: Chạy qua Worker hoặc API /api/drive?action=download (không bao giờ hiện cảnh báo virus)
+  // - Ảnh: Chạy qua /api/drive?action=download với Drive API alt=media chuẩn (không bao giờ lỗi 500, không bị chặn CORS)
+  // - Mobile: Hộp thoại hệ thống "Lưu hình ảnh"
+  // - PC: saveAs lưu trực tiếp, tuyệt đối không nhảy tab
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1265,17 +1275,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
 
-      // 1. VIDEO: Tải qua Cloudflare Worker /video
+      // Nếu là video: tải qua luồng video
       if (item.type === 'video') {
         triggerDirectBrowserDownload(item.id, exactFileName)
         setDownloadingId(null)
         return
       }
 
-      // 2. HÌNH ẢNH: Tải trực tiếp qua Google CDN (=d buộc download nhanh)
-      const directGoogleImageUrl = `https://lh3.googleusercontent.com/d/${item.id}=d`
-      const res = await fetch(directGoogleImageUrl)
-      if (!res.ok) throw new Error('Fetch image failed')
+      // Tải ảnh qua API /api/drive với action=download chuẩn
+      const downloadEndpoint = `/api/drive?action=download&id=${encodeURIComponent(item.id)}&name=${encodeURIComponent(exactFileName)}`
+      const res = await fetch(downloadEndpoint)
+      if (!res.ok) throw new Error(`Máy chủ không thể lấy ảnh (HTTP ${res.status})`)
       
       let blob = await res.blob()
 
@@ -1285,24 +1295,34 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
       const fileObj = new File([blob], exactFileName, { type: 'image/jpeg' })
 
+      // Trên Điện thoại (iOS / Android): Mở menu "Lưu hình ảnh"
       if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
-        await navigator.share({
-          files: [fileObj],
-          title: exactFileName,
-        })
-        setDownloadingId(null)
-        return
+        try {
+          await navigator.share({
+            files: [fileObj],
+            title: exactFileName,
+          })
+          setDownloadingId(null)
+          return
+        } catch (shareErr: any) {
+          if (shareErr.name === 'AbortError') {
+            setDownloadingId(null)
+            return
+          }
+        }
       }
 
+      // Trên Máy tính: Lưu thẳng về máy, không mở tab mới
       saveAs(blob, exactFileName)
-    } catch (err) {
-      console.error('Lỗi khi tải:', err)
-      window.open(`https://lh3.googleusercontent.com/d/${item.id}=d`, '_blank')
+    } catch (err: any) {
+      console.error('Lỗi khi tải ảnh:', err)
+      alert('Có lỗi xảy ra khi tải ảnh: ' + (err?.message || err))
     } finally {
       setDownloadingId(null)
     }
   }
 
+  // 3. NÉN TOÀN BỘ ALBUM ZIP QUA API DRIVE ALT=MEDIA (KHÔNG LỖI 500, KHÔNG DÍNH CORS)
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1337,6 +1357,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const videoFiles = targetFiles.filter(f => f.type === 'video')
       const imageFiles = targetFiles.filter(f => f.type === 'image')
 
+      // Video tải tuần tự qua luồng video
       if (videoFiles.length > 0) {
         for (let i = 0; i < videoFiles.length; i++) {
           const v = videoFiles[i]
@@ -1347,17 +1368,18 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         }
       }
 
+      // Nén ảnh bằng API /api/drive?action=download
       if (imageFiles.length > 0) {
         const zip = new JSZip()
         const total = imageFiles.length
         let completedCount = 0
 
-        const CONCURRENCY_LIMIT = 8
+        const CONCURRENCY_LIMIT = 5
         const fetchImage = async (fileItem: MediaItem) => {
           const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
           try {
-            const directUrl = `https://lh3.googleusercontent.com/d/${fileItem.id}=d`
-            const res = await fetch(directUrl)
+            const downloadEndpoint = `/api/drive?action=download&id=${encodeURIComponent(fileItem.id)}&name=${encodeURIComponent(exactFileName)}`
+            const res = await fetch(downloadEndpoint)
             if (res.ok) {
               let blob = await res.blob()
               if (activeSetting.enable_watermark) {
@@ -1431,12 +1453,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           const total = imageFiles.length
           let completedCount = 0
 
-          const CONCURRENCY_LIMIT = 8
+          const CONCURRENCY_LIMIT = 5
           const fetchImage = async (fileItem: MediaItem) => {
             const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
             try {
-              const directUrl = `https://lh3.googleusercontent.com/d/${fileItem.id}=d`
-              const res = await fetch(directUrl)
+              const downloadEndpoint = `/api/drive?action=download&id=${encodeURIComponent(fileItem.id)}&name=${encodeURIComponent(exactFileName)}`
+              const res = await fetch(downloadEndpoint)
               if (res.ok) {
                 let blob = await res.blob()
                 if (activeSetting.enable_watermark) {
