@@ -401,6 +401,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return null
   }
 
+  // Tự động dọn dẹp hàng tháng vào ngày 30
   useEffect(() => {
     if (isSharedGuest) return
 
@@ -1264,7 +1265,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
 
-      // VIDEO: Chạy qua Cloudflare Worker /video
+      // VIDEO: 100% qua Cloudflare Worker /video
       if (item.type === 'video') {
         triggerDirectBrowserDownload(item.id, exactFileName)
         setDownloadingId(null)
