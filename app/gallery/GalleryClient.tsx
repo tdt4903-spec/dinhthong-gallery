@@ -70,8 +70,8 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
-// Domain Cloudflare Worker (hoặc đặt biến NEXT_PUBLIC_MEDIA_PROXY_URL / NEXT_PUBLIC_VIDEO_PROXY_URL)
-const MEDIA_PROXY_URL = process.env.NEXT_PUBLIC_MEDIA_PROXY_URL || process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || ""
+// Domain Cloudflare Worker thực tế của bạn
+const VIDEO_WORKER_BASE = 'https://dinhthong-video-proxy.tdt4903.workers.dev'
 
 const extractDriveId = (url: string) => {
   if (!url) return ''
@@ -170,16 +170,9 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// 1. TẢI VIDEO: ƯU TIÊN WORKER /video, NẾU CHƯA CÓ DÙNG /api/drive?action=download (KHÔNG NHẢY QUA TAB QUÉT VIRUS)
+// 1. TẢI VIDEO: 100% ĐI THẲNG QUA CLOUDFLARE WORKER /video (KHÔNG QUA VERCEL)
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
-  let downloadUrl = ''
-
-  if (MEDIA_PROXY_URL && !MEDIA_PROXY_URL.includes('dinhthong.workers.dev')) {
-    downloadUrl = `${MEDIA_PROXY_URL.replace(/\/+$/, '')}/video?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
-  } else {
-    // Gọi API Drive chính thống alt=media, Google Drive API không bao giờ hiển thị trang quét virus
-    downloadUrl = `/api/drive?action=download&id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
-  }
+  const downloadUrl = `${VIDEO_WORKER_BASE}/video?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
 
   const link = document.createElement('a')
   link.href = downloadUrl
@@ -1257,11 +1250,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     URL.revokeObjectURL(url)
   }
 
-  // 2. TẢI ẢNH ĐƠN / VIDEO:
-  // - Video: Chạy qua Worker hoặc API /api/drive?action=download (không bao giờ hiện cảnh báo virus)
-  // - Ảnh: Chạy qua /api/drive?action=download với Drive API alt=media chuẩn (không bao giờ lỗi 500, không bị chặn CORS)
-  // - Mobile: Hộp thoại hệ thống "Lưu hình ảnh"
-  // - PC: saveAs lưu trực tiếp, tuyệt đối không nhảy tab
+  // 2. TẢI ẢNH ĐƠN (ĐIỆN THOẠI HIỆN POPUP LƯU ẢNH, MÁY TÍNH TẢI VỀ MÁY, KHÔNG NHẢY TAB)
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1275,14 +1264,15 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
 
-      // Nếu là video: tải qua luồng video
+      // VIDEO: Chạy qua Cloudflare Worker /video
       if (item.type === 'video') {
         triggerDirectBrowserDownload(item.id, exactFileName)
         setDownloadingId(null)
         return
       }
 
-      // Tải ảnh qua API /api/drive với action=download chuẩn
+      // HÌNH ẢNH: Sử dụng API /api/drive?action=download chuẩn của Drive API (alt=media)
+      // Không bị lỗi 500 của /api/download cũ và không bị chặn CORS
       const downloadEndpoint = `/api/drive?action=download&id=${encodeURIComponent(item.id)}&name=${encodeURIComponent(exactFileName)}`
       const res = await fetch(downloadEndpoint)
       if (!res.ok) throw new Error(`Máy chủ không thể lấy ảnh (HTTP ${res.status})`)
@@ -1295,7 +1285,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
       const fileObj = new File([blob], exactFileName, { type: 'image/jpeg' })
 
-      // Trên Điện thoại (iOS / Android): Mở menu "Lưu hình ảnh"
+      // Trên Điện thoại: Mở hộp thoại hệ thống để chọn "Lưu hình ảnh"
       if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
         try {
           await navigator.share({
@@ -1312,7 +1302,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         }
       }
 
-      // Trên Máy tính: Lưu thẳng về máy, không mở tab mới
+      // Trên Máy tính: Tự động lưu về ổ cứng, không bao giờ mở tab mới
       saveAs(blob, exactFileName)
     } catch (err: any) {
       console.error('Lỗi khi tải ảnh:', err)
@@ -1322,7 +1312,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  // 3. NÉN TOÀN BỘ ALBUM ZIP QUA API DRIVE ALT=MEDIA (KHÔNG LỖI 500, KHÔNG DÍNH CORS)
+  // 3. NÉN TOÀN BỘ ALBUM ZIP QUA API DRIVE ALT=MEDIA
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1357,7 +1347,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const videoFiles = targetFiles.filter(f => f.type === 'video')
       const imageFiles = targetFiles.filter(f => f.type === 'image')
 
-      // Video tải tuần tự qua luồng video
+      // Video tải trực tiếp qua Cloudflare Worker
       if (videoFiles.length > 0) {
         for (let i = 0; i < videoFiles.length; i++) {
           const v = videoFiles[i]
@@ -1368,7 +1358,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         }
       }
 
-      // Nén ảnh bằng API /api/drive?action=download
+      // Nén ảnh bằng luồng Drive API alt=media
       if (imageFiles.length > 0) {
         const zip = new JSZip()
         const total = imageFiles.length
@@ -2410,7 +2400,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
             const fallbackAlbum: Album = {
               id: resolved.id,
-              title: resolved.title || 'DinhThong Album',
+              title: resolved.title || getNotificationTitle(resolved.id),
               coverUrl: '',
               driveUrl: resolved.driveUrl,
             }
@@ -4106,7 +4096,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     value={editingFolderSetting.max_viewers || 0}
                     onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, max_viewers: Math.max(0, Number(e.target.value)) })}
                     placeholder="0 = Không giới hạn"
-                    className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}
+                    className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
                   />
                 </div>
               </div>
