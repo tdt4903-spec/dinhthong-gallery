@@ -70,7 +70,7 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
-// Domain Cloudflare Worker video proxy của bạn
+// Domain Cloudflare Worker thực tế của bạn
 const VIDEO_WORKER_BASE = 'https://dinhthong-video-proxy.tdt4903.workers.dev'
 
 const extractDriveId = (url: string) => {
@@ -170,7 +170,7 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// 1. TẢI VIDEO: 100% QUA CLOUDFLARE WORKER /video (KHÔNG QUA VERCEL)
+// 1. TẢI VIDEO: 100% ĐI QUA CLOUDFLARE WORKER /video (KHÔNG QUA VERCEL)
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
   const downloadUrl = `${VIDEO_WORKER_BASE}/video?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
 
@@ -401,7 +401,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return null
   }
 
-  // Tự động dọn dẹp hàng tháng vào ngày 30
   useEffect(() => {
     if (isSharedGuest) return
 
@@ -1251,7 +1250,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     URL.revokeObjectURL(url)
   }
 
-  // 2. TẢI ẢNH ĐƠN: ĐIỆN THOẠI BẬT BẢNG CHIA SẺ LƯU HÌNH ẢNH, MÁY TÍNH TẢI TRỰC TIẾP[cite: 1]
+  // 2. TẢI ẢNH ĐƠN
+  // Mobile: ưu tiên Web Share để iPhone/iPad hiện bảng hệ thống có "Lưu hình ảnh".
+  // Desktop: giữ nguyên tải file trực tiếp bằng file-saver.
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1265,67 +1266,67 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
 
-      // VIDEO: 100% qua Cloudflare Worker /video
+      // VIDEO: giữ nguyên cơ chế Cloudflare Worker hiện tại.
       if (item.type === 'video') {
         triggerDirectBrowserDownload(item.id, exactFileName)
-        setDownloadingId(null)
         return
       }
 
-      // Nhận diện chuẩn xác thiết bị di động (iOS / Android)[cite: 1]
-      const isMobile = typeof navigator !== 'undefined' && (
-        /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) ||
-        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-      )
-
+      // ẢNH: lấy blob qua API hiện tại để không thay đổi luồng desktop/CORS.
       const downloadEndpoint = `/api/drive?action=download&id=${encodeURIComponent(item.id)}&name=${encodeURIComponent(exactFileName)}`
+      const res = await fetch(downloadEndpoint, { cache: 'no-store' })
+      if (!res.ok) throw new Error(`Máy chủ không thể lấy ảnh (HTTP ${res.status})`)
 
-      // TRÊN ĐIỆN THOẠI: Lấy blob để mở bảng chia sẻ iOS / Android -> Bấm "Lưu hình ảnh" lưu thẳng vào Thư viện ảnh[cite: 1]
-      if (isMobile) {
+      let blob = await res.blob()
+      if (activeSetting.enable_watermark) {
+        blob = await applyWatermarkToImageBlob(blob)
+      }
+
+      const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+      const isiOS = /iPad|iPhone|iPod/i.test(ua) ||
+        (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      const isAndroid = /Android/i.test(ua)
+      const isMobile = isiOS || isAndroid
+
+      if (isMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        // Safari/iOS nhận diện mục "Lưu hình ảnh" ổn định hơn khi File có MIME ảnh thật.
+        const lowerName = exactFileName.toLowerCase()
+        const mime = lowerName.endsWith('.png') ? 'image/png'
+          : lowerName.endsWith('.webp') ? 'image/webp'
+          : lowerName.endsWith('.heic') || lowerName.endsWith('.heif') ? 'image/heic'
+          : 'image/jpeg'
+
+        const shareBlob = blob.type && blob.type.startsWith('image/')
+          ? blob
+          : new Blob([blob], { type: mime })
+        const imageFile = new File([shareBlob], exactFileName, { type: mime, lastModified: Date.now() })
+
         try {
-          const res = await fetch(downloadEndpoint)
-          if (!res.ok) throw new Error(`HTTP ${res.status}`)
-          let blob = await res.blob()
-
-          if (activeSetting.enable_watermark) {
-            blob = await applyWatermarkToImageBlob(blob)
-          }
-
-          const fileObj = new File([blob], exactFileName, { type: 'image/jpeg' })
-
-          if (typeof navigator.canShare === 'function' && navigator.canShare({ files: [fileObj] })) {
-            await navigator.share({
-              files: [fileObj],
-              title: exactFileName,
-            })
-            setDownloadingId(null)
-            return
-          }
+          // Không bắt buộc canShare: một số trình duyệt iOS hỗ trợ share(files)
+          // nhưng canShare trả false/không nhất quán.
+          await navigator.share({ files: [imageFile] })
+          return
         } catch (shareErr: any) {
-          if (shareErr.name === 'AbortError') {
-            setDownloadingId(null)
-            return
-          }
+          if (shareErr?.name === 'AbortError') return
+          console.warn('Không mở được bảng Lưu hình ảnh của hệ thống:', shareErr)
+
+          // Trên mobile tuyệt đối không rơi xuống saveAs(), vì iOS sẽ hiện
+          // popup "Bạn có muốn tải về ..." như ảnh lỗi người dùng gửi.
+          // Fallback: mở chính ảnh để người dùng có thể giữ ảnh và chọn Lưu vào Ảnh.
+          const objectUrl = URL.createObjectURL(shareBlob)
+          const opened = window.open(objectUrl, '_blank')
+          if (!opened) window.location.href = objectUrl
+          window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+          return
         }
       }
 
-      // TRÊN MÁY TÍNH: Tải trực tiếp về thư mục Downloads[cite: 1]
-      const link = document.createElement('a')
-      link.href = downloadEndpoint
-      link.setAttribute('download', exactFileName)
-      link.style.display = 'none'
-      document.body.appendChild(link)
-      link.click()
-
-      window.setTimeout(() => {
-        if (document.body.contains(link)) {
-          document.body.removeChild(link)
-        }
-        setDownloadingId(null)
-      }, 2000)
+      // Desktop giữ nguyên hành vi đang hoạt động tốt.
+      saveAs(blob, exactFileName)
     } catch (err: any) {
       console.error('Lỗi khi tải ảnh:', err)
       alert('Có lỗi xảy ra khi tải ảnh: ' + (err?.message || err))
+    } finally {
       setDownloadingId(null)
     }
   }
@@ -4001,9 +4002,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               ) : notificationTab === 'full' ? (
                 notificationItems.filter(item => item.full).map(item => (
                   <button key={`full-${item.albumId}`} type="button" onClick={() => openNotificationAlbum(item)} className={`w-full text-left p-4 rounded-2xl border transition ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-100 hover:bg-emerald-50'}`}>
-                    <div className="min-w-0"><div className="font-semibold text-sm truncate">{item.title}</div><div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Khách{item.fullData?.guestLabel ? ` ${item.fullData.guestLabel}` : ''} đã chọn đủ ảnh</div></div>
-                    <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">{item.fullData?.chosen || 0}/{item.fullData?.max || 0}</span>
-                  </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0"><div className="font-semibold text-sm truncate">{item.title}</div><div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Khách{item.fullData?.guestLabel ? ` ${item.fullData.guestLabel}` : ''} đã chọn đủ ảnh</div></div>
+                      <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">{item.fullData?.chosen || 0}/{item.fullData?.max || 0}</span>
+                    </div>
+                  </button>
                 ))
               ) : (
                 notificationItems.flatMap(item => (item.joined || []).map((guest: any, idx: number) => ({ ...guest, albumId: item.albumId, title: item.title, key: `${item.albumId}-${guest.joinedAt}-${idx}` }))).map((guest: any) => (
