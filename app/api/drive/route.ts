@@ -40,6 +40,22 @@ export async function GET(request: NextRequest) {
   const action = request.nextUrl.searchParams.get('action')
   const fileIdParam = request.nextUrl.searchParams.get('id')
 
+  // DOWNLOAD FILE QUA VERCEL ĐÃ BỊ VÔ HIỆU HÓA.
+  // Ảnh/video phải đi qua Cloudflare Worker.
+  if (action === 'download') {
+    return NextResponse.json(
+      {
+        error: 'Download through Vercel is disabled. Use Cloudflare Worker.'
+      },
+      {
+        status: 410,
+        headers: {
+          'Cache-Control': 'no-store'
+        }
+      }
+    )
+  }
+
   // ============================================================
   // DOWNLOAD PROXY
   // Browser -> /api/drive -> Google Drive API (alt=media)
