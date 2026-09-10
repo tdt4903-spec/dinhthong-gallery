@@ -52,8 +52,11 @@ export default {
       })
     }
 
-    // Chỉ xử lý endpoint /video
-    if (url.pathname !== '/video') {
+    // Hỗ trợ cả ảnh và video
+    const isVideo = url.pathname === '/video'
+    const isImage = url.pathname === '/image'
+
+    if (!isVideo && !isImage) {
       return new Response('Not Found', {
         status: 404,
       })
