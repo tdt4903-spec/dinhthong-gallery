@@ -170,7 +170,7 @@ const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG 
   })
 }
 
-// 1. TẢI VIDEO: 100% ĐI THẲNG QUA CLOUDFLARE WORKER /video (KHÔNG QUA VERCEL)
+// 1. TẢI VIDEO: 100% ĐI QUA CLOUDFLARE WORKER /video (KHÔNG QUA VERCEL)
 const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
   const downloadUrl = `${VIDEO_WORKER_BASE}/video?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
 
@@ -401,7 +401,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return null
   }
 
-  // Tự động dọn dẹp hàng tháng vào ngày 30
   useEffect(() => {
     if (isSharedGuest) return
 
@@ -1251,7 +1250,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     URL.revokeObjectURL(url)
   }
 
-  // 2. TẢI ẢNH ĐƠN (ĐIỆN THOẠI HIỆN POPUP LƯU ẢNH, MÁY TÍNH TẢI VỀ MÁY, KHÔNG NHẢY TAB)
+  // 2. TẢI ẢNH ĐƠN (ĐIỆN THOẠI HIỆN POPUP LƯU ẢNH, MÁY TÍNH TẢI VỀ MÁY, KHÔNG BẬT MENU AIRDROP/SHARE)[cite: 1]
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1272,8 +1271,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         return
       }
 
-      // HÌNH ẢNH: Sử dụng API /api/drive?action=download chuẩn của Drive API (alt=media)
-      // Không bị lỗi 500 của /api/download cũ và không bị chặn CORS
+      // HÌNH ẢNH: Tải qua API /api/drive?action=download chuẩn để tránh lỗi 500 và chặn CORS
       const downloadEndpoint = `/api/drive?action=download&id=${encodeURIComponent(item.id)}&name=${encodeURIComponent(exactFileName)}`
       const res = await fetch(downloadEndpoint)
       if (!res.ok) throw new Error(`Máy chủ không thể lấy ảnh (HTTP ${res.status})`)
@@ -1284,26 +1282,33 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         blob = await applyWatermarkToImageBlob(blob)
       }
 
-      const fileObj = new File([blob], exactFileName, { type: 'image/jpeg' })
+      // Nhận diện chuẩn xác điện thoại/máy tính bảng[cite: 1]
+      const isMobile = typeof navigator !== 'undefined' && (
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      )
 
-      // Trên Điện thoại: Mở hộp thoại hệ thống để chọn "Lưu hình ảnh"
-      if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
-        try {
-          await navigator.share({
-            files: [fileObj],
-            title: exactFileName,
-          })
-          setDownloadingId(null)
-          return
-        } catch (shareErr: any) {
-          if (shareErr.name === 'AbortError') {
+      // CHỈ TRÊN ĐIỆN THOẠI: Mở bảng chia sẻ hệ thống để chọn "Lưu hình ảnh"[cite: 1]
+      if (isMobile && typeof navigator.canShare === 'function') {
+        const fileObj = new File([blob], exactFileName, { type: 'image/jpeg' })
+        if (navigator.canShare({ files: [fileObj] })) {
+          try {
+            await navigator.share({
+              files: [fileObj],
+              title: exactFileName,
+            })
             setDownloadingId(null)
             return
+          } catch (shareErr: any) {
+            if (shareErr.name === 'AbortError') {
+              setDownloadingId(null)
+              return
+            }
           }
         }
       }
 
-      // Trên Máy tính: Tự động lưu về ổ cứng, không bao giờ mở tab mới
+      // TRÊN MÁY TÍNH (Windows / Mac): Tải thẳng file về máy không qua menu AirDrop[cite: 1]
       saveAs(blob, exactFileName)
     } catch (err: any) {
       console.error('Lỗi khi tải ảnh:', err)
