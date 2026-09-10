@@ -73,6 +73,10 @@ const preloadedCache = new Set<string>()
 // Domain Cloudflare Worker thực tế của bạn
 const VIDEO_WORKER_BASE = 'https://dinhthong-video-proxy.tdt4903.workers.dev'
 
+// Ảnh tải xuống cũng đi qua Cloudflare Worker để không phát sinh Fast Origin Transfer trên Vercel.
+const getImageWorkerDownloadUrl = (fileId: string, fileName: string) =>
+  `${VIDEO_WORKER_BASE}/image?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+
 const extractDriveId = (url: string) => {
   if (!url) return ''
   const clean = url.trim()
@@ -1250,9 +1254,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     URL.revokeObjectURL(url)
   }
 
-  // 2. TẢI ẢNH ĐƠN
-  // Mobile: ưu tiên Web Share để iPhone/iPad hiện bảng hệ thống có "Lưu hình ảnh".
-  // Desktop: giữ nguyên tải file trực tiếp bằng file-saver.
+  // 2. TẢI ẢNH ĐƠN (ĐIỆN THOẠI HIỆN POPUP LƯU ẢNH, MÁY TÍNH TẢI VỀ MÁY, KHÔNG BẬT MENU AIRDROP/SHARE)[cite: 1]
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1266,62 +1268,51 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const ext = item.type === 'video' ? 'mp4' : 'jpg'
       const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
 
-      // VIDEO: giữ nguyên cơ chế Cloudflare Worker hiện tại.
+      // VIDEO: 100% qua Cloudflare Worker /video
       if (item.type === 'video') {
         triggerDirectBrowserDownload(item.id, exactFileName)
+        setDownloadingId(null)
         return
       }
 
-      // ẢNH: lấy blob qua API hiện tại để không thay đổi luồng desktop/CORS.
-      const downloadEndpoint = `/api/drive?action=download&id=${encodeURIComponent(item.id)}&name=${encodeURIComponent(exactFileName)}`
-      const res = await fetch(downloadEndpoint, { cache: 'no-store' })
+      // HÌNH ẢNH: tải trực tiếp qua Cloudflare Worker, không đi qua Vercel
+      const downloadEndpoint = getImageWorkerDownloadUrl(item.id, exactFileName)
+      const res = await fetch(downloadEndpoint)
       if (!res.ok) throw new Error(`Máy chủ không thể lấy ảnh (HTTP ${res.status})`)
-
+      
       let blob = await res.blob()
+
       if (activeSetting.enable_watermark) {
         blob = await applyWatermarkToImageBlob(blob)
       }
 
-      const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
-      const isiOS = /iPad|iPhone|iPod/i.test(ua) ||
-        (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-      const isAndroid = /Android/i.test(ua)
-      const isMobile = isiOS || isAndroid
+      // Nhận diện chuẩn xác điện thoại/máy tính bảng[cite: 1]
+      const isMobile = typeof navigator !== 'undefined' && (
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      )
 
-      if (isMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-        // Safari/iOS nhận diện mục "Lưu hình ảnh" ổn định hơn khi File có MIME ảnh thật.
-        const lowerName = exactFileName.toLowerCase()
-        const mime = lowerName.endsWith('.png') ? 'image/png'
-          : lowerName.endsWith('.webp') ? 'image/webp'
-          : lowerName.endsWith('.heic') || lowerName.endsWith('.heif') ? 'image/heic'
-          : 'image/jpeg'
-
-        const shareBlob = blob.type && blob.type.startsWith('image/')
-          ? blob
-          : new Blob([blob], { type: mime })
-        const imageFile = new File([shareBlob], exactFileName, { type: mime, lastModified: Date.now() })
-
-        try {
-          // Không bắt buộc canShare: một số trình duyệt iOS hỗ trợ share(files)
-          // nhưng canShare trả false/không nhất quán.
-          await navigator.share({ files: [imageFile] })
-          return
-        } catch (shareErr: any) {
-          if (shareErr?.name === 'AbortError') return
-          console.warn('Không mở được bảng Lưu hình ảnh của hệ thống:', shareErr)
-
-          // Trên mobile tuyệt đối không rơi xuống saveAs(), vì iOS sẽ hiện
-          // popup "Bạn có muốn tải về ..." như ảnh lỗi người dùng gửi.
-          // Fallback: mở chính ảnh để người dùng có thể giữ ảnh và chọn Lưu vào Ảnh.
-          const objectUrl = URL.createObjectURL(shareBlob)
-          const opened = window.open(objectUrl, '_blank')
-          if (!opened) window.location.href = objectUrl
-          window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
-          return
+      // CHỈ TRÊN ĐIỆN THOẠI: Mở bảng chia sẻ hệ thống để chọn "Lưu hình ảnh"[cite: 1]
+      if (isMobile && typeof navigator.canShare === 'function') {
+        const fileObj = new File([blob], exactFileName, { type: 'image/jpeg' })
+        if (navigator.canShare({ files: [fileObj] })) {
+          try {
+            await navigator.share({
+              files: [fileObj],
+              title: exactFileName,
+            })
+            setDownloadingId(null)
+            return
+          } catch (shareErr: any) {
+            if (shareErr.name === 'AbortError') {
+              setDownloadingId(null)
+              return
+            }
+          }
         }
       }
 
-      // Desktop giữ nguyên hành vi đang hoạt động tốt.
+      // TRÊN MÁY TÍNH (Windows / Mac): Tải thẳng file về máy không qua menu AirDrop[cite: 1]
       saveAs(blob, exactFileName)
     } catch (err: any) {
       console.error('Lỗi khi tải ảnh:', err)
@@ -1377,7 +1368,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         }
       }
 
-      // Nén ảnh bằng luồng Drive API alt=media
+      // Nén ảnh: lấy dữ liệu qua Cloudflare Worker, không đi qua Vercel
       if (imageFiles.length > 0) {
         const zip = new JSZip()
         const total = imageFiles.length
@@ -1387,7 +1378,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         const fetchImage = async (fileItem: MediaItem) => {
           const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
           try {
-            const downloadEndpoint = `/api/drive?action=download&id=${encodeURIComponent(fileItem.id)}&name=${encodeURIComponent(exactFileName)}`
+            const downloadEndpoint = getImageWorkerDownloadUrl(fileItem.id, exactFileName)
             const res = await fetch(downloadEndpoint)
             if (res.ok) {
               let blob = await res.blob()
@@ -1466,7 +1457,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           const fetchImage = async (fileItem: MediaItem) => {
             const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
             try {
-              const downloadEndpoint = `/api/drive?action=download&id=${encodeURIComponent(fileItem.id)}&name=${encodeURIComponent(exactFileName)}`
+              const downloadEndpoint = getImageWorkerDownloadUrl(fileItem.id, exactFileName)
               const res = await fetch(downloadEndpoint)
               if (res.ok) {
                 let blob = await res.blob()
