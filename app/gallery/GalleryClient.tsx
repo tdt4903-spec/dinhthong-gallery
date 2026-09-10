@@ -305,6 +305,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [zippingFolderId, setZippingFolderId] = useState<string | null>(null)
   const [zipProgress, setZipProgress] = useState('')
+  const [pendingMobileShare, setPendingMobileShare] = useState<{ blob: Blob; fileName: string } | null>(null)
 
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 24
@@ -1254,7 +1255,49 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     URL.revokeObjectURL(url)
   }
 
-  // 2. TẢI ẢNH ĐƠN (ĐIỆN THOẠI HIỆN POPUP LƯU ẢNH, MÁY TÍNH TẢI VỀ MÁY, KHÔNG BẬT MENU AIRDROP/SHARE)[cite: 1]
+  // 2. TẢI ẢNH ĐƠN
+  // Mobile: ưu tiên Web Share API để iOS/Android hiện "Lưu hình ảnh".
+  // Tuyệt đối KHÔNG fallback sang saveAs() trên mobile vì sẽ hiện hộp thoại
+  // "Bạn có muốn tải về ... không?" của trình duyệt.
+  const isMobileDevice = () => typeof navigator !== 'undefined' && (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  )
+
+  const sharePreparedMobileImage = async (prepared: { blob: Blob; fileName: string }) => {
+    const mimeType = prepared.blob.type && prepared.blob.type.startsWith('image/')
+      ? prepared.blob.type
+      : 'image/jpeg'
+    const fileObj = new File([prepared.blob], prepared.fileName, { type: mimeType })
+
+    if (
+      typeof navigator.share !== 'function' ||
+      typeof navigator.canShare !== 'function' ||
+      !navigator.canShare({ files: [fileObj] })
+    ) {
+      alert('Trình duyệt này chưa hỗ trợ lưu ảnh trực tiếp vào Ảnh. Hãy mở bằng Safari/Chrome mới nhất trên điện thoại.')
+      return false
+    }
+
+    try {
+      await navigator.share({ files: [fileObj], title: prepared.fileName })
+      return true
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return false
+      console.warn('Web Share chưa mở được:', err)
+      return false
+    }
+  }
+
+  const handleConfirmMobileSave = async () => {
+    if (!pendingMobileShare) return
+    // Hàm này được gọi trực tiếp từ một lần bấm của người dùng, vì vậy
+    // navigator.share() luôn có user activation mới trên iOS.
+    const prepared = pendingMobileShare
+    const ok = await sharePreparedMobileImage(prepared)
+    if (ok) setPendingMobileShare(null)
+  }
+
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
     if (e) {
       e.preventDefault()
@@ -1271,48 +1314,33 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       // VIDEO: 100% qua Cloudflare Worker /video
       if (item.type === 'video') {
         triggerDirectBrowserDownload(item.id, exactFileName)
-        setDownloadingId(null)
         return
       }
 
-      // HÌNH ẢNH: tải trực tiếp qua Cloudflare Worker, không đi qua Vercel
+      // ẢNH: 100% qua Cloudflare Worker /image, không đi qua Vercel.
       const downloadEndpoint = getImageWorkerDownloadUrl(item.id, exactFileName)
-      const res = await fetch(downloadEndpoint)
+      const res = await fetch(downloadEndpoint, { cache: 'no-store' })
       if (!res.ok) throw new Error(`Máy chủ không thể lấy ảnh (HTTP ${res.status})`)
-      
-      let blob = await res.blob()
 
+      let blob = await res.blob()
       if (activeSetting.enable_watermark) {
         blob = await applyWatermarkToImageBlob(blob)
       }
 
-      // Nhận diện chuẩn xác điện thoại/máy tính bảng[cite: 1]
-      const isMobile = typeof navigator !== 'undefined' && (
-        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-      )
+      if (isMobileDevice()) {
+        const prepared = { blob, fileName: exactFileName }
 
-      // CHỈ TRÊN ĐIỆN THOẠI: Mở bảng chia sẻ hệ thống để chọn "Lưu hình ảnh"[cite: 1]
-      if (isMobile && typeof navigator.canShare === 'function') {
-        const fileObj = new File([blob], exactFileName, { type: 'image/jpeg' })
-        if (navigator.canShare({ files: [fileObj] })) {
-          try {
-            await navigator.share({
-              files: [fileObj],
-              title: exactFileName,
-            })
-            setDownloadingId(null)
-            return
-          } catch (shareErr: any) {
-            if (shareErr.name === 'AbortError') {
-              setDownloadingId(null)
-              return
-            }
-          }
+        // Thử mở Share Sheet ngay. Trên một số bản iOS, thời gian fetch có thể
+        // làm mất transient user activation. Nếu vậy, KHÔNG tải file kiểu browser;
+        // thay vào đó hiện nút xác nhận để tạo một user gesture mới rồi share lại.
+        const shared = await sharePreparedMobileImage(prepared)
+        if (!shared) {
+          setPendingMobileShare(prepared)
         }
+        return
       }
 
-      // TRÊN MÁY TÍNH (Windows / Mac): Tải thẳng file về máy không qua menu AirDrop[cite: 1]
+      // Desktop giữ nguyên: tải file trực tiếp về máy.
       saveAs(blob, exactFileName)
     } catch (err: any) {
       console.error('Lỗi khi tải ảnh:', err)
@@ -3818,6 +3846,32 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       )}
 
       {/* MODAL YÊU CẦU NHẬP TÊN CHO KHÁCH */}
+      {pendingMobileShare && (
+        <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
+            <div className="w-12 h-1 rounded-full bg-emerald-600 mx-auto mb-5" />
+            <h3 className="font-serif font-bold text-lg">Ảnh đã sẵn sàng</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 mb-5">
+              Nhấn nút bên dưới để mở bảng hệ thống, sau đó chọn <strong>Lưu hình ảnh</strong>.
+            </p>
+            <button
+              type="button"
+              onClick={handleConfirmMobileSave}
+              className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            >
+              Lưu hình ảnh
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingMobileShare(null)}
+              className="w-full mt-2 py-2.5 rounded-2xl text-sm text-gray-500 dark:text-gray-400"
+            >
+              Hủy
+            </button>
+          </div>
+        </div>
+      )}
+
       {showGuestNameModal && isSharedGuest && (
         <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
