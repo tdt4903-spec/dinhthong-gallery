@@ -73,6 +73,10 @@ const preloadedCache = new Set<string>()
 // Domain Cloudflare Worker thực tế của bạn
 const VIDEO_WORKER_BASE = 'https://dinhthong-video-proxy.tdt4903.workers.dev'
 
+// iPhone/Safari dễ thiếu RAM nếu giữ quá nhiều ảnh gốc cùng lúc. Tách thành
+// từng đợt nhỏ nhưng vẫn lần lượt lưu hết số ảnh người dùng yêu cầu.
+const MOBILE_IMAGE_SHARE_BATCH_SIZE = 10
+
 // Ảnh tải xuống cũng đi qua Cloudflare Worker để không phát sinh Fast Origin Transfer trên Vercel.
 const getImageWorkerDownloadUrl = (fileId: string, fileName: string) =>
   `${VIDEO_WORKER_BASE}/image?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
@@ -306,6 +310,21 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [zippingFolderId, setZippingFolderId] = useState<string | null>(null)
   const [zipProgress, setZipProgress] = useState('')
   const [pendingMobileShare, setPendingMobileShare] = useState<{ blob: Blob; fileName: string } | null>(null)
+
+  // Vùng chọn riêng dành cho tải ảnh trên điện thoại. Tách hoàn toàn khỏi
+  // selectedItemIds (công cụ quản trị) và ratings (ảnh khách đã chọn), nhờ đó
+  // thao tác tải không làm thay đổi dữ liệu lựa chọn trong Supabase.
+  const [downloadSelectedIds, setDownloadSelectedIds] = useState<Set<string>>(new Set())
+  const [isPreparingMobileImages, setIsPreparingMobileImages] = useState(false)
+  const [mobileDownloadProgress, setMobileDownloadProgress] = useState('')
+  const [pendingMobileBatchShare, setPendingMobileBatchShare] = useState<{
+    files: File[]
+    remainingItems: MediaItem[]
+    label: string
+    batchNumber: number
+    totalBatches: number
+    totalImages: number
+  } | null>(null)
 
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 24
@@ -797,6 +816,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
   const subFolders = visibleItems.filter(item => item.type === 'folder')
   const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
+  const downloadableImages = mediaFiles.filter(item => item.type === 'image')
+  const selectedDownloadImages = downloadableImages.filter(item => downloadSelectedIds.has(item.id))
+  const areAllDownloadImagesSelected = downloadableImages.length > 0 && selectedDownloadImages.length === downloadableImages.length
 
   const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
 
@@ -1198,6 +1220,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setStarFilter('all')
     setCurrentPage(1)
     setSelectedItemIds(new Set())
+    setDownloadSelectedIds(new Set())
+    setPendingMobileBatchShare(null)
+    setMobileDownloadProgress('')
+    setIsPreparingMobileImages(false)
     try {
       const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}&_t=${Date.now()}`, { cache: 'no-store' })
       const data = await res.json().catch(() => ({}))
@@ -1296,6 +1322,165 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const prepared = pendingMobileShare
     const ok = await sharePreparedMobileImage(prepared)
     if (ok) setPendingMobileShare(null)
+  }
+
+  const toggleMobileDownloadSelection = (itemId: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    setDownloadSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(itemId)) next.delete(itemId)
+      else next.add(itemId)
+      return next
+    })
+  }
+
+  const toggleSelectAllDownloadImages = () => {
+    if (areAllDownloadImagesSelected) {
+      setDownloadSelectedIds(new Set())
+      return
+    }
+    setDownloadSelectedIds(new Set(downloadableImages.map(item => item.id)))
+  }
+
+  const prepareMobileImageBatch = async (
+    sourceItems: MediaItem[],
+    label: string,
+    batchNumber: number,
+    totalBatches: number,
+    totalImages: number
+  ) => {
+    const currentBatch = sourceItems.slice(0, MOBILE_IMAGE_SHARE_BATCH_SIZE)
+    const remainingItems = sourceItems.slice(MOBILE_IMAGE_SHARE_BATCH_SIZE)
+
+    if (currentBatch.length === 0) return
+
+    setIsPreparingMobileImages(true)
+    setMobileDownloadProgress(`Đang chuẩn bị ${Math.min((batchNumber - 1) * MOBILE_IMAGE_SHARE_BATCH_SIZE + 1, totalImages)}-${Math.min(batchNumber * MOBILE_IMAGE_SHARE_BATCH_SIZE, totalImages)} / ${totalImages}`)
+
+    try {
+      const preparedFiles: Array<File | null> = new Array(currentBatch.length).fill(null)
+      let completed = 0
+      const CONCURRENCY_LIMIT = 3
+
+      const prepareOne = async (item: MediaItem, index: number) => {
+        const exactFileName = item.name.includes('.') ? item.name : `${item.name}.jpg`
+        const downloadEndpoint = getImageWorkerDownloadUrl(item.id, exactFileName)
+        const res = await fetch(downloadEndpoint, { cache: 'no-store' })
+        if (!res.ok) throw new Error(`${exactFileName}: HTTP ${res.status}`)
+
+        let blob = await res.blob()
+        if (activeSetting.enable_watermark) {
+          blob = await applyWatermarkToImageBlob(blob)
+        }
+
+        const mimeType = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
+        preparedFiles[index] = new File([blob], exactFileName, { type: mimeType })
+
+        completed++
+        const preparedOverall = Math.min((batchNumber - 1) * MOBILE_IMAGE_SHARE_BATCH_SIZE + completed, totalImages)
+        setMobileDownloadProgress(`Đã chuẩn bị ${preparedOverall}/${totalImages} ảnh`)
+      }
+
+      for (let i = 0; i < currentBatch.length; i += CONCURRENCY_LIMIT) {
+        const chunk = currentBatch.slice(i, i + CONCURRENCY_LIMIT)
+        await Promise.all(chunk.map((item, offset) => prepareOne(item, i + offset)))
+      }
+
+      const files = preparedFiles.filter((file): file is File => Boolean(file))
+      if (files.length === 0) throw new Error('Không chuẩn bị được ảnh nào để lưu.')
+
+      setPendingMobileBatchShare({
+        files,
+        remainingItems,
+        label,
+        batchNumber,
+        totalBatches,
+        totalImages,
+      })
+      setMobileDownloadProgress('')
+    } catch (err: unknown) {
+      console.error('Lỗi chuẩn bị ảnh hàng loạt:', err)
+      const message = err instanceof Error ? err.message : String(err)
+      alert('Không thể chuẩn bị ảnh để tải: ' + message)
+      setMobileDownloadProgress('')
+    } finally {
+      setIsPreparingMobileImages(false)
+    }
+  }
+
+  const startMobileImageDownload = async (sourceItems: MediaItem[], label: string) => {
+    if (isPreparingMobileImages || pendingMobileBatchShare) return
+
+    const imagesOnly = sourceItems.filter(item => item.type === 'image')
+    if (imagesOnly.length === 0) {
+      alert('Không có ảnh nào để tải.')
+      return
+    }
+
+    const totalBatches = Math.ceil(imagesOnly.length / MOBILE_IMAGE_SHARE_BATCH_SIZE)
+    await prepareMobileImageBatch(imagesOnly, label, 1, totalBatches, imagesOnly.length)
+  }
+
+  const handleDownloadSelectedImagesToPhone = async () => {
+    if (selectedDownloadImages.length === 0) {
+      alert('Hãy tick ít nhất 1 ảnh trước khi tải.')
+      return
+    }
+    await startMobileImageDownload(selectedDownloadImages, `${currentActiveFolderTitle}_da_chon`)
+  }
+
+  const handleDownloadAllImagesToPhone = async () => {
+    await startMobileImageDownload(downloadableImages, `${currentActiveFolderTitle}_tat_ca_anh`)
+  }
+
+  const handleConfirmMobileBatchSave = async () => {
+    const pending = pendingMobileBatchShare
+    if (!pending) return
+
+    try {
+      const canNativeShare =
+        typeof navigator.share === 'function' &&
+        typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files: pending.files })
+
+      if (canNativeShare) {
+        await navigator.share({
+          files: pending.files,
+          title: pending.label,
+        })
+      } else {
+        // Trình duyệt không hỗ trợ chia sẻ nhiều file: vẫn cho tải về Files
+        // bằng ZIP, dữ liệu ZIP được tạo ở điện thoại; ảnh gốc vẫn đi qua Worker.
+        const zip = new JSZip()
+        pending.files.forEach(file => zip.file(file.name, file, { compression: 'STORE' }))
+        const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+        saveAs(zipBlob, `${pending.label}_dot_${pending.batchNumber}.zip`)
+      }
+
+      if (pending.remainingItems.length > 0) {
+        const nextBatch = pending.batchNumber + 1
+        const remaining = pending.remainingItems
+        setPendingMobileBatchShare(null)
+        await prepareMobileImageBatch(
+          remaining,
+          pending.label,
+          nextBatch,
+          pending.totalBatches,
+          pending.totalImages
+        )
+      } else {
+        setPendingMobileBatchShare(null)
+        setMobileDownloadProgress('')
+        setDownloadSelectedIds(new Set())
+      }
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      console.error('Lỗi lưu nhiều ảnh:', err)
+      const message = err instanceof Error ? err.message : String(err)
+      alert('Không thể mở trình lưu ảnh: ' + message)
+    }
   }
 
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
@@ -2720,7 +2905,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <button
                   onClick={(e) => handleDownloadAlbumZip(undefined, e)}
                   disabled={Boolean(zippingFolderId)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer disabled:opacity-60 flex-shrink-0"
+                  className="hidden sm:flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer disabled:opacity-60 flex-shrink-0"
                 >
                   {zippingFolderId === (currentActiveFolderId || 'global') ? (
                     <>
@@ -3238,6 +3423,75 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
             </div>
 
+            {/* MOBILE: vùng chọn/tải ảnh riêng, không đụng vào lựa chọn ảnh của khách */}
+            {downloadableImages.length > 0 && (
+              <div className={`sm:hidden sticky top-16 z-20 -mx-3 mb-5 px-3 py-3 border-y backdrop-blur-xl ${
+                isDarkMode
+                  ? 'bg-[#0f1115]/95 border-white/10'
+                  : 'bg-white/95 border-gray-100'
+              }`}>
+                <div className="flex items-center justify-between gap-2 mb-2.5">
+                  <button
+                    type="button"
+                    onClick={toggleSelectAllDownloadImages}
+                    disabled={isPreparingMobileImages}
+                    className={`flex items-center gap-2 min-w-0 text-left px-2.5 py-2 rounded-xl border transition active:scale-[0.98] disabled:opacity-50 ${
+                      areAllDownloadImagesSelected
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600'
+                        : isDarkMode
+                          ? 'bg-white/5 border-white/10 text-white'
+                          : 'bg-gray-50 border-gray-200 text-gray-700'
+                    }`}
+                  >
+                    {areAllDownloadImagesSelected ? (
+                      <CheckSquare className="w-4 h-4 flex-shrink-0" />
+                    ) : (
+                      <Square className="w-4 h-4 flex-shrink-0" />
+                    )}
+                    <span className="text-[11px] font-semibold truncate">
+                      {areAllDownloadImagesSelected ? 'Bỏ chọn tất cả' : 'Tick chọn ảnh để tải'}
+                    </span>
+                  </button>
+
+                  <span className="text-[11px] font-bold text-emerald-600 whitespace-nowrap">
+                    {selectedDownloadImages.length}/{downloadableImages.length} ảnh
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDownloadSelectedImagesToPhone}
+                    disabled={selectedDownloadImages.length === 0 || isPreparingMobileImages || Boolean(pendingMobileBatchShare)}
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-sm transition active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isPreparingMobileImages ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    <span>Tải ảnh đã chọn</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadAllImagesToPhone}
+                    disabled={isPreparingMobileImages || Boolean(pendingMobileBatchShare)}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-[11px] font-bold border transition active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${
+                      isDarkMode
+                        ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white'
+                        : 'bg-gray-900 hover:bg-black border-gray-900 text-white'
+                    }`}
+                  >
+                    {isPreparingMobileImages ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    <span>Tải tất cả ảnh</span>
+                  </button>
+                </div>
+
+                {mobileDownloadProgress && (
+                  <div className="mt-2 text-center text-[10px] font-medium text-gray-500 dark:text-gray-400">
+                    {mobileDownloadProgress}
+                  </div>
+                )}
+              </div>
+            )}
+
             {loadingImages ? (
               <div className="flex flex-col items-center justify-center py-24 text-gray-400">
                 <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
@@ -3394,13 +3648,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                           const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`
                           const displayName = customNames[item.id] || item.name
                           const isChecked = selectedItemIds.has(item.id)
+                          const isDownloadChecked = downloadSelectedIds.has(item.id)
                           const isThisDownloading = downloadingId === item.id
 
                           return (
                             <div 
                               key={item.id}
                               className={`rounded-xl overflow-hidden border transition group relative ${
-                                isChecked ? 'ring-2 ring-emerald-500' : ''
+                                (isChecked || isDownloadChecked) ? 'ring-2 ring-emerald-500' : ''
                               } ${
                                 isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
                               }`}
@@ -3452,6 +3707,26 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   </>
                                 )}
 
+                                {item.type === 'image' && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => toggleMobileDownloadSelection(item.id, e)}
+                                    className={`sm:hidden absolute top-2 left-2 p-2 rounded-xl backdrop-blur-md text-white z-30 cursor-pointer transition active:scale-90 border ${
+                                      isDownloadChecked
+                                        ? 'bg-emerald-600/95 border-emerald-400/50'
+                                        : 'bg-black/65 border-white/20'
+                                    }`}
+                                    title={isDownloadChecked ? 'Bỏ chọn tải ảnh' : 'Chọn ảnh để tải'}
+                                    aria-label={isDownloadChecked ? 'Bỏ chọn tải ảnh' : 'Chọn ảnh để tải'}
+                                  >
+                                    {isDownloadChecked ? (
+                                      <CheckSquare className="w-4 h-4 text-white" />
+                                    ) : (
+                                      <Square className="w-4 h-4 text-white" />
+                                    )}
+                                  </button>
+                                )}
+
                                 {!isSharedGuest && (
                                   <button
                                     onClick={(e) => handleToggleSelectItem(item.id, e)}
@@ -3465,7 +3740,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                 {!isSharedGuest && (
                                   <button
                                     onClick={(e) => handlePermanentlyHideItem(item.id, displayName, e)}
-                                    className="absolute top-2 left-2 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                    className="absolute top-2 left-12 sm:left-2 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
                                     title="Ẩn tệp này"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -3867,6 +4142,41 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               className="w-full mt-2 py-2.5 rounded-2xl text-sm text-gray-500 dark:text-gray-400"
             >
               Hủy
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pendingMobileBatchShare && (
+        <div className="fixed inset-0 z-[75] bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
+            <div className="w-12 h-1 rounded-full bg-emerald-600 mx-auto mb-5" />
+            <h3 className="font-serif font-bold text-lg">
+              {pendingMobileBatchShare.files.length} ảnh đã sẵn sàng
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              Đợt {pendingMobileBatchShare.batchNumber}/{pendingMobileBatchShare.totalBatches} · Tổng {pendingMobileBatchShare.totalImages} ảnh
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 mb-5">
+              Nhấn bên dưới để mở bảng hệ thống, sau đó chọn <strong>Lưu hình ảnh</strong>. Nếu có nhiều ảnh, web sẽ lần lượt chuẩn bị các đợt tiếp theo để tránh đầy bộ nhớ điện thoại.
+            </p>
+            <button
+              type="button"
+              onClick={handleConfirmMobileBatchSave}
+              className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center justify-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Lưu {pendingMobileBatchShare.files.length} ảnh
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPendingMobileBatchShare(null)
+                setMobileDownloadProgress('')
+              }}
+              className="w-full mt-2 py-2.5 rounded-2xl text-sm text-gray-500 dark:text-gray-400"
+            >
+              Hủy tải
             </button>
           </div>
         </div>
