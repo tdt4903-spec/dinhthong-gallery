@@ -311,9 +311,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [zipProgress, setZipProgress] = useState('')
   const [pendingMobileShare, setPendingMobileShare] = useState<{ blob: Blob; fileName: string } | null>(null)
 
-  // Vùng chọn riêng dành cho tải ảnh trên điện thoại. Tách hoàn toàn khỏi
-  // selectedItemIds (công cụ quản trị) và ratings (ảnh khách đã chọn), nhờ đó
-  // thao tác tải không làm thay đổi dữ liệu lựa chọn trong Supabase.
+  // Một vùng tick duy nhất dành cho TẢI ẢNH trên cả desktop và mobile.
+  // Desktop: ảnh đã tick được nén ZIP. Mobile: ảnh đã tick được chuyển sang
+  // bảng lưu/chia sẻ hệ thống để lưu vào Photos. Danh sách TXT chỉ dựa trên ratings (số sao).
   const [downloadSelectedIds, setDownloadSelectedIds] = useState<Set<string>>(new Set())
   const [isPreparingMobileImages, setIsPreparingMobileImages] = useState(false)
   const [mobileDownloadProgress, setMobileDownloadProgress] = useState('')
@@ -1279,6 +1279,60 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     link.download = 'danh-sach-binh-luan-khach.txt'
     link.click()
     URL.revokeObjectURL(url)
+  }
+
+  // DESKTOP: dùng chính vùng tick tải ảnh ở trên để nén các ảnh đã chọn thành ZIP.
+  // Không dùng selectedItemIds và không liên quan đến ratings / file TXT.
+  const handleDownloadSelectedImagesDesktopZip = async () => {
+    if (zippingFolderId) return
+    if (selectedDownloadImages.length === 0) {
+      alert('Hãy tick ít nhất 1 ảnh trước khi tải.')
+      return
+    }
+
+    setZippingFolderId('download_selected_images')
+    setZipProgress('Chuẩn bị...')
+
+    try {
+      const zip = new JSZip()
+      const total = selectedDownloadImages.length
+      let completedCount = 0
+      const CONCURRENCY_LIMIT = 5
+
+      const fetchImage = async (fileItem: MediaItem) => {
+        const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
+        try {
+          const downloadEndpoint = getImageWorkerDownloadUrl(fileItem.id, exactFileName)
+          const res = await fetch(downloadEndpoint, { cache: 'no-store' })
+          if (!res.ok) throw new Error(`${exactFileName}: HTTP ${res.status}`)
+
+          let blob = await res.blob()
+          if (activeSetting.enable_watermark) {
+            blob = await applyWatermarkToImageBlob(blob)
+          }
+          zip.file(exactFileName, blob, { compression: 'STORE' })
+        } finally {
+          completedCount++
+          setZipProgress(`${completedCount}/${total}`)
+        }
+      }
+
+      for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+        const chunk = selectedDownloadImages.slice(i, i + CONCURRENCY_LIMIT)
+        await Promise.all(chunk.map(fetchImage))
+      }
+
+      setZipProgress('Tạo file ZIP...')
+      const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+      saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
+      setDownloadSelectedIds(new Set())
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      alert('Không thể tạo ZIP ảnh đã chọn: ' + message)
+    } finally {
+      setZippingFolderId(null)
+      setZipProgress('')
+    }
   }
 
   // 2. TẢI ẢNH ĐƠN
@@ -3235,7 +3289,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
                       <button
                         onClick={(e) => handleToggleSelectAlbum(album.id, e)}
-                        className="absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
+                        className="hidden sm:block absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
                         title={isChecked ? 'Bỏ chọn' : 'Chọn album'}
                       >
                         {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
@@ -3455,7 +3509,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
             </div>
 
-            {/* MOBILE: checkbox này CHỈ dùng để tải ảnh; không liên quan max_select / TXT / ratings */}
+            {/* MOBILE: chỉ có 1 loại tick trên ảnh = chọn để tải. TXT chỉ lấy từ số sao. */}
             {downloadableImages.length > 0 && (
               <div className={`sm:hidden sticky top-16 z-20 -mx-3 mb-5 px-3 py-3 border-y backdrop-blur-xl ${
                 isDarkMode
@@ -3476,12 +3530,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     }`}
                   >
                     {areAllDownloadImagesSelected ? (
-                      <CheckSquare className="w-4 h-4 flex-shrink-0" />
+                      <X className="w-4 h-4 flex-shrink-0" />
                     ) : (
-                      <Square className="w-4 h-4 flex-shrink-0" />
+                      <Check className="w-4 h-4 flex-shrink-0" />
                     )}
                     <span className="text-[11px] font-semibold truncate">
-                      {areAllDownloadImagesSelected ? 'Bỏ chọn tất cả' : 'Tick chọn ảnh để tải'}
+                      {areAllDownloadImagesSelected ? 'Bỏ chọn tất cả' : 'Chọn tất cả để tải'}
                     </span>
                   </button>
 
@@ -3590,7 +3644,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
                                 <button
                                   onClick={(e) => handleToggleSelectItem(folder.id, e)}
-                                  className="absolute bottom-2.5 left-2.5 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
+                                  className="hidden sm:block absolute bottom-2.5 left-2.5 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
                                   title={isChecked ? 'Bỏ chọn' : 'Chọn thư mục'}
                                 >
                                   {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
@@ -3679,7 +3733,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                           const currentStar = displayRatings[item.id] || 0
                           const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`
                           const displayName = customNames[item.id] || item.name
-                          const isChecked = selectedItemIds.has(item.id)
                           const isDownloadChecked = downloadSelectedIds.has(item.id)
                           const isThisDownloading = downloadingId === item.id
 
@@ -3687,7 +3740,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                             <div 
                               key={item.id}
                               className={`rounded-xl overflow-hidden border transition group relative ${
-                                (isChecked || isDownloadChecked) ? 'ring-2 ring-emerald-500' : ''
+                                isDownloadChecked ? 'ring-2 ring-emerald-500' : ''
                               } ${
                                 isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
                               }`}
@@ -3743,7 +3796,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   <button
                                     type="button"
                                     onClick={(e) => toggleMobileDownloadSelection(item.id, e)}
-                                    className={`sm:hidden absolute top-2 left-2 p-2 rounded-xl backdrop-blur-md text-white z-30 cursor-pointer transition active:scale-90 border ${
+                                    className={`absolute top-2 left-2 p-2 rounded-xl backdrop-blur-md text-white z-30 cursor-pointer transition active:scale-90 border ${
                                       isDownloadChecked
                                         ? 'bg-emerald-600/95 border-emerald-400/50'
                                         : 'bg-black/65 border-white/20'
@@ -3759,20 +3812,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   </button>
                                 )}
 
-                                {!isSharedGuest && (
-                                  <button
-                                    onClick={(e) => handleToggleSelectItem(item.id, e)}
-                                    className="absolute bottom-2 left-2 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
-                                    title={isChecked ? 'Bỏ chọn' : 'Chọn tệp'}
-                                  >
-                                    {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
-                                  </button>
-                                )}
 
                                 {!isSharedGuest && (
                                   <button
                                     onClick={(e) => handlePermanentlyHideItem(item.id, displayName, e)}
-                                    className="absolute top-2 left-12 sm:left-2 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                    className="absolute top-2 left-12 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
                                     title="Ẩn tệp này"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -4099,9 +4143,50 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
+      {/* DESKTOP: 1 tick trên ảnh = chọn tải. Mobile dùng thanh lưu ảnh ở phía trên. */}
+      {selectedAlbum && selectedDownloadImages.length > 0 && (
+        <div className="hidden sm:flex fixed bottom-6 inset-x-0 z-40 justify-center px-4 animate-in slide-in-from-bottom-5 duration-200">
+          <div className="flex items-center gap-4 px-5 py-3 rounded-2xl bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white shadow-2xl border border-white/15">
+            <span className="text-xs font-medium text-emerald-400">
+              Đã tick tải: <strong className="text-white">{selectedDownloadImages.length}</strong> ảnh
+            </span>
+
+            <div className="h-4 w-[1px] bg-white/20" />
+
+            <button
+              type="button"
+              onClick={handleDownloadSelectedImagesDesktopZip}
+              disabled={Boolean(zippingFolderId)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow transition cursor-pointer disabled:opacity-50"
+            >
+              {zippingFolderId === 'download_selected_images' ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>{zipProgress || 'Đang nén...'}</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Lưu ZIP ảnh đã tick</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDownloadSelectedIds(new Set())}
+              className="p-1 rounded-full text-white/60 hover:text-white transition cursor-pointer"
+              title="Bỏ tick tải"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* THANH CÔNG CỤ NỔI KHI TICK CHỌN */}
       {currentSelectionCount > 0 && (
-        <div className="fixed bottom-6 inset-x-0 z-40 flex justify-center px-4 animate-in slide-in-from-bottom-5 duration-200">
+        <div className={`hidden sm:flex fixed ${selectedAlbum && selectedDownloadImages.length > 0 ? 'bottom-24' : 'bottom-6'} inset-x-0 z-40 justify-center px-4 animate-in slide-in-from-bottom-5 duration-200`}>
           <div className="flex items-center gap-2.5 sm:gap-4 px-4 sm:px-6 py-3 rounded-2xl bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white shadow-2xl border border-white/15">
             <span className="text-xs font-medium text-emerald-400">
               Đã chọn: <strong className="text-white">{currentSelectionCount}</strong>
