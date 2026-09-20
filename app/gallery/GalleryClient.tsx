@@ -71,7 +71,7 @@ const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
 // Domain Cloudflare Worker thực tế của bạn
-const VIDEO_WORKER_BASE = 'https://dinhthong-video-proxy.tdt4903.workers.dev'
+const VIDEO_WORKER_BASE = (process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || 'https://dinhthong-video-proxy.tdt4903.workers.dev').replace(/\/$/, '')
 
 // iPhone/Safari dễ thiếu RAM nếu giữ quá nhiều ảnh gốc cùng lúc. Tách thành
 // từng đợt nhỏ nhưng vẫn lần lượt lưu hết số ảnh người dùng yêu cầu.
@@ -1282,9 +1282,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   // 2. TẢI ẢNH ĐƠN
-  // Mobile: ưu tiên Web Share API để iOS/Android hiện "Lưu hình ảnh".
-  // Tuyệt đối KHÔNG fallback sang saveAs() trên mobile vì sẽ hiện hộp thoại
-  // "Bạn có muốn tải về ... không?" của trình duyệt.
+  // Mobile: dùng Web Share API để iOS/Android hiện thao tác lưu vào thư viện Ảnh.
+  // Tuyệt đối KHÔNG tạo ZIP hoặc fallback sang saveAs() trên điện thoại.
   const isMobileDevice = () => typeof navigator !== 'undefined' && (
     /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
@@ -1391,15 +1390,50 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const files = preparedFiles.filter((file): file is File => Boolean(file))
       if (files.length === 0) throw new Error('Không chuẩn bị được ảnh nào để lưu.')
 
-      setPendingMobileBatchShare({
+      const preparedBatch = {
         files,
         remainingItems,
         label,
         batchNumber,
         totalBatches,
         totalImages,
-      })
+      }
+
       setMobileDownloadProgress('')
+
+      // Thử mở ngay bảng lưu ảnh ở lần bấm đầu tiên. Nếu Safari đã làm mất
+      // user activation trong lúc tải ảnh gốc từ Worker, ta giữ batch đã chuẩn bị
+      // và hiện nút “Lưu ... ảnh vào album” để người dùng bấm một lần nữa.
+      const canNativeShare =
+        typeof navigator.share === 'function' &&
+        typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files })
+
+      if (batchNumber === 1 && canNativeShare) {
+        try {
+          await navigator.share({ files, title: label })
+
+          if (remainingItems.length > 0) {
+            await prepareMobileImageBatch(
+              remainingItems,
+              label,
+              batchNumber + 1,
+              totalBatches,
+              totalImages
+            )
+          } else {
+            setPendingMobileBatchShare(null)
+            setDownloadSelectedIds(new Set())
+          }
+          return
+        } catch (shareErr: unknown) {
+          // NotAllowedError thường xảy ra khi iOS hết transient user activation
+          // sau quá trình fetch. AbortError cũng giữ batch để người dùng có thể thử lại.
+          console.warn('Cần thao tác bấm mới để mở bảng lưu ảnh:', shareErr)
+        }
+      }
+
+      setPendingMobileBatchShare(preparedBatch)
     } catch (err: unknown) {
       console.error('Lỗi chuẩn bị ảnh hàng loạt:', err)
       const message = err instanceof Error ? err.message : String(err)
@@ -1445,19 +1479,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         typeof navigator.canShare === 'function' &&
         navigator.canShare({ files: pending.files })
 
-      if (canNativeShare) {
-        await navigator.share({
-          files: pending.files,
-          title: pending.label,
-        })
-      } else {
-        // Trình duyệt không hỗ trợ chia sẻ nhiều file: vẫn cho tải về Files
-        // bằng ZIP, dữ liệu ZIP được tạo ở điện thoại; ảnh gốc vẫn đi qua Worker.
-        const zip = new JSZip()
-        pending.files.forEach(file => zip.file(file.name, file, { compression: 'STORE' }))
-        const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
-        saveAs(zipBlob, `${pending.label}_dot_${pending.batchNumber}.zip`)
+      if (!canNativeShare) {
+        alert('Trình duyệt này chưa hỗ trợ lưu nhiều ảnh trực tiếp vào album. Hãy mở link bằng Safari trên iPhone/iPad hoặc Chrome mới nhất trên Android.')
+        return
       }
+
+      // Mobile tuyệt đối không đóng ZIP. Web Share API chuyển các file ảnh gốc
+      // sang bảng chia sẻ hệ thống; trên iOS người dùng chọn “Lưu X hình ảnh”.
+      await navigator.share({
+        files: pending.files,
+        title: pending.label,
+      })
 
       if (pending.remainingItems.length > 0) {
         const nextBatch = pending.batchNumber + 1
@@ -3423,7 +3455,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
             </div>
 
-            {/* MOBILE: vùng chọn/tải ảnh riêng, không đụng vào lựa chọn ảnh của khách */}
+            {/* MOBILE: checkbox này CHỈ dùng để tải ảnh; không liên quan max_select / TXT / ratings */}
             {downloadableImages.length > 0 && (
               <div className={`sm:hidden sticky top-16 z-20 -mx-3 mb-5 px-3 py-3 border-y backdrop-blur-xl ${
                 isDarkMode
@@ -3454,7 +3486,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   </button>
 
                   <span className="text-[11px] font-bold text-emerald-600 whitespace-nowrap">
-                    {selectedDownloadImages.length}/{downloadableImages.length} ảnh
+                    Đã tick tải: {selectedDownloadImages.length}
                   </span>
                 </div>
 
@@ -3466,7 +3498,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-sm transition active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {isPreparingMobileImages ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>Tải ảnh đã chọn</span>
+                    <span>Lưu ảnh đã chọn</span>
                   </button>
 
                   <button
@@ -3480,7 +3512,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     }`}
                   >
                     {isPreparingMobileImages ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>Tải tất cả ảnh</span>
+                    <span>Lưu tất cả ảnh</span>
                   </button>
                 </div>
 
@@ -4166,7 +4198,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center justify-center gap-2"
             >
               <Download className="w-4 h-4" />
-              Lưu {pendingMobileBatchShare.files.length} ảnh
+              Lưu {pendingMobileBatchShare.files.length} ảnh vào album
             </button>
             <button
               type="button"
