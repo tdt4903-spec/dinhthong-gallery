@@ -24,3 +24,49 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.admin-tool-card {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.6rem;
+  border-radius: 0.9rem;
+  border-width: 1px;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1rem;
+  transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.admin-tool-card:hover {
+  transform: translateY(-1px);
+}
+
+.admin-tool-card:active {
+  transform: scale(0.99);
+}
+
+.admin-tool-light {
+  background: #fafcf9;
+  border-color: #e4e9e4;
+  color: #29332d;
+}
+
+.admin-tool-light:hover {
+  background: #f1f7f2;
+  border-color: #cddacd;
+  box-shadow: 0 8px 24px rgba(17, 45, 29, 0.07);
+}
+
+.admin-tool-dark {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.admin-tool-dark:hover {
+  background: rgba(255, 255, 255, 0.065);
+  border-color: rgba(255, 255, 255, 0.14);
+}

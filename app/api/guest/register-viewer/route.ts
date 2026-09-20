@@ -48,9 +48,11 @@ export async function POST(request: Request) {
     // Tập hợp danh sách các khách duy nhất đã vào trước đó
     const uniqueKeys = new Set<string>()
     let sameNamedVisitor = false
+    let sameBrowserVisitor = false
 
     ;(rows || []).forEach((row: any) => {
       const rowName = normalizeGuestName(String(row?.customer_name || ''))
+      if (String(row?.visitor_id || '') === visitorId) sameBrowserVisitor = true
       if (rowName) {
         uniqueKeys.add(`name:${rowName}`)
         if (normalizedName && rowName === normalizedName) {
@@ -61,9 +63,10 @@ export async function POST(request: Request) {
       }
     })
 
-    // 1. Trường hợp người cũ quay lại (Trùng tên đã khai báo trước đó):
-    // Cho phép vào ngay, không làm tăng số lượng người và không bị chặn bởi max_viewers.
-    if (customerName && sameNamedVisitor) {
+    // 1. Trường hợp người cũ quay lại: trùng tên đã khai báo trước đó,
+    // hoặc cùng trình duyệt đã từng vào và bây giờ đang xác nhận tên khi album đã đầy.
+    // Cho phép vào và không làm tăng số lượng người.
+    if (customerName && (sameNamedVisitor || sameBrowserVisitor)) {
       try {
         await admin.rpc('register_gallery_album_viewer', {
           p_album_id: albumId,
@@ -78,7 +81,8 @@ export async function POST(request: Request) {
       return NextResponse.json({
         allowed: true,
         viewer_count: uniqueKeys.size,
-        same_name: true,
+        same_name: sameNamedVisitor,
+        same_browser: sameBrowserVisitor,
       })
     }
 
@@ -88,6 +92,7 @@ export async function POST(request: Request) {
         allowed: false,
         viewer_count: uniqueKeys.size,
         same_name: false,
+        same_browser: sameBrowserVisitor,
         reason: 'FULL',
       })
     }

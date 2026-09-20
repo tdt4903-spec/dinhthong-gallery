@@ -210,11 +210,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     return currentHour < 6 || currentHour >= 18
   }
 
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(false)
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => isTimeForDarkMode())
   const hasUserToggledMode = useRef<boolean>(false)
 
   useEffect(() => {
-    setIsDarkMode(isTimeForDarkMode())
     const interval = setInterval(() => {
       if (!hasUserToggledMode.current) {
         setIsDarkMode(isTimeForDarkMode())
@@ -276,9 +275,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [guestCanSelect, setGuestCanSelect] = useState(false)
   const [guestViewerCount, setGuestViewerCount] = useState(0)
   const [guestAccessDenied, setGuestAccessDenied] = useState(false)
+  const [guestNamePurpose, setGuestNamePurpose] = useState<'collect' | 'capacity' | null>(null)
   const [notificationItems, setNotificationItems] = useState<any[]>([])
+  const [guestSelectionActivity, setGuestSelectionActivity] = useState<any[]>([])
+  const [isDownloadingSharedTxt, setIsDownloadingSharedTxt] = useState(false)
   const [isNotificationOpen, setIsNotificationOpen] = useState(false)
-  const [notificationTab, setNotificationTab] = useState<'viewers' | 'full' | 'joined'>('viewers')
+  const [notificationTab, setNotificationTab] = useState<'selected' | 'viewers' | 'full' | 'joined'>('selected')
 
   const [isLocked, setIsLocked] = useState(false)
   const [passwordInput, setPasswordInput] = useState('')
@@ -513,7 +515,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const registerGuestViewer = async (folderId: string, customerName = '') => {
     const targetAlbumId = isSharedGuest ? (guestRootAlbumId || folderId) : folderId
-    if (!targetAlbumId || !guestId) return { allowed: true, viewerCount: 0, trackingUnavailable: true }
+    if (!targetAlbumId || !guestId) return { allowed: true, viewerCount: 0, trackingUnavailable: true, reason: '' }
 
     const cleanName = customerName.trim()
     const setting = getFolderSettingFromState(targetAlbumId)
@@ -522,7 +524,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     if (collectCustomerInfo && !cleanName) {
       setGuestAccessDenied(false)
-      return { allowed: false, viewerCount: guestViewerCount, trackingUnavailable: false, waitingForName: true }
+      return { allowed: false, viewerCount: guestViewerCount, trackingUnavailable: false, waitingForName: true, reason: 'NAME_REQUIRED' }
     }
 
     try {
@@ -532,26 +534,36 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         body: JSON.stringify({
           albumId: targetAlbumId,
           visitorId: guestId,
-          customerName: cleanName || `Khách ${guestId.slice(0, 6).toUpperCase()}`,
-          maxViewers: maxViewers,
+          customerName: cleanName,
+          maxViewers,
         }),
       })
 
       const result = await res.json().catch(() => ({}))
-
-      if (!res.ok || result?.allowed === false) {
-        setGuestViewerCount(Number(result?.viewer_count || 0))
-        setGuestAccessDenied(true)
-        return { allowed: false, viewerCount: Number(result?.viewer_count || 0), trackingUnavailable: false }
-      }
-
       const viewerCount = Number(result?.viewer_count || 0)
       setGuestViewerCount(viewerCount)
+
+      if (!res.ok || result?.allowed === false) {
+        return {
+          allowed: false,
+          viewerCount,
+          trackingUnavailable: false,
+          reason: String(result?.reason || 'DENIED'),
+          sameName: Boolean(result?.same_name),
+        }
+      }
+
       setGuestAccessDenied(false)
-      return { allowed: true, viewerCount, trackingUnavailable: false }
+      return {
+        allowed: true,
+        viewerCount,
+        trackingUnavailable: false,
+        reason: '',
+        sameName: Boolean(result?.same_name),
+      }
     } catch (e) {
       console.warn('Không ghi nhận được lượt xem album:', e)
-      return { allowed: true, viewerCount: 0, trackingUnavailable: true }
+      return { allowed: true, viewerCount: 0, trackingUnavailable: true, reason: '' }
     }
   }
 
@@ -571,7 +583,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       : ''
 
     setGuestAccessDenied(false)
+    setGuestNamePurpose(null)
 
+    // Album có bật thu thập thông tin: luôn hỏi tên trước khi cho khách xem album.
     if (collect) {
       if (guestCustomerName.trim()) {
         const result = await registerGuestViewer(rootId, guestCustomerName.trim())
@@ -582,15 +596,31 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       }
 
       setGuestNameInput(savedName.trim())
+      setGuestNamePurpose('collect')
       setShowGuestNameModal(true)
       return false
     }
 
+    // Album không thu thập thông tin: khách vào thẳng album.
+    // Nếu album đã đủ số người xem, khi đó mới hỏi tên để kiểm tra khách cũ.
     const result = await registerGuestViewer(rootId, '')
-    if (!result.allowed) return false
-    setGuestCustomerName('')
-    setGuestCanSelect(true)
-    return true
+    if (result.allowed) {
+      setGuestCustomerName('')
+      setGuestCanSelect(true)
+      return true
+    }
+
+    if (result.reason === 'FULL') {
+      setGuestNameInput(savedName.trim())
+      setGuestNamePurpose('capacity')
+      setShowGuestNameModal(true)
+      setGuestAccessDenied(false)
+      return false
+    }
+
+    setGuestCanSelect(false)
+    setGuestAccessDenied(true)
+    return false
   }
 
   const finalizeGuestEntry = async () => {
@@ -603,12 +633,13 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       alert('Tên không được dài quá 100 ký tự.')
       return
     }
+
     const rootId = guestRootAlbumId || currentActiveFolderId
     if (!rootId) return
 
     setGuestAccessDenied(false)
-
     const result = await registerGuestViewer(rootId, cleanName)
+
     if (!result.allowed) {
       setGuestCanSelect(false)
       setShowGuestNameModal(false)
@@ -616,16 +647,26 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       return
     }
 
-    setGuestCustomerName(cleanName)
+    // Chỉ dùng tên để chào khi album thực sự bật thu thập thông tin.
+    // Với bước kiểm tra album đầy, tên chỉ là khóa nhận diện khách cũ.
+    if (guestNamePurpose === 'collect') {
+      setGuestCustomerName(cleanName)
+    } else {
+      setGuestCustomerName('')
+    }
+
     setGuestCanSelect(true)
     setShowGuestNameModal(false)
     setGuestNameInput('')
+    setGuestNamePurpose(null)
 
     try {
       localStorage.setItem(getGuestIdentityStorageKey(rootId), cleanName)
     } catch {}
 
-    const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
+    const targetUrl = folderHistory.length > 0
+      ? folderHistory[folderHistory.length - 1].driveUrl
+      : (selectedAlbum?.driveUrl || '')
     if (targetUrl) await fetchAlbumImages(targetUrl, currentActiveFolderId, true)
   }
 
@@ -642,7 +683,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const now = Date.now()
     try { localStorage.setItem('dinhthong_gallery_notifications_cleared_at', String(now)) } catch {}
     setNotificationItems(prev => prev.map(item => ({ ...item, full: false, joined: [] })))
-    setNotificationTab('viewers')
+    setNotificationTab('selected')
   }
 
   const getNotificationTitle = (albumId: string, fallback = 'DinhThong Album') => {
@@ -707,6 +748,43 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       alert(albumId ? 'Đã xóa số lượng người xem của album này.' : 'Đã xóa toàn bộ số lượng người xem.')
     } catch (e: any) {
       alert('Lỗi xóa số người xem: ' + (e?.message || e))
+    }
+  }
+
+  const handleDownloadSharedSelectionTxt = async () => {
+    if (isSharedGuest || isDownloadingSharedTxt) return
+    setIsDownloadingSharedTxt(true)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) throw new Error('Phiên đăng nhập đã hết hạn.')
+
+      const res = await fetch('/api/admin/selected-txt', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: 'no-store',
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err?.error || `Không thể tạo file TXT (HTTP ${res.status})`)
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'danh-sach-anh-khach-chon.txt'
+      link.style.display = 'none'
+      document.body.appendChild(link)
+      link.click()
+      setTimeout(() => {
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+      }, 1000)
+    } catch (e: any) {
+      alert('Không thể tải file TXT chung: ' + (e?.message || e))
+    } finally {
+      setIsDownloadingSharedTxt(false)
     }
   }
 
@@ -807,6 +885,35 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         joined: (joinedByAlbum[albumId] || []).filter((row: any) => Number(row.joinedAt || 0) > clearedAt).sort((a: any, b: any) => b.joinedAt - a.joinedAt),
       })).filter(item => item.viewers > 0 || item.full || item.joined.length > 0)
 
+      const selectionGroups: Record<string, any> = {}
+      ;(guestRows || []).forEach((row: any) => {
+        if (Number(row.stars || 0) <= 0) return
+        const albumId = String(row.album_id || '')
+        const actor = String(row.actor_key || '')
+        const key = `${albumId}::${actor}`
+        const updatedAt = new Date(row.updated_at || 0).getTime()
+        if (!selectionGroups[key]) {
+          selectionGroups[key] = {
+            albumId,
+            actor,
+            title: getTitle(albumId),
+            guestLabel: String(row.guest_label || '').trim() || 'Khách',
+            count: 0,
+            updatedAt: 0,
+          }
+        }
+        selectionGroups[key].count += 1
+        if (updatedAt >= selectionGroups[key].updatedAt) {
+          selectionGroups[key].updatedAt = updatedAt
+          if (String(row.guest_label || '').trim()) selectionGroups[key].guestLabel = String(row.guest_label).trim()
+        }
+      })
+
+      setGuestSelectionActivity(
+        Object.values(selectionGroups)
+          .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+          .slice(0, 12)
+      )
       setNotificationItems(notices)
     } catch (e) {
       console.error('Lỗi tải thông báo:', e)
@@ -2915,14 +3022,18 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   let welcomeMessage = ''
   if (!isSharedGuest) {
-    if (displayName.trim()) welcomeMessage = `Xin chào ${displayName.trim()}`
+    if (displayName.trim()) welcomeMessage = `Xin chào, ${displayName.trim()} 👋`
   } else {
     if (isCollectEnabled && guestCustomerName.trim()) {
-      welcomeMessage = `Xin chào ${guestCustomerName.trim()}`
+      welcomeMessage = `Xin chào, ${guestCustomerName.trim()} 👋`
     } else {
-      welcomeMessage = 'Xin chào bạn'
+      welcomeMessage = 'Xin chào bạn 👋'
     }
   }
+
+  const adminTotalGuestSelections = guestSelectionActivity.reduce((sum: number, item: any) => sum + Number(item?.count || 0), 0)
+  const adminTotalViewers = notificationItems.reduce((sum: number, item: any) => sum + Number(item?.viewers || 0), 0)
+  const recentAdminAlbums = filteredAlbums.slice(0, 5)
 
   if (loading) {
     return (
@@ -3020,7 +3131,13 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             ) : (
               !isSharedGuest && (
                 <>
-                  <div className="relative w-24 sm:w-44 flex-shrink-0">
+                  <nav className="hidden lg:flex items-center gap-1 flex-shrink-0">
+                    <button type="button" className="px-3 py-2 text-xs font-semibold text-emerald-600 border-b-2 border-emerald-600">Trang chủ</button>
+                    <button type="button" onClick={() => document.getElementById('all-albums')?.scrollIntoView({ behavior: 'smooth' })} className={`px-3 py-2 text-xs font-semibold transition ${isDarkMode ? 'text-white/65 hover:text-white' : 'text-gray-500 hover:text-gray-900'}`}>Album</button>
+                    <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className={`px-3 py-2 text-xs font-semibold transition ${isDarkMode ? 'text-white/65 hover:text-white' : 'text-gray-500 hover:text-gray-900'}`}>Khách chọn</button>
+                  </nav>
+
+                  <div className="relative w-28 sm:w-48 flex-shrink-0">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <input 
                       type="text"
@@ -3034,42 +3151,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       }`}
                     />
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => router.push('/money')}
-                    className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-bold border transition shadow-2xs cursor-pointer flex-shrink-0 ${
-                      isDarkMode 
-                        ? 'bg-orange-500/10 hover:bg-orange-500/20 border-orange-500/30 text-orange-400' 
-                        : 'bg-orange-50 hover:bg-orange-100 border-orange-200 text-orange-700'
-                    }`}
-                    title="Sổ Quản Lý Thu Chi"
-                  >
-                    <Wallet className="w-3.5 h-3.5 text-orange-500 flex-shrink-0" />
-                    <span>Thu Chi</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsKeyGenOpen(true)}
-                    className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-semibold border transition shadow-2xs cursor-pointer flex-shrink-0 ${
-                      isDarkMode 
-                        ? 'bg-white/10 hover:bg-white/20 border-white/10 text-white' 
-                        : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700'
-                    }`}
-                    title="Quản lý Key Panel"
-                  >
-                    <KeyRound className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
-                    <span>Key Panel</span>
-                  </button>
-
-                  <button
-                    onClick={() => setIsModalOpen(true)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition active:scale-95 cursor-pointer flex-shrink-0"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Thêm album</span>
-                  </button>
                 </>
               )
             )}
@@ -3131,7 +3212,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       </header>
 
       {/* DÒNG LỜI CHÀO LINH HOẠT CHO ADMIN VÀ KHÁCH */}
-      {welcomeMessage && (
+      {welcomeMessage && (selectedAlbum || isSharedGuest) && (
         <div className={`w-full border-b ${isDarkMode ? 'border-white/10' : 'border-gray-100'}`}>
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 sm:py-3">
             <p className={`font-serif italic text-xs sm:text-sm leading-none truncate ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -3160,182 +3241,202 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         )}
 
         {!selectedAlbum ? (
-          <div>
-            <section className="relative rounded-2xl sm:rounded-3xl overflow-hidden shadow-2xl min-h-[260px] sm:min-h-[385px] flex items-center mb-8 sm:mb-12 group">
-              <img 
-                src="/banner.jpg" 
-                alt="Hero Banner" 
-                className="absolute inset-0 w-full h-full object-cover transition-transform duration-1000 ease-out group-hover:scale-105"
-              />
-              <div className="absolute inset-y-0 left-0 w-full sm:w-2/3 lg:w-1/2 bg-gradient-to-r from-white/95 via-white/60 to-transparent pointer-events-none z-[5]" />
-              <div className="absolute inset-y-0 left-0 w-full sm:w-2/3 lg:w-1/2 bg-gradient-to-r from-[#0f1115]/95 via-[#0f1115]/60 to-transparent pointer-events-none z-[5] opacity-0 dark:opacity-100 transition-opacity duration-500" />
+          <div className="space-y-7 sm:space-y-9">
+            {/* ADMIN HERO */}
+            <section className={`relative overflow-hidden rounded-[26px] sm:rounded-[30px] border shadow-2xl ${isDarkMode ? 'border-white/10 bg-[#0b1d14]' : 'border-emerald-900/10 bg-[#f5f7f3]'}`}>
+              <div className="absolute inset-0">
+                <img src="/banner.jpg" alt="DinhThong Gallery" className="h-full w-full object-cover" />
+                <div className={`absolute inset-0 ${isDarkMode ? 'bg-[linear-gradient(90deg,rgba(3,22,13,.92),rgba(3,25,15,.62),rgba(2,17,11,.34))]' : 'bg-[linear-gradient(90deg,rgba(246,249,245,.96),rgba(242,248,243,.72),rgba(236,245,239,.30))]'}`} />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_15%,rgba(16,185,129,.16),transparent_38%)]" />
+              </div>
 
-              <div className="relative z-10 p-6 sm:p-14 max-w-xl text-gray-900 dark:text-white transform transition-all duration-700 ease-out">
-                <span className="text-[10px] sm:text-[11px] font-bold tracking-[0.2em] sm:tracking-[0.25em] text-emerald-600 dark:text-emerald-400 uppercase drop-shadow-sm block">
-                  DINHTHONG GALLERY
-                </span>
-                <h1 className="text-2xl sm:text-4xl lg:text-5xl font-serif font-medium tracking-tight mt-2 sm:mt-3 leading-tight drop-shadow-sm">
-                  Khoảnh khắc <br />
-                  Lưu giữ <span className="italic font-normal text-emerald-600 dark:text-emerald-300 inline-block">cảm xúc</span>
-                </h1>
+              <div className="relative z-10 flex min-h-[265px] sm:min-h-[310px] flex-col justify-between p-5 sm:p-8 lg:p-10">
+                <div className="flex items-center justify-between gap-3">
+                  <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? 'border-white/10 bg-black/20 text-emerald-200' : 'border-emerald-900/10 bg-white/60 text-emerald-800'}`}>
+                    <ImageIcon className="h-3.5 w-3.5" /> Admin Workspace
+                  </span>
+                  <span className={`hidden sm:block text-[10px] uppercase tracking-[0.2em] ${isDarkMode ? 'text-white/35' : 'text-emerald-950/45'}`}>
+                    DinhThong Gallery · Hà Tĩnh
+                  </span>
+                </div>
+
+                <div className="max-w-2xl py-7 sm:py-9">
+                  <p className={`text-xs font-medium ${isDarkMode ? 'text-emerald-300/85' : 'text-emerald-800'}`}>Xin chào, {displayName.trim() || 'Admin'} 👋</p>
+                  <h1 className={`mt-2 font-serif text-3xl sm:text-4xl lg:text-5xl font-semibold leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-[#10251a]'}`}>
+                    Mỗi bức ảnh là một câu chuyện.
+                  </h1>
+                  <p className={`mt-3 max-w-xl text-xs sm:text-sm leading-6 ${isDarkMode ? 'text-white/55' : 'text-[#365044]'}`}>
+                    Tiếp tục quản lý album, nhận lựa chọn của khách và vận hành toàn bộ DinhThong Gallery trong một không gian thống nhất.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+                  {[
+                    { label: 'Thư mục tổng', value: masterFoldersList.length, icon: FolderSync },
+                    { label: 'Album', value: albums.length, icon: ImageIcon },
+                    { label: 'Ảnh khách chọn', value: adminTotalGuestSelections, icon: ClipboardList },
+                    { label: 'Người xem', value: adminTotalViewers, icon: Eye },
+                  ].map(({ label, value, icon: Icon }) => (
+                    <div key={label} className={`rounded-2xl border px-4 py-3.5 backdrop-blur-xl ${isDarkMode ? 'border-white/10 bg-black/25' : 'border-white/70 bg-white/72 shadow-sm'}`}>
+                      <div className="flex items-center gap-2.5">
+                        <span className={`flex h-8 w-8 items-center justify-center rounded-xl ${isDarkMode ? 'bg-emerald-400/12 text-emerald-300' : 'bg-emerald-600/10 text-emerald-700'}`}><Icon className="h-4 w-4" /></span>
+                        <div>
+                          <div className={`text-lg font-bold leading-none ${isDarkMode ? 'text-white' : 'text-[#14251c]'}`}>{value}</div>
+                          <div className={`mt-1 text-[10px] ${isDarkMode ? 'text-white/45' : 'text-gray-500'}`}>{label}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </section>
 
-            <div className={`w-full h-[1px] mb-6 sm:mb-8 transition-colors ${isDarkMode ? 'bg-white/10' : 'bg-gray-200'}`} />
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg sm:text-xl font-bold font-serif tracking-tight">Thư mục Album</h2>
-                <span className="text-xs text-gray-400">({filteredAlbums.length})</span>
+            {/* RECENT ALBUMS */}
+            <section>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-serif text-lg sm:text-xl font-semibold">Album gần đây</h2>
+                  <p className="mt-0.5 text-[11px] text-gray-400">Mở nhanh những album đang sử dụng.</p>
+                </div>
+                <button type="button" onClick={() => document.getElementById('all-albums')?.scrollIntoView({ behavior: 'smooth' })} className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-500">Xem tất cả →</button>
               </div>
 
-              {!isSharedGuest && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={handleDeleteAllGuestSelectionsFromAllAlbums}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-2xs cursor-pointer ${
-                      isDarkMode 
-                        ? 'bg-red-500/10 hover:bg-red-500/20 border-red-500/30 text-red-400' 
-                        : 'bg-red-50 hover:bg-red-100 border-red-200 text-red-700'
-                    }`}
-                    title="Xóa toàn bộ ảnh khách đã chọn từ tất cả các album"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-red-600" />
-                    <span>Xóa Ảnh Chọn (Tất Cả Album)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => checkAllMasterFolders(masterFoldersList, true)}
-                    disabled={isSyncing}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-2xs cursor-pointer ${
-                      isDarkMode 
-                        ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400' 
-                        : 'bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-700'
-                    }`}
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isSyncing ? 'animate-spin' : ''}`} />
-                    <span>{isSyncing ? 'Đang quét...' : 'Quét Thư Mục Mới'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsMasterModalOpen(true)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-2xs cursor-pointer ${
-                      isDarkMode 
-                        ? 'bg-white/10 hover:bg-white/20 border-white/10 text-white' 
-                        : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700'
-                    }`}
-                  >
-                    <FolderSync className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>Cài Đặt Thư Mục Tổng</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleCleanHomePage}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition shadow-2xs cursor-pointer ${
-                      isDarkMode 
-                        ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30 text-amber-400' 
-                        : 'bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-700'
-                    }`}
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Dọn Dẹp Trang Chủ</span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5 sm:gap-6">
-              {filteredAlbums.map((album) => {
-                const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
-                const hasImageCover = Boolean(coverImage)
-                const isChecked = selectedAlbumIds.has(album.id)
-                const isThisZipping = zippingFolderId === album.id
-
-                return (
-                  <div 
-                    key={album.id}
-                    className={`rounded-2xl overflow-hidden border transition-all duration-300 hover:shadow-lg group ${
-                      isChecked ? 'ring-2 ring-emerald-500' : ''
-                    } ${
-                      isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
-                    }`}
-                  >
-                    <div 
-                      onClick={() => handleOpenAlbum(album)}
-                      className="h-52 sm:h-64 bg-gray-50 dark:bg-[#12141a] relative cursor-pointer overflow-hidden flex items-center justify-center"
-                    >
-                      {hasImageCover ? (
-                        <img 
-                          src={coverImage.replace(/=w\d+.*$/, '=w500-h500-p-k-no')} 
-                          alt={album.title} 
-                          loading="lazy"
-                          decoding="async"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${album.id}=w500-h500-p-k-no`
-                          }}
-                        />
-                      ) : (
-                        <div className="flex items-center justify-center w-full h-full group-hover:scale-105 transition-transform duration-300">
-                          <CustomFolderGraphic className="w-24 h-24 sm:w-28 sm:h-28" />
-                        </div>
-                      )}
-                      
-                      <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
-
-                      <button
-                        onClick={(e) => handleToggleSelectAlbum(album.id, e)}
-                        className="hidden sm:block absolute bottom-3 left-3 p-1.5 rounded-xl bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
-                        title={isChecked ? 'Bỏ chọn' : 'Chọn album'}
-                      >
-                        {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
-                      </button>
-
-                      {!isSharedGuest && (
-                        <button
-                          onClick={(e) => handleDeleteAlbum(album.id, e)}
-                          className="absolute top-3 right-3 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
-                          title="Xóa album"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="p-4 flex items-center justify-between">
-                      <div onClick={() => handleOpenAlbum(album)} className="cursor-pointer truncate pr-2">
-                        <h3 className="font-semibold text-sm hover:text-emerald-600 transition-colors truncate">
-                          {customNames[album.id] || album.title}
-                        </h3>
-                        <p className="text-[11px] text-gray-400 mt-0.5">Nhấp để xem</p>
-                      </div>
-
-                      <button 
-                        onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)}
-                        disabled={Boolean(zippingFolderId)}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
-                      >
-                        {isThisZipping ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>{zipProgress || 'Vui lòng đợi...'}</span>
-                          </>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                {recentAdminAlbums.map((album) => {
+                  const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
+                  return (
+                    <button key={`recent-${album.id}`} type="button" onClick={() => handleOpenAlbum(album)} className="group text-left min-w-0">
+                      <div className={`relative aspect-[4/3] overflow-hidden rounded-2xl border ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-100'}`}>
+                        {coverImage ? (
+                          <img src={coverImage.replace(/=w\d+.*$/, '=w600-h450-p-k-no')} alt={album.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
                         ) : (
-                          <>
-                            <Download className="w-3.5 h-3.5" />
-                            <span>Tải</span>
-                          </>
+                          <div className="flex h-full w-full items-center justify-center"><CustomFolderGraphic className="w-20 h-20" /></div>
                         )}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent opacity-70" />
+                      </div>
+                      <div className="mt-2 truncate text-xs font-semibold">{customNames[album.id] || album.title}</div>
+                      <div className="mt-0.5 text-[10px] text-gray-400">Nhấp để mở album</div>
+                    </button>
+                  )
+                })}
+                {recentAdminAlbums.length === 0 && (
+                  <div className={`col-span-full rounded-2xl border border-dashed p-8 text-center text-xs ${isDarkMode ? 'border-white/10 text-white/40' : 'border-gray-200 text-gray-400'}`}>Chưa có album phù hợp.</div>
+                )}
+              </div>
+            </section>
+
+            <section className="grid xl:grid-cols-[minmax(0,1.55fr)_minmax(330px,.65fr)] gap-5 sm:gap-6 items-start">
+              {/* ALBUM COLLECTION */}
+              <div id="all-albums" className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-white/[0.025]' : 'border-gray-200 bg-white shadow-sm'}`}>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="font-serif text-lg sm:text-xl font-semibold">Bộ sưu tập album</h2>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isDarkMode ? 'bg-white/10 text-white/60' : 'bg-gray-100 text-gray-500'}`}>{filteredAlbums.length}</span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-gray-400">Không dùng giao diện kiểu Drive — mỗi album là một câu chuyện riêng.</p>
+                  </div>
+                  <button type="button" onClick={() => setIsModalOpen(true)} className="hidden sm:flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-emerald-700"><Plus className="h-3.5 w-3.5" /> Thêm album</button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                  {filteredAlbums.map((album) => {
+                    const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
+                    const isChecked = selectedAlbumIds.has(album.id)
+                    const isThisZipping = zippingFolderId === album.id
+                    return (
+                      <article key={album.id} className={`group overflow-hidden rounded-2xl border transition hover:-translate-y-0.5 hover:shadow-xl ${isChecked ? 'ring-2 ring-emerald-500' : ''} ${isDarkMode ? 'border-white/10 bg-[#121b16]' : 'border-gray-200 bg-[#fbfcfa]'}`}>
+                        <div onClick={() => handleOpenAlbum(album)} className="relative aspect-[16/10] cursor-pointer overflow-hidden">
+                          {coverImage ? (
+                            <img src={coverImage.replace(/=w\d+.*$/, '=w700-h500-p-k-no')} alt={album.title} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+                          ) : (
+                            <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-white/5' : 'bg-[#f6f7f3]'}`}><CustomFolderGraphic className="w-24 h-24" /></div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/10" />
+                          <button type="button" onClick={(e) => handleToggleSelectAlbum(album.id, e)} className="absolute left-2.5 top-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-xl border border-white/20 bg-black/35 text-white backdrop-blur-md" title={isChecked ? 'Bỏ chọn album' : 'Chọn album'}>
+                            {isChecked ? <CheckSquare className="h-4 w-4 text-emerald-300" /> : <Square className="h-4 w-4" />}
+                          </button>
+                          <button type="button" onClick={(e) => handleDeleteAlbum(album.id, e)} className="absolute right-2.5 top-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-xl border border-white/20 bg-black/35 text-white/75 backdrop-blur-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-300" title="Xóa album"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                        <div className="p-3.5">
+                          <button type="button" onClick={() => handleOpenAlbum(album)} className="block w-full text-left">
+                            <h3 className="truncate text-sm font-semibold hover:text-emerald-600">{customNames[album.id] || album.title}</h3>
+                            <p className="mt-1 text-[10px] text-gray-400">Album nội bộ · Nhấp để xem</p>
+                          </button>
+                          <div className="mt-3 flex items-center justify-between gap-2">
+                            <span className={`text-[10px] ${isDarkMode ? 'text-white/35' : 'text-gray-400'}`}>DinhThong Gallery</span>
+                            <button type="button" onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)} disabled={Boolean(zippingFolderId)} className={`flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[10px] font-semibold transition disabled:opacity-50 ${isDarkMode ? 'bg-white/8 text-white/70 hover:bg-white/12' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
+                              {isThisZipping ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} {isThisZipping ? (zipProgress || 'Đợi...') : 'Tải'}
+                            </button>
+                          </div>
+                        </div>
+                      </article>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* ADMIN ACTIVITY */}
+              <aside className="space-y-4">
+                <div className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#111a15]' : 'border-gray-200 bg-white shadow-sm'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <h3 className="font-serif text-base font-semibold">Khách hàng đã chọn ảnh</h3>
+                      <p className="mt-0.5 text-[10px] text-gray-400">Cập nhật chung cho tất cả tài khoản admin.</p>
+                    </div>
+                    <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className="text-[10px] font-semibold text-emerald-600">Xem tất cả →</button>
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    {guestSelectionActivity.slice(0, 4).map((activity: any) => (
+                      <button key={`${activity.albumId}-${activity.actor}`} type="button" onClick={() => openNotificationAlbum(activity)} className={`w-full rounded-2xl border p-3 text-left transition ${isDarkMode ? 'border-white/8 bg-white/[0.035] hover:bg-white/[0.06]' : 'border-gray-100 bg-gray-50 hover:bg-gray-100'}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-semibold">{activity.guestLabel || 'Khách'}</div>
+                            <div className="mt-0.5 truncate text-[10px] text-gray-400">{activity.title}</div>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-600">{activity.count} ảnh</span>
+                        </div>
+                        <div className="mt-2 text-[9px] text-gray-400">{activity.updatedAt ? new Date(activity.updatedAt).toLocaleString('vi-VN') : ''}</div>
                       </button>
+                    ))}
+                    {guestSelectionActivity.length === 0 && <div className="rounded-2xl border border-dashed border-gray-500/20 px-4 py-8 text-center text-[11px] text-gray-400">Chưa có lựa chọn mới từ khách.</div>}
+                  </div>
+                </div>
+
+                <div className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-emerald-400/15 bg-[linear-gradient(145deg,#102319,#0c1711)]' : 'border-emerald-900/10 bg-[linear-gradient(145deg,#eef8f1,#ffffff)] shadow-sm'}`}>
+                  <div className="flex items-start gap-3">
+                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isDarkMode ? 'bg-emerald-400/10 text-emerald-300' : 'bg-emerald-600/10 text-emerald-700'}`}><ClipboardList className="h-5 w-5" /></span>
+                    <div>
+                      <h3 className="text-sm font-semibold">File ảnh khách chọn</h3>
+                      <p className="mt-1 text-[10px] leading-5 text-gray-400">Một file TXT chung được tạo từ dữ liệu Supabase. Đăng nhập bằng admin nào cũng thấy cùng dữ liệu đã chọn.</p>
                     </div>
                   </div>
-                )
-              })}
-            </div>
+                  <button type="button" onClick={handleDownloadSharedSelectionTxt} disabled={isDownloadingSharedTxt} className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                    {isDownloadingSharedTxt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    {isDownloadingSharedTxt ? 'Đang tạo file...' : 'Tải file .txt chung'}
+                  </button>
+                </div>
+              </aside>
+            </section>
+
+            {/* QUICK ADMIN TOOLS - giữ toàn bộ tính năng quản trị cũ */}
+            <section className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-white/[0.025]' : 'border-gray-200 bg-white shadow-sm'}`}>
+              <div className="mb-4">
+                <h2 className="font-serif text-lg font-semibold">Công cụ quản trị nhanh</h2>
+                <p className="mt-0.5 text-[11px] text-gray-400">Các chức năng cũ được giữ nguyên, chỉ sắp xếp lại để dễ thao tác.</p>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                <button type="button" onClick={() => router.push('/money')} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Wallet className="h-4 w-4 text-orange-500" /><span>Thu Chi</span></button>
+                <button type="button" onClick={() => setIsKeyGenOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><KeyRound className="h-4 w-4 text-amber-500" /><span>Key Panel</span></button>
+                <button type="button" onClick={() => setIsModalOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Plus className="h-4 w-4 text-emerald-500" /><span>Thêm album</span></button>
+                <button type="button" onClick={() => checkAllMasterFolders(masterFoldersList, true)} disabled={isSyncing} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'} disabled:opacity-50`}><RefreshCw className={`h-4 w-4 text-emerald-500 ${isSyncing ? 'animate-spin' : ''}`} /><span>Quét thư mục mới</span></button>
+                <button type="button" onClick={() => setIsMasterModalOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><FolderSync className="h-4 w-4 text-emerald-500" /><span>Cài đặt thư mục tổng</span></button>
+                <button type="button" onClick={handleCleanHomePage} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Trash2 className="h-4 w-4 text-amber-500" /><span>Dọn dẹp trang chủ</span></button>
+                <button type="button" onClick={handleDeleteAllGuestSelectionsFromAllAlbums} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Trash2 className="h-4 w-4 text-red-500" /><span>Xóa ảnh khách chọn</span></button>
+                <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Bell className="h-4 w-4 text-emerald-500" /><span>Thông báo khách</span></button>
+              </div>
+            </section>
           </div>
         ) : isLocked ? (
           <div className="min-h-[60vh] flex items-center justify-center p-4">
@@ -4303,8 +4404,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
             <div className="w-12 h-1 rounded-full bg-emerald-600 mx-auto mb-5" />
-            <h3 className="font-serif font-bold text-lg text-center">Nhập tên của bạn</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2 mb-5">Vui lòng nhập tên để bắt đầu xem và chọn ảnh trong album.</p>
+            <h3 className="font-serif font-bold text-lg text-center">{guestNamePurpose === 'capacity' ? 'Xác nhận khách đã xem album' : 'Xin chào bạn'}</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2 mb-5">
+              {guestNamePurpose === 'capacity'
+                ? 'Album đã đạt giới hạn người xem. Vui lòng nhập tên của bạn để hệ thống kiểm tra bạn có phải khách đã truy cập trước đó hay không.'
+                : 'Album này có bật thu thập thông tin. Vui lòng nhập tên để tiếp tục vào album.'}
+            </p>
             <input
               autoFocus
               value={guestNameInput}
@@ -4317,7 +4422,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               onClick={finalizeGuestEntry} 
               className="w-full mt-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-md transition cursor-pointer"
             >
-              Tiếp tục vào Album
+              {guestNamePurpose === 'capacity' ? 'Kiểm tra & tiếp tục' : 'Tiếp tục vào Album'}
             </button>
           </div>
         </div>
@@ -4332,11 +4437,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             </div>
             <h3 className="font-serif font-bold text-lg">Đã Đủ Số Lượng Người Truy Cập</h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              Album này đã đạt đến giới hạn số lượng khách truy cập cho phép. Nếu bạn là khách đã đăng ký trước đó, hãy thử nhập lại chính xác tên của mình.
+              Album này đã đạt giới hạn số người xem và tên bạn vừa nhập chưa được nhận diện là khách cũ. Vui lòng kiểm tra lại tên hoặc liên hệ người gửi album.
             </p>
             <button
               onClick={() => {
                 setGuestAccessDenied(false)
+                setGuestNamePurpose('capacity')
                 setShowGuestNameModal(true)
               }}
               className="mt-5 w-full py-2.5 rounded-2xl bg-gray-100 dark:bg-white/10 text-xs font-semibold hover:bg-gray-200 dark:hover:bg-white/20 transition cursor-pointer"
@@ -4437,9 +4543,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 mt-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
               {[
-                { id: 'viewers' as const, label: 'Số lượng người xem' },
+                { id: 'selected' as const, label: 'Ảnh khách chọn' },
+                { id: 'viewers' as const, label: 'Số người xem' },
                 { id: 'full' as const, label: 'Chọn đủ ảnh' },
                 { id: 'joined' as const, label: 'Khách gia nhập' },
               ].map(tab => (
@@ -4455,7 +4562,22 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             </div>
 
             <div className="mt-4 max-h-[60vh] overflow-y-auto space-y-3">
-              {notificationItems.length === 0 ? (
+              {notificationTab === 'selected' ? (
+                guestSelectionActivity.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-10">Chưa có ảnh khách chọn.</p>
+                ) : guestSelectionActivity.map((activity: any) => (
+                  <button key={`selected-${activity.albumId}-${activity.actor}`} type="button" onClick={() => openNotificationAlbum(activity)} className={`w-full text-left p-4 rounded-2xl border transition ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-100 hover:bg-emerald-50'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm truncate">{activity.guestLabel || 'Khách'}</div>
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 truncate">Đã chọn ảnh trong <strong>{activity.title}</strong></div>
+                      </div>
+                      <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">{activity.count} ảnh</span>
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-2">{activity.updatedAt ? new Date(activity.updatedAt).toLocaleString('vi-VN') : ''}</div>
+                  </button>
+                ))
+              ) : notificationItems.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-10">Chưa có dữ liệu.</p>
               ) : notificationTab === 'viewers' ? (
                 notificationItems.filter(item => item.viewers > 0).map(item => (
