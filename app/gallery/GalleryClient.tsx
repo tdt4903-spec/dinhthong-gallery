@@ -307,6 +307,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [generatedKey, setGeneratedKey] = useState('')
   const [keyRecords, setKeyRecords] = useState<KeyRecord[]>([])
   const [isSavingKey, setIsSavingKey] = useState(false)
+  const [isLoadingKeys, setIsLoadingKeys] = useState(false)
+  const [keyLoadError, setKeyLoadError] = useState('')
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [zippingFolderId, setZippingFolderId] = useState<string | null>(null)
@@ -1130,11 +1132,36 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const fetchLicenses = async () => {
+    setIsLoadingKeys(true)
+    setKeyLoadError('')
     try {
-      const { data, error } = await supabase.from('panel_licenses').select('*').order('created_at', { ascending: false })
-      if (!error && data) setKeyRecords(data)
-    } catch {}
+      const { data, error } = await supabase
+        .from('panel_licenses')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Không thể tải danh sách Key Panel:', error)
+        setKeyLoadError('Không thể tải danh sách máy. Vui lòng thử lại.')
+        return
+      }
+
+      setKeyRecords((data || []) as KeyRecord[])
+    } catch (error) {
+      console.error('Không thể tải danh sách Key Panel:', error)
+      setKeyLoadError('Không thể tải danh sách máy. Vui lòng thử lại.')
+    } finally {
+      setIsLoadingKeys(false)
+    }
   }
+
+  // Danh sách Key Panel phải hiển thị ngay khi mở cửa sổ quản lý.
+  // Trước đây fetchLicenses() chỉ chạy sau khi tạo/khóa/xóa một key mới,
+  // khiến modal ban đầu luôn trống dù Supabase đã có dữ liệu.
+  useEffect(() => {
+    if (!isKeyGenOpen) return
+    void fetchLicenses()
+  }, [isKeyGenOpen])
 
   const checkAllMasterFolders = async (folders: MasterFolderItem[], isManual = false, existingKnown?: Set<string>) => {
     if (!folders || folders.length === 0) {
@@ -5096,10 +5123,28 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
 
               <div className="pt-3 border-t border-gray-100">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xs font-bold text-gray-900">Danh sách máy ({keyRecords.length})</h3>
-                  <span className="text-[10px] text-gray-400">Đồng bộ Supabase</span>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-900">Danh sách máy ({keyRecords.length})</h3>
+                    <p className="text-[10px] text-gray-400 mt-0.5">Tự động tải từ Supabase khi mở Key Panel</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void fetchLicenses()}
+                    disabled={isLoadingKeys}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-[10px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-60 cursor-pointer"
+                    title="Tải lại danh sách"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLoadingKeys ? 'animate-spin' : ''}`} />
+                    Làm mới
+                  </button>
                 </div>
+
+                {keyLoadError && (
+                  <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-600">
+                    {keyLoadError}
+                  </div>
+                )}
 
                 <div className="border border-gray-100 rounded-xl overflow-hidden shadow-sm">
                   <div className="max-h-48 overflow-x-auto">
@@ -5114,7 +5159,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {keyRecords.length === 0 ? (
+                        {isLoadingKeys ? (
+                          <tr>
+                            <td colSpan={5} className="py-7 text-center text-gray-400 text-xs">
+                              <span className="inline-flex items-center gap-2">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                Đang tải danh sách máy...
+                              </span>
+                            </td>
+                          </tr>
+                        ) : keyRecords.length === 0 ? (
                           <tr>
                             <td colSpan={5} className="py-6 text-center text-gray-400 text-xs">
                               Chưa có máy nào được tạo key trên hệ thống.
