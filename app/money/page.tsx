@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
+import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import * as XLSX from 'xlsx'
 import { 
   Plus, ChevronLeft, ChevronRight, Download, 
@@ -218,6 +219,7 @@ interface Transaction {
 
 export default function MoneyManagerPage() {
   const router = useRouter()
+  const { popup, showAlert, showConfirm, resolvePopup } = useAppPopup()
   const [mounted, setMounted] = useState(false)
   const [user, setUser] = useState<any>(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -341,7 +343,7 @@ export default function MoneyManagerPage() {
           .single()
 
         if (!whitelist) {
-          alert('Tài khoản của bạn không có quyền truy cập vào mục Thu Chi!')
+          await showAlert('Tài khoản của bạn không có quyền truy cập vào mục Thu Chi!')
           await supabase.auth.signOut()
           router.replace('/')
           return
@@ -500,7 +502,7 @@ export default function MoneyManagerPage() {
     if (!supabase) return
     const finalNum = safeCalculateMath(amountStr)
     if (!finalNum || finalNum <= 0) {
-      alert('Vui lòng nhập số tiền hợp lệ!')
+      void showAlert('Vui lòng nhập số tiền hợp lệ!')
       return
     }
 
@@ -516,10 +518,10 @@ export default function MoneyManagerPage() {
     if (!error) {
       setAmountStr('')
       setNote('')
-      alert('Đã lưu thành công!')
+      void showAlert('Đã lưu thành công!')
       fetchTransactions()
     } else {
-      alert('Lỗi lưu: ' + error.message)
+      void showAlert('Lỗi lưu: ' + error.message)
     }
   }
 
@@ -534,7 +536,7 @@ export default function MoneyManagerPage() {
 
     const finalAmount = safeCalculateMath(editAmountStr)
     if (!finalAmount || finalAmount <= 0) {
-      alert('Vui lòng nhập số tiền hợp lệ!')
+      void showAlert('Vui lòng nhập số tiền hợp lệ!')
       return
     }
 
@@ -555,10 +557,10 @@ export default function MoneyManagerPage() {
         setTransactions(prev => prev.map(item => item.id === editingTransaction.id ? { ...editingTransaction, amount: finalAmount } : item))
         setEditingTransaction(null)
       } else {
-        alert('Lỗi lưu: ' + error.message)
+        void showAlert('Lỗi lưu: ' + error.message)
       }
     } catch (err: any) {
-      alert('Lỗi: ' + err.message)
+      void showAlert('Lỗi: ' + err.message)
     } finally {
       setIsSavingEdit(false)
     }
@@ -566,7 +568,7 @@ export default function MoneyManagerPage() {
 
   const handleDelete = async (id: string) => {
     if (!supabase) return
-    if (confirm('Bạn có chắc muốn xóa giao dịch này không?')) {
+    if (await showConfirm('Bạn có chắc muốn xóa giao dịch này không?')) {
       const { error } = await supabase.from('transactions').delete().eq('id', id)
       if (!error) {
         setTransactions(prev => prev.filter(t => t.id !== id))
@@ -577,13 +579,13 @@ export default function MoneyManagerPage() {
   const handleDeleteAll = async () => {
     if (!supabase) return
     if (transactions.length === 0) {
-      alert('Hiện chưa có dữ liệu nào trong sổ để xóa!')
+      void showAlert('Hiện chưa có dữ liệu nào trong sổ để xóa!')
       return
     }
 
-    const confirm1 = confirm(`CẢNH BÁO: Bạn có chắc muốn XÓA TOÀN BỘ ${transactions.length} giao dịch đã nhập?`)
+    const confirm1 = await showConfirm(`CẢNH BÁO: Bạn có chắc muốn XÓA TOÀN BỘ ${transactions.length} giao dịch đã nhập?`)
     if (!confirm1) return
-    const confirm2 = confirm('Hành động này KHÔNG THỂ HOÀN TÁC. Bạn có thực sự muốn xóa sạch?')
+    const confirm2 = await showConfirm('Hành động này KHÔNG THỂ HOÀN TÁC. Bạn có thực sự muốn xóa sạch?')
     if (!confirm2) return
 
     setIsDeletingAll(true)
@@ -591,12 +593,12 @@ export default function MoneyManagerPage() {
       const { error } = await supabase.from('transactions').delete().neq('id', '00000000-0000-0000-0000-000000000000')
       if (!error) {
         setTransactions([])
-        alert('Đã xóa toàn bộ dữ liệu thành công!')
+        void showAlert('Đã xóa toàn bộ dữ liệu thành công!')
       } else {
-        alert('Lỗi khi xóa dữ liệu: ' + error.message)
+        void showAlert('Lỗi khi xóa dữ liệu: ' + error.message)
       }
     } catch (e: any) {
-      alert('Lỗi: ' + e.message)
+      void showAlert('Lỗi: ' + e.message)
     } finally {
       setIsDeletingAll(false)
     }
@@ -615,7 +617,7 @@ export default function MoneyManagerPage() {
       try {
         const buffer = evt.target?.result
         if (!buffer) {
-          alert('File không có nội dung!')
+          void showAlert('File không có nội dung!')
           setIsImporting(false)
           return
         }
@@ -628,7 +630,7 @@ export default function MoneyManagerPage() {
         const rawJson: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' })
 
         if (!rawJson || rawJson.length === 0) {
-          alert('File rỗng hoặc không có dữ liệu!')
+          void showAlert('File rỗng hoặc không có dữ liệu!')
           setIsImporting(false)
           return
         }
@@ -735,7 +737,7 @@ export default function MoneyManagerPage() {
         }
 
         if (formattedToInsert.length === 0) {
-          alert('Không tìm thấy dữ liệu thu chi hợp lệ trong file!')
+          void showAlert('Không tìm thấy dữ liệu thu chi hợp lệ trong file!')
           setIsImporting(false)
           return
         }
@@ -747,10 +749,10 @@ export default function MoneyManagerPage() {
           if (error) throw error
         }
 
-        alert(`Đã nhập thành công ${formattedToInsert.length} giao dịch vào Sổ Thu Chi!`)
+        void showAlert(`Đã nhập thành công ${formattedToInsert.length} giao dịch vào Sổ Thu Chi!`)
         fetchTransactions()
       } catch (err: any) {
-        alert('Lỗi nạp file: ' + err.message)
+        void showAlert('Lỗi nạp file: ' + err.message)
       } finally {
         setIsImporting(false)
         if (fileInputRef.current) fileInputRef.current.value = ''
@@ -763,7 +765,7 @@ export default function MoneyManagerPage() {
   const handleExportExcel = async () => {
     setShowExportMenu(false)
     if (!transactions || transactions.length === 0) {
-      alert('Chưa có dữ liệu nào trong sổ để xuất!')
+      void showAlert('Chưa có dữ liệu nào trong sổ để xuất!')
       return
     }
 
@@ -785,14 +787,14 @@ export default function MoneyManagerPage() {
       const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
       await triggerFileDownload(blob, `Bao_Cao_Thu_Chi_${currentDateStr}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     } catch (err: any) {
-      alert('Lỗi xuất file Excel: ' + err.message)
+      void showAlert('Lỗi xuất file Excel: ' + err.message)
     }
   }
 
   const handleExportCSV = async () => {
     setShowExportMenu(false)
     if (!transactions || transactions.length === 0) {
-      alert('Chưa có dữ liệu nào trong sổ để xuất!')
+      void showAlert('Chưa có dữ liệu nào trong sổ để xuất!')
       return
     }
 
@@ -812,7 +814,7 @@ export default function MoneyManagerPage() {
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
       await triggerFileDownload(blob, `Du_Lieu_Thu_Chi_${currentDateStr}.csv`, 'text/csv')
     } catch (err: any) {
-      alert('Lỗi xuất file CSV: ' + err.message)
+      void showAlert('Lỗi xuất file CSV: ' + err.message)
     }
   }
 

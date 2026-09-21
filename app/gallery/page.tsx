@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { Loader2 } from 'lucide-react'
 import GalleryClient from './GalleryClient'
+import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 
 export default function GalleryPage() {
   const router = useRouter()
+  const { popup, showAlert, resolvePopup } = useAppPopup()
 
   const [checking, setChecking] = useState(true)
   const [showNameModal, setShowNameModal] = useState(false)
@@ -53,13 +55,13 @@ export default function GalleryPage() {
 
         if (whitelistError) {
           console.error('Lỗi đọc allowed_emails:', whitelistError)
-          alert('Không thể kiểm tra thông tin tài khoản. Vui lòng thử lại.')
+          await showAlert('Không thể kiểm tra thông tin tài khoản. Vui lòng thử lại.')
           router.replace('/')
           return
         }
 
         if (!whitelist) {
-          alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
+          await showAlert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
           await supabase.auth.signOut()
           router.replace('/')
           return
@@ -109,7 +111,7 @@ export default function GalleryPage() {
     if (!cleanName) return
 
     if (cleanName.length > 100) {
-      alert('Tên không được dài quá 100 ký tự.')
+      await showAlert('Tên không được dài quá 100 ký tự.')
       return
     }
 
@@ -140,7 +142,7 @@ export default function GalleryPage() {
     } catch (error: any) {
       console.error('Lỗi lưu tên:', error)
 
-      alert(
+      await showAlert(
         'Không thể lưu tên. Vui lòng thử lại.\n\n' +
           (error?.message || '')
       )
@@ -152,6 +154,7 @@ export default function GalleryPage() {
   if (checking) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#f7f8f6] text-gray-500">
+        <AppPopupHost popup={popup} onResolve={resolvePopup} />
         <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-3" />
         <p className="text-xs">Đang kiểm tra quyền truy cập...</p>
       </div>
@@ -161,6 +164,7 @@ export default function GalleryPage() {
   if (showNameModal) {
     return (
       <div className="min-h-screen bg-[#f7f8f6] flex items-center justify-center px-4">
+        <AppPopupHost popup={popup} onResolve={resolvePopup} />
         <div className="w-full max-w-md">
           <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-7 sm:p-8">
             <div className="text-center mb-7">
@@ -218,5 +222,10 @@ export default function GalleryPage() {
     )
   }
 
-  return <GalleryClient displayName={displayName} />
+  return (
+    <>
+      <AppPopupHost popup={popup} onResolve={resolvePopup} />
+      <GalleryClient displayName={displayName} />
+    </>
+  )
 }

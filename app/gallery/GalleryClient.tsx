@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import { createBrowserClient } from '@supabase/ssr'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
@@ -204,6 +205,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const { popup, showAlert, showConfirm, resolvePopup } = useAppPopup()
 
   const isTimeForDarkMode = () => {
     const currentHour = new Date().getHours()
@@ -464,7 +466,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }, [isSharedGuest, currentActiveFolderId])
 
   const handleDeleteAllGuestSelectionsFromAllAlbums = async () => {
-    if (!confirm('CẢNH BÁO: Bạn có chắc chắn muốn XÓA TẤT CẢ ảnh khách đã chọn từ TẤT CẢ các album trên hệ thống không? Hành động này không thể hoàn tác!')) {
+    if (!await showConfirm('CẢNH BÁO: Bạn có chắc chắn muốn XÓA TẤT CẢ ảnh khách đã chọn từ TẤT CẢ các album trên hệ thống không? Hành động này không thể hoàn tác!')) {
       return
     }
 
@@ -478,19 +480,19 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const data = await res.json()
       if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi khi xóa.')
 
-      alert('Đã xóa thành công tất cả ảnh khách chọn trên toàn bộ các album!')
+      void showAlert('Đã xóa thành công tất cả ảnh khách chọn trên toàn bộ các album!')
       await fetchNotifications()
       if (currentActiveFolderId) {
         await fetchSelectionsForFolder(currentActiveFolderId, true)
         await fetchGuestSelections(currentActiveFolderId)
       }
     } catch (e: any) {
-      alert('Lỗi: ' + e.message)
+      void showAlert('Lỗi: ' + e.message)
     }
   }
 
   const handleDeleteGuestSelectionsInCurrentAlbum = async () => {
-    if (!confirm(`Bạn có chắc chắn muốn xóa toàn bộ ảnh khách đã chọn trong "${currentActiveFolderTitle}" không?`)) {
+    if (!await showConfirm(`Bạn có chắc chắn muốn xóa toàn bộ ảnh khách đã chọn trong "${currentActiveFolderTitle}" không?`)) {
       return
     }
 
@@ -507,12 +509,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const data = await res.json()
       if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi khi xóa.')
 
-      alert('Đã xóa thành công ảnh khách chọn trong album này!')
+      void showAlert('Đã xóa thành công ảnh khách chọn trong album này!')
       await fetchNotifications()
       await fetchSelectionsForFolder(currentActiveFolderId, true)
       await fetchGuestSelections(currentActiveFolderId)
     } catch (e: any) {
-      alert('Lỗi: ' + e.message)
+      void showAlert('Lỗi: ' + e.message)
     }
   }
 
@@ -629,11 +631,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const finalizeGuestEntry = async () => {
     const cleanName = guestNameInput.trim()
     if (!cleanName) {
-      alert('Vui lòng nhập tên của bạn.')
+      void showAlert('Vui lòng nhập tên của bạn.')
       return
     }
     if (cleanName.length > 100) {
-      alert('Tên không được dài quá 100 ký tự.')
+      void showAlert('Tên không được dài quá 100 ký tự.')
       return
     }
 
@@ -707,7 +709,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     const resolved = await resolveSharedFolder(albumId)
     if (!resolved) {
-      alert('Không tìm thấy album/thư mục này trên Drive.')
+      void showAlert('Không tìm thấy album/thư mục này trên Drive.')
       return
     }
 
@@ -748,9 +750,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
       await fetchNotifications()
       setGuestViewerCount(0)
-      alert(albumId ? 'Đã xóa số lượng người xem của album này.' : 'Đã xóa toàn bộ số lượng người xem.')
+      void showAlert(albumId ? 'Đã xóa số lượng người xem của album này.' : 'Đã xóa toàn bộ số lượng người xem.')
     } catch (e: any) {
-      alert('Lỗi xóa số người xem: ' + (e?.message || e))
+      void showAlert('Lỗi xóa số người xem: ' + (e?.message || e))
     }
   }
 
@@ -785,7 +787,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         URL.revokeObjectURL(url)
       }, 1000)
     } catch (e: any) {
-      alert('Không thể tải file TXT chung: ' + (e?.message || e))
+      void showAlert('Không thể tải file TXT chung: ' + (e?.message || e))
     } finally {
       setIsDownloadingSharedTxt(false)
     }
@@ -1165,7 +1167,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const checkAllMasterFolders = async (folders: MasterFolderItem[], isManual = false, existingKnown?: Set<string>) => {
     if (!folders || folders.length === 0) {
-      if (isManual) alert('Vui lòng thêm ít nhất 1 Thư Mục Tổng trước khi quét!')
+      if (isManual) void showAlert('Vui lòng thêm ít nhất 1 Thư Mục Tổng trước khi quét!')
       return
     }
     setIsSyncing(true)
@@ -1187,7 +1189,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       }
 
       if (newFoldersDetected.length === 0) {
-        if (isManual) alert('Tất cả thư mục trên Drive đã được đồng bộ đầy đủ!')
+        if (isManual) void showAlert('Tất cả thư mục trên Drive đã được đồng bộ đầy đủ!')
       } else {
         setPendingSyncAlbums(newFoldersDetected)
         setSelectedPendingIds(new Set(newFoldersDetected.map(a => a.id)))
@@ -1422,7 +1424,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const handleDownloadSelectedImagesDesktopZip = async () => {
     if (zippingFolderId) return
     if (selectedDownloadImages.length === 0) {
-      alert('Hãy tick ít nhất 1 ảnh trước khi tải.')
+      void showAlert('Hãy tick ít nhất 1 ảnh trước khi tải.')
       return
     }
 
@@ -1464,7 +1466,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setDownloadSelectedIds(new Set())
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
-      alert('Không thể tạo ZIP ảnh đã chọn: ' + message)
+      void showAlert('Không thể tạo ZIP ảnh đã chọn: ' + message)
     } finally {
       setZippingFolderId(null)
       setZipProgress('')
@@ -1490,7 +1492,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       typeof navigator.canShare !== 'function' ||
       !navigator.canShare({ files: [fileObj] })
     ) {
-      alert('Trình duyệt này chưa hỗ trợ lưu ảnh trực tiếp vào Ảnh. Hãy mở bằng Safari/Chrome mới nhất trên điện thoại.')
+      void showAlert('Trình duyệt này chưa hỗ trợ lưu ảnh trực tiếp vào Ảnh. Hãy mở bằng Safari/Chrome mới nhất trên điện thoại.')
       return false
     }
 
@@ -1627,7 +1629,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     } catch (err: unknown) {
       console.error('Lỗi chuẩn bị ảnh hàng loạt:', err)
       const message = err instanceof Error ? err.message : String(err)
-      alert('Không thể chuẩn bị ảnh để tải: ' + message)
+      void showAlert('Không thể chuẩn bị ảnh để tải: ' + message)
       setMobileDownloadProgress('')
     } finally {
       setIsPreparingMobileImages(false)
@@ -1639,7 +1641,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     const imagesOnly = sourceItems.filter(item => item.type === 'image')
     if (imagesOnly.length === 0) {
-      alert('Không có ảnh nào để tải.')
+      void showAlert('Không có ảnh nào để tải.')
       return
     }
 
@@ -1649,7 +1651,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const handleDownloadSelectedImagesToPhone = async () => {
     if (selectedDownloadImages.length === 0) {
-      alert('Hãy tick ít nhất 1 ảnh trước khi tải.')
+      void showAlert('Hãy tick ít nhất 1 ảnh trước khi tải.')
       return
     }
     await startMobileImageDownload(selectedDownloadImages, `${currentActiveFolderTitle}_da_chon`)
@@ -1670,7 +1672,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         navigator.canShare({ files: pending.files })
 
       if (!canNativeShare) {
-        alert('Trình duyệt này chưa hỗ trợ lưu nhiều ảnh trực tiếp vào album. Hãy mở link bằng Safari trên iPhone/iPad hoặc Chrome mới nhất trên Android.')
+        void showAlert('Trình duyệt này chưa hỗ trợ lưu nhiều ảnh trực tiếp vào album. Hãy mở link bằng Safari trên iPhone/iPad hoặc Chrome mới nhất trên Android.')
         return
       }
 
@@ -1701,7 +1703,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       if (err instanceof DOMException && err.name === 'AbortError') return
       console.error('Lỗi lưu nhiều ảnh:', err)
       const message = err instanceof Error ? err.message : String(err)
-      alert('Không thể mở trình lưu ảnh: ' + message)
+      void showAlert('Không thể mở trình lưu ảnh: ' + message)
     }
   }
 
@@ -1751,7 +1753,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       saveAs(blob, exactFileName)
     } catch (err: any) {
       console.error('Lỗi khi tải ảnh:', err)
-      alert('Có lỗi xảy ra khi tải ảnh: ' + (err?.message || err))
+      void showAlert('Có lỗi xảy ra khi tải ảnh: ' + (err?.message || err))
     } finally {
       setDownloadingId(null)
     }
@@ -1783,7 +1785,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       }
 
       if (targetFiles.length === 0) {
-        alert(`Thư mục "${target.title}" hiện không có tệp nào để tải!`)
+        void showAlert(`Thư mục "${target.title}" hiện không có tệp nào để tải!`)
         setZippingFolderId(null)
         setZipProgress('')
         return
@@ -1840,7 +1842,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         saveAs(zipContent, `${target.title}.zip`)
       }
     } catch (err: any) {
-      alert('Có lỗi xảy ra khi tải album: ' + err.message)
+      void showAlert('Có lỗi xảy ra khi tải album: ' + err.message)
     } finally {
       setZippingFolderId(null)
       setZipProgress('')
@@ -1867,7 +1869,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     } else {
       const selectedFiles = visibleItems.filter(f => selectedItemIds.has(f.id) && f.type !== 'folder')
       if (selectedFiles.length === 0) {
-        alert('Vui lòng chọn ít nhất 1 tệp ảnh/video để tải!')
+        void showAlert('Vui lòng chọn ít nhất 1 tệp ảnh/video để tải!')
         return
       }
 
@@ -1921,7 +1923,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
         setSelectedItemIds(new Set())
       } catch (e: any) {
-        alert('Lỗi tải tệp: ' + e.message)
+        void showAlert('Lỗi tải tệp: ' + e.message)
       } finally {
         setZippingFolderId(null)
         setZipProgress('')
@@ -1932,10 +1934,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const handleDeleteAlbum = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
     if (isSharedGuest) return
-    if (confirm('Bạn có chắc muốn xóa album này không?')) {
+    if (await showConfirm('Bạn có chắc muốn xóa album này không?')) {
       const { error } = await supabase.from('albums').delete().eq('id', id)
       if (!error) await fetchAlbumsFromSupabase()
-      else alert('Lỗi khi xóa: ' + error.message)
+      else void showAlert('Lỗi khi xóa: ' + error.message)
     }
   }
 
@@ -1948,9 +1950,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const { error } = await supabase.from('albums').update({ cover_url: formattedCover }).eq('id', targetId)
       if (!error) {
         await fetchAlbumsFromSupabase()
-        alert('Đã cập nhật ảnh bìa Album trang chủ thành công!')
+        void showAlert('Đã cập nhật ảnh bìa Album trang chủ thành công!')
       } else {
-        alert('Lỗi cập nhật ảnh bìa: ' + error.message)
+        void showAlert('Lỗi cập nhật ảnh bìa: ' + error.message)
       }
     } else {
       const { error } = await supabase.from('custom_covers').upsert([
@@ -1959,9 +1961,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
       if (!error) {
         setAlbumCovers(prev => ({ ...prev, [targetId]: formattedCover }))
-        alert('Đã đặt ảnh bìa cho thư mục con thành công!')
+        void showAlert('Đã đặt ảnh bìa cho thư mục con thành công!')
       } else {
-        alert('Lỗi lưu ảnh bìa: ' + error.message)
+        void showAlert('Lỗi lưu ảnh bìa: ' + error.message)
       }
     }
   }
@@ -1999,7 +2001,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       await fetchAlbumsFromSupabase()
       setIsModalOpen(false)
     } else {
-      alert('Lỗi khi thêm album: ' + error.message)
+      void showAlert('Lỗi khi thêm album: ' + error.message)
     }
   }
 
@@ -2012,22 +2014,22 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       
       const { error } = await supabase.from('item_comments').upsert({ id: itemId, comment: text })
       if (error) throw error
-      alert('Đã lưu bình luận yêu cầu thành công!')
+      void showAlert('Đã lưu bình luận yêu cầu thành công!')
     } catch (err: any) {
-      alert('Lỗi lưu bình luận: ' + err.message)
+      void showAlert('Lỗi lưu bình luận: ' + err.message)
     } finally {
       setIsSavingComment(false)
     }
   }
 
   const handleDeleteAllComments = async () => {
-    if (confirm('CẢNH BÁO: Bạn có chắc muốn XÓA TẤT CẢ bình luận của khách hàng trên hệ thống?')) {
+    if (await showConfirm('CẢNH BÁO: Bạn có chắc muốn XÓA TẤT CẢ bình luận của khách hàng trên hệ thống?')) {
       const { error } = await supabase.from('item_comments').delete().neq('id', '00000000-0000-0000-0000-000000000000')
       if (!error) {
         setComments({})
-        alert('Đã xóa tất cả bình luận thành công!')
+        void showAlert('Đã xóa tất cả bình luận thành công!')
       } else {
-        alert('Lỗi xóa bình luận: ' + error.message)
+        void showAlert('Lỗi xóa bình luận: ' + error.message)
       }
     }
   }
@@ -2044,7 +2046,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const handleClearAllSelections = async () => {
-    if (!confirm('Bạn có chắc muốn xóa tất cả các ảnh đã chọn trong album này không?')) return
+    if (!await showConfirm('Bạn có chắc muốn xóa tất cả các ảnh đã chọn trong album này không?')) return
 
     const folderId = currentActiveFolderId
     let scope = isSharedGuest ? 'guest' : 'default'
@@ -2073,7 +2075,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       localStorage.removeItem('dinhthong_image_ratings')
       if (!isSharedGuest) { await fetchGuestSelections(folderId); await fetchNotifications() }
     } catch (e: any) {
-      alert('Lỗi xóa lựa chọn: ' + (e?.message || e))
+      void showAlert('Lỗi xóa lựa chọn: ' + (e?.message || e))
     }
   }
 
@@ -2093,7 +2095,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const maxSel = Number(activeSetting?.max_select || 0)
     
     if (maxSel > 0 && !selectedItemIds.has(id) && selectedItemIds.size >= maxSel) {
-      alert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
+      void showAlert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
       return
     }
 
@@ -2107,7 +2109,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const handleRateImage = async (imageId: string, stars: number) => {
     if (isSharedGuest && !guestCanSelect) {
-      alert(activeSetting.collect_customer_info ? 'Vui lòng nhập tên để bắt đầu chọn ảnh.' : 'Vui lòng chờ xác thực quyền truy cập.')
+      void showAlert(activeSetting.collect_customer_info ? 'Vui lòng nhập tên để bắt đầu chọn ảnh.' : 'Vui lòng chờ xác thực quyền truy cập.')
       return
     }
 
@@ -2119,7 +2121,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const currentRatedCount = Object.entries(ratings).filter(([id, value]) => currentMediaIds.has(id) && Number(value) > 0).length
       
       if (maxSel > 0 && currentRatedCount >= maxSel) {
-        alert(`Thư mục "${currentActiveFolderTitle}" chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ bớt ảnh khác trước khi chọn thêm.`)
+        void showAlert(`Thư mục "${currentActiveFolderTitle}" chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ bớt ảnh khác trước khi chọn thêm.`)
         return
       }
     }
@@ -2139,28 +2141,28 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     if (isSharedGuest) return
     if (!selectedAlbum) {
       if (selectedAlbumIds.size === 0) return
-      if (confirm(`Bạn có chắc muốn XÓA ${selectedAlbumIds.size} album đã chọn khỏi hệ thống?`)) {
+      if (await showConfirm(`Bạn có chắc muốn XÓA ${selectedAlbumIds.size} album đã chọn khỏi hệ thống?`)) {
         const idsToDelete = Array.from(selectedAlbumIds)
         const { error } = await supabase.from('albums').delete().in('id', idsToDelete)
         if (!error) {
           await fetchAlbumsFromSupabase()
           setSelectedAlbumIds(new Set())
-          alert('Đã xóa thành công các album đã chọn!')
+          void showAlert('Đã xóa thành công các album đã chọn!')
         } else {
-          alert('Lỗi khi xóa: ' + error.message)
+          void showAlert('Lỗi khi xóa: ' + error.message)
         }
       }
     } else {
       if (selectedItemIds.size === 0) return
-      if (confirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM ${selectedItemIds.size} mục đã chọn khỏi hiển thị?`)) {
+      if (await showConfirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM ${selectedItemIds.size} mục đã chọn khỏi hiển thị?`)) {
         const idsToHide = Array.from(selectedItemIds).map(id => ({ id }))
         const { error } = await supabase.from('hidden_items').insert(idsToHide)
         if (!error) {
           setHiddenItemIds(prev => new Set([...Array.from(prev), ...Array.from(selectedItemIds)]))
           setSelectedItemIds(new Set())
-          alert('Đã xóa dứt điểm các mục đã chọn!')
+          void showAlert('Đã xóa dứt điểm các mục đã chọn!')
         } else {
-          alert('Lỗi khi xóa: ' + error.message)
+          void showAlert('Lỗi khi xóa: ' + error.message)
         }
       }
     }
@@ -2194,9 +2196,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       })
 
       setIsManageVisibilityOpen(false)
-      alert('Đã cập nhật trạng thái hiển thị thành công!')
+      void showAlert('Đã cập nhật trạng thái hiển thị thành công!')
     } catch (err: any) {
-      alert('Lỗi lưu: ' + err.message)
+      void showAlert('Lỗi lưu: ' + err.message)
     } finally {
       setIsSavingVisibility(false)
     }
@@ -2249,9 +2251,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       }))
 
       setEditingFolderSetting(null)
-      alert(`Đã lưu cài đặt cho "${newTitle || currentActiveFolderTitle}" thành công!`)
+      void showAlert(`Đã lưu cài đặt cho "${newTitle || currentActiveFolderTitle}" thành công!`)
     } catch (err: any) {
-      alert('Lỗi lưu cài đặt: ' + err.message)
+      void showAlert('Lỗi lưu cài đặt: ' + err.message)
     }
   }
 
@@ -2394,13 +2396,13 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       e.stopPropagation()
     }
     if (isSharedGuest) return
-    if (confirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM mục "${itemName}" khỏi hiển thị không?`)) {
+    if (await showConfirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM mục "${itemName}" khỏi hiển thị không?`)) {
       const { error } = await supabase.from('hidden_items').insert([{ id: itemId }])
       if (!error) {
         setHiddenItemIds(prev => new Set([...Array.from(prev), itemId]))
         if (previewMedia?.id === itemId) setPreviewMedia(null)
       } else {
-        alert('Lỗi khi xóa: ' + error.message)
+        void showAlert('Lỗi khi xóa: ' + error.message)
       }
     }
   }
@@ -2496,8 +2498,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }, [currentIndex, previewSourceList])
 
   const handleGenerateKey = async () => {
-    if (!customerName.trim()) { alert('Vui lòng nhập Tên khách hàng!'); return; }
-    if (!serialInput.trim()) { alert('Vui lòng nhập Số Seri máy của khách!'); return; }
+    if (!customerName.trim()) { void showAlert('Vui lòng nhập Tên khách hàng!'); return; }
+    if (!serialInput.trim()) { void showAlert('Vui lòng nhập Số Seri máy của khách!'); return; }
 
     setIsSavingKey(true)
     let expireTimestamp = 0
@@ -2536,7 +2538,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     const { error } = await supabase.from('panel_licenses').upsert(newRecord, { onConflict: 'serial' })
     if (!error) await fetchLicenses()
-    else alert('Lỗi lưu Supabase: ' + error.message)
+    else void showAlert('Lỗi lưu Supabase: ' + error.message)
     setIsSavingKey(false)
   }
 
@@ -2544,18 +2546,18 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const newStatus = record.status === 'revoked' ? 'active' : 'revoked'
     const actionName = newStatus === 'revoked' ? 'khóa máy và thu hồi quyền' : 'mở khóa lại cho'
     
-    if (confirm(`Bạn có chắc muốn ${actionName} khách hàng: ${record.customer_name} (${record.serial})?`)) {
+    if (await showConfirm(`Bạn có chắc muốn ${actionName} khách hàng: ${record.customer_name} (${record.serial})?`)) {
       const { error } = await supabase.from('panel_licenses').update({ status: newStatus }).eq('id', record.id)
       if (!error) await fetchLicenses()
-      else alert('Lỗi cập nhật: ' + error.message)
+      else void showAlert('Lỗi cập nhật: ' + error.message)
     }
   }
 
   const handleDeleteRecord = async (id: string) => {
-    if (confirm('Bạn có chắc muốn xóa bản ghi này khỏi danh sách quản lý?')) {
+    if (await showConfirm('Bạn có chắc muốn xóa bản ghi này khỏi danh sách quản lý?')) {
       const { error } = await supabase.from('panel_licenses').delete().eq('id', id)
       if (!error) await fetchLicenses()
-      else alert('Lỗi khi xóa: ' + error.message)
+      else void showAlert('Lỗi khi xóa: ' + error.message)
     }
   }
 
@@ -2581,14 +2583,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       await fetchAlbumsFromSupabase()
       checkAllMasterFolders(updatedMasters, false)
     } catch (err: any) {
-      alert('Lỗi: ' + err.message)
+      void showAlert('Lỗi: ' + err.message)
     } finally {
       setIsSyncing(false)
     }
   }
 
   const handleDeleteMasterFolder = async (id: string) => {
-    if (confirm('Bạn có chắc muốn xóa thư mục tổng này khỏi danh sách quản lý?')) {
+    if (await showConfirm('Bạn có chắc muốn xóa thư mục tổng này khỏi danh sách quản lý?')) {
       const { error } = await supabase.from('master_folders').delete().eq('id', id)
       if (!error) setMasterFoldersList(prev => prev.filter(f => f.id !== id))
     }
@@ -2601,18 +2603,18 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     const childAlbumsToDelete = (albums || []).filter(a => a && !masterUrls.has(a.driveUrl.trim()) && !masterIds.has(a.id))
     if (childAlbumsToDelete.length === 0) {
-      alert('Trang chủ đã chuẩn xác, chỉ chứa các Thư Mục Tổng!')
+      void showAlert('Trang chủ đã chuẩn xác, chỉ chứa các Thư Mục Tổng!')
       return
     }
 
-    if (confirm(`Tìm thấy ${childAlbumsToDelete.length} thư mục con đang bị tràn ra ngoài trang chủ. Bấm OK để đưa toàn bộ vào bên trong Thư Mục Tổng tương ứng?`)) {
+    if (await showConfirm(`Tìm thấy ${childAlbumsToDelete.length} thư mục con đang bị tràn ra ngoài trang chủ. Bấm OK để đưa toàn bộ vào bên trong Thư Mục Tổng tương ứng?`)) {
       const idsToDelete = childAlbumsToDelete.map(a => a.id)
       const { error } = await supabase.from('albums').delete().in('id', idsToDelete)
       if (!error) {
         await fetchAlbumsFromSupabase()
-        alert('Đã dọn dẹp xong! Toàn bộ thư mục con đã nằm gọn bên trong Thư Mục Tổng.')
+        void showAlert('Đã dọn dẹp xong! Toàn bộ thư mục con đã nằm gọn bên trong Thư Mục Tổng.')
       } else {
-        alert('Lỗi dọn dẹp: ' + error.message)
+        void showAlert('Lỗi dọn dẹp: ' + error.message)
       }
     }
   }
@@ -2659,9 +2661,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       })
 
       setIsSyncModalOpen(false)
-      alert(`Đã đồng bộ thành công ${selectedPendingIds.size} thư mục vào bên trong Thư Mục Tổng!`)
+      void showAlert(`Đã đồng bộ thành công ${selectedPendingIds.size} thư mục vào bên trong Thư Mục Tổng!`)
     } catch (e: any) {
-      alert('Lỗi khi đồng bộ: ' + e.message)
+      void showAlert('Lỗi khi đồng bộ: ' + e.message)
     } finally {
       setIsSyncing(false)
     }
@@ -2838,7 +2840,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             const resolved = await resolveSharedFolder(sharedId)
 
             if (!resolved) {
-              alert('Link album không còn hợp lệ hoặc không tìm thấy thư mục Drive. Vui lòng tạo lại link chia sẻ từ Admin.')
+              void showAlert('Link album không còn hợp lệ hoặc không tìm thấy thư mục Drive. Vui lòng tạo lại link chia sẻ từ Admin.')
               setLoading(false)
               return
             }
@@ -2872,7 +2874,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           const { data: whitelist, error } = await supabase.from('allowed_emails').select('email, full_name').eq('email', loggedInEmail).single()
 
           if (error || !whitelist) {
-            alert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
+            void showAlert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
             await supabase.auth.signOut()
             setLoading(false)
             router.replace('/')
@@ -5226,6 +5228,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           </div>
         </div>
       )}
+
+      <AppPopupHost popup={popup} onResolve={resolvePopup} />
 
       {/* Footer */}
       <footer className={`border-t py-6 sm:py-8 text-xs transition-colors ${

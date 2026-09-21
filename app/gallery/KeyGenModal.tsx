@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup';
 
 interface KeyGenModalProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026";
 
 export default function KeyGenModal({ isOpen, onClose }: KeyGenModalProps) {
+  const { popup, showAlert, showConfirm, resolvePopup } = useAppPopup();
   const [customerName, setCustomerName] = useState('');
   const [serial, setSerial] = useState('');
   const [duration, setDuration] = useState('LIFE');
@@ -49,11 +51,11 @@ export default function KeyGenModal({ isOpen, onClose }: KeyGenModalProps) {
 
   const handleGenerateKey = () => {
     if (!customerName.trim()) {
-      alert('Vui lòng nhập Tên khách hàng!');
+      void showAlert('Vui lòng nhập Tên khách hàng!');
       return;
     }
     if (!serial.trim()) {
-      alert('Vui lòng nhập Số Seri của máy khách!');
+      void showAlert('Vui lòng nhập Số Seri của máy khách!');
       return;
     }
 
@@ -103,11 +105,11 @@ export default function KeyGenModal({ isOpen, onClose }: KeyGenModalProps) {
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
-    alert('Đã copy mã key: ' + text);
+    void showAlert('Đã copy mã key: ' + text);
   };
 
-  const handleDeleteRecord = (id: string) => {
-    if (confirm('Bạn có chắc chắn muốn xóa bản ghi này khỏi lịch sử?')) {
+  const handleDeleteRecord = async (id: string) => {
+    if (await showConfirm('Bạn có chắc chắn muốn xóa bản ghi này khỏi lịch sử?')) {
       const updated = records.filter((r) => r.id !== id);
       setRecords(updated);
       localStorage.setItem('dinhthong_key_history', JSON.stringify(updated));
@@ -116,6 +118,7 @@ export default function KeyGenModal({ isOpen, onClose }: KeyGenModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <AppPopupHost popup={popup} onResolve={resolvePopup} />
       <div className="bg-white text-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         
         {/* Header Modal */}
