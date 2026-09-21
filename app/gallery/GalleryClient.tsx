@@ -6,7 +6,7 @@ import { createBrowserClient } from '@supabase/ssr'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import { 
-  Search, Sun, Moon, Plus, 
+  Search, Sun, Moon, Plus, Camera, 
   Trash2, LogOut, User as UserIcon,
   Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, Lock as LockIcon, ZoomIn, ZoomOut, RotateCcw, Send, Bell
 } from 'lucide-react'
@@ -258,7 +258,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [panPosition, setPanPosition] = useState({ x: 0, y: 0 })
   const lastTapRef = useRef<number>(0)
 
-  const [starFilter, setStarFilter] = useState<number | 'all'>('all')
+  const [starFilter, setStarFilter] = useState<number | 'all' | 'selected'>('all')
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
   const [isCommentModalOpen, setIsCommentModalOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -329,6 +329,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   } | null>(null)
 
   const [currentPage, setCurrentPage] = useState(1)
+  const [gridDensity, setGridDensity] = useState<'comfortable' | 'compact'>('comfortable')
   const itemsPerPage = 24
 
   const [useComma, setUseComma] = useState(true)
@@ -944,6 +945,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const filteredMediaFiles = mediaFiles.filter(img => {
     if (starFilter === 'all') return true
     const imgStar = displayRatings[img.id] || 0
+    if (starFilter === 'selected') return imgStar > 0
     return imgStar === starFilter
   })
 
@@ -3033,7 +3035,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const adminTotalGuestSelections = guestSelectionActivity.reduce((sum: number, item: any) => sum + Number(item?.count || 0), 0)
   const adminTotalViewers = notificationItems.reduce((sum: number, item: any) => sum + Number(item?.viewers || 0), 0)
-  const recentAdminAlbums = filteredAlbums.slice(0, 5)
+  const featuredAdminAlbums = filteredAlbums
 
   if (loading) {
     return (
@@ -3045,11 +3047,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   return (
-    <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#0f1115] text-white' : 'bg-[#fcfcfd] text-[#1c1d21]'}`}>
+    <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#06140f] text-white' : 'bg-[#f5f7f3] text-[#1c1d21]'}`}>
       
       {/* HEADER */}
-      <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#0f1115]/95 border-white/10' : 'bg-white/95 border-gray-100'}`}>
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-2">
+      <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#071710]/94 border-white/10' : 'bg-[#fbfdf9]/94 border-emerald-950/8'}`}>
+        <div className="max-w-[1500px] mx-auto px-3 sm:px-6 h-16 sm:h-[72px] flex items-center justify-between gap-2">
           
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {((selectedAlbum && !isSharedGuest) || (isSharedGuest && folderHistory.length > 0)) && (
@@ -3064,70 +3066,27 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </button>
             )}
 
-            <div
+            <button
+              type="button"
               onClick={() => !isSharedGuest && setSelectedAlbum(null)}
-              className={`flex flex-col justify-center min-w-0 ${
-                !isSharedGuest ? 'cursor-pointer' : ''
-              }`}
+              className={`flex min-w-0 items-center gap-2.5 text-left ${!isSharedGuest ? 'cursor-pointer' : 'cursor-default'}`}
             >
-              <div className="flex items-baseline gap-1 leading-none">
-                <span className="text-base sm:text-2xl font-serif font-bold tracking-tight">
-                  DinhThong
-                </span>
-                <span className="font-serif italic text-emerald-600 text-xs sm:text-lg">
-                  gallery
-                </span>
-              </div>
-            </div>
+              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${isDarkMode ? 'border-emerald-300/25 bg-emerald-500/10 text-emerald-300' : 'border-emerald-800/15 bg-emerald-700/8 text-emerald-800'}`}>
+                <Camera className="h-4.5 w-4.5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate font-serif text-sm sm:text-lg font-semibold tracking-tight">DinhThong Gallery</span>
+                <span className={`hidden sm:block text-[7px] uppercase tracking-[.18em] ${isDarkMode ? 'text-white/35' : 'text-gray-400'}`}>Moments For A Lifetime</span>
+              </span>
+            </button>
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
             {selectedAlbum && !isLocked ? (
-              <>
-                <div className="relative w-28 sm:w-52 flex-shrink-0">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                  <input 
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Tìm..."
-                    className={`w-full pl-8 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
-                      isDarkMode 
-                        ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
-                        : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-2xs'
-                    }`}
-                  />
-                </div>
-
-                <button
-                  onClick={(e) => handleDownloadAlbumZip(undefined, e)}
-                  disabled={Boolean(zippingFolderId)}
-                  className="hidden sm:flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer disabled:opacity-60 flex-shrink-0"
-                >
-                  {zippingFolderId === (currentActiveFolderId || 'global') ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>{zipProgress || 'Vui lòng đợi...'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Tải album</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => setIsAdminPanelOpen(true)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition cursor-pointer flex-shrink-0"
-                >
-                  <ClipboardList className="w-3.5 h-3.5" />
-                  <span>Ảnh chọn</span>
-                  <span className="bg-emerald-800 px-1.5 py-0.5 rounded-full text-[10px]">
-                    {displaySelectedImagesList.length}
-                  </span>
-                </button>
-              </>
+              <div className={`hidden sm:flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-semibold ${isDarkMode ? 'border-white/10 bg-white/5 text-white/55' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>
+                <ImageIcon className="h-3.5 w-3.5 text-emerald-500" />
+                <span className="max-w-[220px] truncate">{currentActiveFolderTitle || 'Album'}</span>
+              </div>
             ) : (
               !isSharedGuest && (
                 <>
@@ -3137,7 +3096,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className={`px-3 py-2 text-xs font-semibold transition ${isDarkMode ? 'text-white/65 hover:text-white' : 'text-gray-500 hover:text-gray-900'}`}>Khách chọn</button>
                   </nav>
 
-                  <div className="relative w-28 sm:w-48 flex-shrink-0">
+                  <div className="relative hidden sm:block sm:w-48 flex-shrink-0">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                     <input 
                       type="text"
@@ -3211,19 +3170,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       </header>
 
-      {/* DÒNG LỜI CHÀO LINH HOẠT CHO ADMIN VÀ KHÁCH */}
-      {welcomeMessage && (selectedAlbum || isSharedGuest) && (
-        <div className={`w-full border-b ${isDarkMode ? 'border-white/10' : 'border-gray-100'}`}>
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 sm:py-3">
-            <p className={`font-serif italic text-xs sm:text-sm leading-none truncate ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              {welcomeMessage}
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Main Body */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-1">
+      <main className="max-w-[1500px] mx-auto px-3 sm:px-6 py-4 sm:py-6 w-full flex-1">
         
         {/* BANNER CẢNH BÁO ĐỊNH KỲ NGÀY 30 */}
         {!isSharedGuest && getMonthlyCleanWarning() && (
@@ -3241,200 +3189,200 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         )}
 
         {!selectedAlbum ? (
-          <div className="space-y-7 sm:space-y-9">
-            {/* ADMIN HERO */}
-            <section className={`relative overflow-hidden rounded-[26px] sm:rounded-[30px] border shadow-2xl ${isDarkMode ? 'border-white/10 bg-[#0b1d14]' : 'border-emerald-900/10 bg-[#f5f7f3]'}`}>
+          <div className="space-y-5 sm:space-y-6">
+            {/* ADMIN HOME — cinematic dashboard, không dùng bố cục kiểu Google Drive */}
+            <section className={`relative overflow-hidden rounded-[28px] border shadow-[0_28px_80px_rgba(0,0,0,.18)] ${isDarkMode ? 'border-emerald-200/15 bg-[#082017]' : 'border-emerald-900/10 bg-[#eff6f0]'}`}>
               <div className="absolute inset-0">
                 <img src="/banner.jpg" alt="DinhThong Gallery" className="h-full w-full object-cover" />
-                <div className={`absolute inset-0 ${isDarkMode ? 'bg-[linear-gradient(90deg,rgba(3,22,13,.92),rgba(3,25,15,.62),rgba(2,17,11,.34))]' : 'bg-[linear-gradient(90deg,rgba(246,249,245,.96),rgba(242,248,243,.72),rgba(236,245,239,.30))]'}`} />
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_15%,rgba(16,185,129,.16),transparent_38%)]" />
+                <div className={`absolute inset-0 ${isDarkMode ? 'bg-[linear-gradient(90deg,rgba(2,25,17,.93),rgba(3,30,20,.58),rgba(4,23,16,.24))]' : 'bg-[linear-gradient(90deg,rgba(242,248,243,.94),rgba(239,247,241,.68),rgba(236,244,238,.25))]'}`} />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_72%_18%,rgba(52,211,153,.18),transparent_32%)]" />
               </div>
 
-              <div className="relative z-10 flex min-h-[265px] sm:min-h-[310px] flex-col justify-between p-5 sm:p-8 lg:p-10">
+              <div className="relative z-10 min-h-[270px] sm:min-h-[340px] p-5 sm:p-8 lg:p-10 flex flex-col justify-between">
                 <div className="flex items-center justify-between gap-3">
-                  <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${isDarkMode ? 'border-white/10 bg-black/20 text-emerald-200' : 'border-emerald-900/10 bg-white/60 text-emerald-800'}`}>
-                    <ImageIcon className="h-3.5 w-3.5" /> Admin Workspace
-                  </span>
-                  <span className={`hidden sm:block text-[10px] uppercase tracking-[0.2em] ${isDarkMode ? 'text-white/35' : 'text-emerald-950/45'}`}>
-                    DinhThong Gallery · Hà Tĩnh
-                  </span>
+                  <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-[.18em] backdrop-blur-xl ${isDarkMode ? 'border-white/10 bg-black/20 text-emerald-100/80' : 'border-emerald-900/10 bg-white/70 text-emerald-900/70'}`}>
+                    <Camera className="h-3.5 w-3.5" /> DinhThong Gallery
+                  </div>
+                  <div className={`hidden sm:block text-[9px] uppercase tracking-[.24em] ${isDarkMode ? 'text-white/35' : 'text-emerald-950/45'}`}>
+                    Dream · Capture · Preserve · Forever
+                  </div>
                 </div>
 
-                <div className="max-w-2xl py-7 sm:py-9">
-                  <p className={`text-xs font-medium ${isDarkMode ? 'text-emerald-300/85' : 'text-emerald-800'}`}>Xin chào, {displayName.trim() || 'Admin'} 👋</p>
-                  <h1 className={`mt-2 font-serif text-3xl sm:text-4xl lg:text-5xl font-semibold leading-tight tracking-tight ${isDarkMode ? 'text-white' : 'text-[#10251a]'}`}>
-                    Mỗi bức ảnh là một câu chuyện.
+                <div className="max-w-[690px] py-7 sm:py-10">
+                  <h1 className={`font-serif text-4xl sm:text-5xl lg:text-[56px] leading-[1.02] tracking-tight ${isDarkMode ? 'text-white' : 'text-[#0c2b1d]'}`}>
+                    Hello, {displayName.trim() || 'Thông'} 👋
                   </h1>
-                  <p className={`mt-3 max-w-xl text-xs sm:text-sm leading-6 ${isDarkMode ? 'text-white/55' : 'text-[#365044]'}`}>
-                    Tiếp tục quản lý album, nhận lựa chọn của khách và vận hành toàn bộ DinhThong Gallery trong một không gian thống nhất.
+                  <p className={`mt-3 max-w-xl text-xs sm:text-sm leading-6 ${isDarkMode ? 'text-white/64' : 'text-[#385747]'}`}>
+                    Mỗi bức ảnh là một câu chuyện, cảm ơn bạn đã tiếp tục hành trình cùng DinhThong Gallery.
                   </p>
                 </div>
 
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
                   {[
-                    { label: 'Thư mục tổng', value: masterFoldersList.length, icon: FolderSync },
-                    { label: 'Album', value: albums.length, icon: ImageIcon },
-                    { label: 'Ảnh khách chọn', value: adminTotalGuestSelections, icon: ClipboardList },
-                    { label: 'Người xem', value: adminTotalViewers, icon: Eye },
-                  ].map(({ label, value, icon: Icon }) => (
-                    <div key={label} className={`rounded-2xl border px-4 py-3.5 backdrop-blur-xl ${isDarkMode ? 'border-white/10 bg-black/25' : 'border-white/70 bg-white/72 shadow-sm'}`}>
-                      <div className="flex items-center gap-2.5">
-                        <span className={`flex h-8 w-8 items-center justify-center rounded-xl ${isDarkMode ? 'bg-emerald-400/12 text-emerald-300' : 'bg-emerald-600/10 text-emerald-700'}`}><Icon className="h-4 w-4" /></span>
-                        <div>
-                          <div className={`text-lg font-bold leading-none ${isDarkMode ? 'text-white' : 'text-[#14251c]'}`}>{value}</div>
-                          <div className={`mt-1 text-[10px] ${isDarkMode ? 'text-white/45' : 'text-gray-500'}`}>{label}</div>
+                    { label: 'Bộ sưu tập', value: masterFoldersList.length, note: 'Quản lý các bộ sưu tập ảnh', icon: FolderSync, tone: 'emerald' },
+                    { label: 'Album', value: albums.length, note: 'Tổng số album', icon: ImageIcon, tone: 'cyan' },
+                    { label: 'Ảnh khách chọn', value: adminTotalGuestSelections, note: 'Ảnh đã chấm sao', icon: Star, tone: 'rose' },
+                    { label: 'Người xem', value: adminTotalViewers, note: 'Lượt khách đã ghi nhận', icon: Eye, tone: 'slate' },
+                  ].map(({ label, value, note, icon: Icon, tone }) => (
+                    <div key={label} className={`rounded-2xl border px-3.5 py-3.5 sm:px-4 sm:py-4 backdrop-blur-xl ${isDarkMode ? 'border-white/10 bg-[#0a2218]/72' : 'border-white/70 bg-white/78 shadow-sm'}`}>
+                      <div className="flex items-center gap-3">
+                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${
+                          tone === 'rose' ? 'border-rose-300/20 bg-rose-500/15 text-rose-300' :
+                          tone === 'cyan' ? 'border-cyan-300/20 bg-cyan-500/12 text-cyan-300' :
+                          tone === 'slate' ? 'border-white/10 bg-white/8 text-white/70' :
+                          'border-emerald-300/20 bg-emerald-500/14 text-emerald-300'
+                        }`}><Icon className="h-4 w-4" /></span>
+                        <div className="min-w-0">
+                          <div className={`text-[11px] font-medium ${isDarkMode ? 'text-white/72' : 'text-gray-600'}`}>{label}</div>
+                          <div className={`mt-0.5 text-xl sm:text-2xl font-bold leading-none ${isDarkMode ? 'text-white' : 'text-[#123323]'}`}>{value}</div>
                         </div>
                       </div>
+                      <div className={`mt-2 text-[9px] sm:text-[10px] ${isDarkMode ? 'text-white/36' : 'text-gray-400'}`}>{note}</div>
                     </div>
                   ))}
                 </div>
               </div>
             </section>
 
-            {/* RECENT ALBUMS */}
-            <section>
-              <div className="mb-3 flex items-center justify-between gap-3">
+            {/* BỘ SƯU TẬP — dạng cinematic horizontal cards, không có mục Album gần đây */}
+            <section id="all-albums" className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#0b1711]/72' : 'border-emerald-950/8 bg-white/80 shadow-sm'}`}>
+              <div className="mb-4 flex items-end justify-between gap-3">
                 <div>
-                  <h2 className="font-serif text-lg sm:text-xl font-semibold">Album gần đây</h2>
-                  <p className="mt-0.5 text-[11px] text-gray-400">Mở nhanh những album đang sử dụng.</p>
-                </div>
-                <button type="button" onClick={() => document.getElementById('all-albums')?.scrollIntoView({ behavior: 'smooth' })} className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-500">Xem tất cả →</button>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-                {recentAdminAlbums.map((album) => {
-                  const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
-                  return (
-                    <button key={`recent-${album.id}`} type="button" onClick={() => handleOpenAlbum(album)} className="group text-left min-w-0">
-                      <div className={`relative aspect-[4/3] overflow-hidden rounded-2xl border ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-100'}`}>
-                        {coverImage ? (
-                          <img src={coverImage.replace(/=w\d+.*$/, '=w600-h450-p-k-no')} alt={album.title} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center"><CustomFolderGraphic className="w-20 h-20" /></div>
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent opacity-70" />
-                      </div>
-                      <div className="mt-2 truncate text-xs font-semibold">{customNames[album.id] || album.title}</div>
-                      <div className="mt-0.5 text-[10px] text-gray-400">Nhấp để mở album</div>
-                    </button>
-                  )
-                })}
-                {recentAdminAlbums.length === 0 && (
-                  <div className={`col-span-full rounded-2xl border border-dashed p-8 text-center text-xs ${isDarkMode ? 'border-white/10 text-white/40' : 'border-gray-200 text-gray-400'}`}>Chưa có album phù hợp.</div>
-                )}
-              </div>
-            </section>
-
-            <section className="grid xl:grid-cols-[minmax(0,1.55fr)_minmax(330px,.65fr)] gap-5 sm:gap-6 items-start">
-              {/* ALBUM COLLECTION */}
-              <div id="all-albums" className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-white/[0.025]' : 'border-gray-200 bg-white shadow-sm'}`}>
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="font-serif text-lg sm:text-xl font-semibold">Bộ sưu tập album</h2>
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isDarkMode ? 'bg-white/10 text-white/60' : 'bg-gray-100 text-gray-500'}`}>{filteredAlbums.length}</span>
-                    </div>
-                    <p className="mt-0.5 text-[11px] text-gray-400">Không dùng giao diện kiểu Drive — mỗi album là một câu chuyện riêng.</p>
+                  <div className="flex items-center gap-2">
+                    <Star className="h-4 w-4 text-amber-400 fill-amber-400" />
+                    <h2 className="font-serif text-xl sm:text-2xl font-semibold">Bộ sưu tập nổi bật</h2>
                   </div>
-                  <button type="button" onClick={() => setIsModalOpen(true)} className="hidden sm:flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-emerald-700"><Plus className="h-3.5 w-3.5" /> Thêm album</button>
+                  <p className={`mt-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/40' : 'text-gray-400'}`}>
+                    Mỗi album là một câu chuyện riêng — kéo ngang để xem toàn bộ.
+                  </p>
                 </div>
+                <div className="flex items-center gap-2">
+                  <span className={`hidden sm:inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold ${isDarkMode ? 'bg-white/8 text-white/55' : 'bg-gray-100 text-gray-500'}`}>{filteredAlbums.length} album</span>
+                  <button type="button" onClick={() => setIsModalOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-[11px] font-bold text-white hover:bg-emerald-700">
+                    <Plus className="h-3.5 w-3.5" /> Thêm album
+                  </button>
+                </div>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                  {filteredAlbums.map((album) => {
+              <div className="relative mb-3 sm:hidden">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Tìm kiếm album..."
+                  className={`h-10 w-full rounded-xl border pl-9 pr-3 text-[11px] outline-none ${isDarkMode ? 'border-white/10 bg-white/5 text-white placeholder:text-white/30' : 'border-gray-200 bg-gray-50 text-gray-900'}`}
+                />
+              </div>
+
+              {featuredAdminAlbums.length > 0 ? (
+                <div className="flex gap-3.5 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none">
+                  {featuredAdminAlbums.map((album) => {
                     const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
                     const isChecked = selectedAlbumIds.has(album.id)
                     const isThisZipping = zippingFolderId === album.id
                     return (
-                      <article key={album.id} className={`group overflow-hidden rounded-2xl border transition hover:-translate-y-0.5 hover:shadow-xl ${isChecked ? 'ring-2 ring-emerald-500' : ''} ${isDarkMode ? 'border-white/10 bg-[#121b16]' : 'border-gray-200 bg-[#fbfcfa]'}`}>
+                      <article key={album.id} className={`group w-[230px] sm:w-[260px] lg:w-[285px] shrink-0 snap-start overflow-hidden rounded-2xl border transition hover:-translate-y-0.5 hover:shadow-2xl ${isChecked ? 'ring-2 ring-emerald-500' : ''} ${isDarkMode ? 'border-white/10 bg-[#0e2017]' : 'border-gray-200 bg-white'}`}>
                         <div onClick={() => handleOpenAlbum(album)} className="relative aspect-[16/10] cursor-pointer overflow-hidden">
                           {coverImage ? (
-                            <img src={coverImage.replace(/=w\d+.*$/, '=w700-h500-p-k-no')} alt={album.title} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+                            <img src={coverImage.replace(/=w\d+.*$/, '=w800-h520-p-k-no')} alt={album.title} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]" />
                           ) : (
-                            <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-white/5' : 'bg-[#f6f7f3]'}`}><CustomFolderGraphic className="w-24 h-24" /></div>
+                            <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-white/5' : 'bg-[#f3f6f2]'}`}><CustomFolderGraphic className="h-24 w-24" /></div>
                           )}
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-black/10" />
-                          <button type="button" onClick={(e) => handleToggleSelectAlbum(album.id, e)} className="absolute left-2.5 top-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-xl border border-white/20 bg-black/35 text-white backdrop-blur-md" title={isChecked ? 'Bỏ chọn album' : 'Chọn album'}>
-                            {isChecked ? <CheckSquare className="h-4 w-4 text-emerald-300" /> : <Square className="h-4 w-4" />}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/8 to-black/10" />
+                          <button type="button" onClick={(e) => handleToggleSelectAlbum(album.id, e)} className={`absolute left-2.5 top-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-xl border backdrop-blur-md transition ${isChecked ? 'border-emerald-300/60 bg-emerald-600 text-white' : 'border-white/25 bg-black/35 text-white'}`} title={isChecked ? 'Bỏ chọn album' : 'Chọn album'}>
+                            {isChecked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                           </button>
-                          <button type="button" onClick={(e) => handleDeleteAlbum(album.id, e)} className="absolute right-2.5 top-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-xl border border-white/20 bg-black/35 text-white/75 backdrop-blur-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-300" title="Xóa album"><Trash2 className="h-4 w-4" /></button>
-                        </div>
-                        <div className="p-3.5">
-                          <button type="button" onClick={() => handleOpenAlbum(album)} className="block w-full text-left">
-                            <h3 className="truncate text-sm font-semibold hover:text-emerald-600">{customNames[album.id] || album.title}</h3>
-                            <p className="mt-1 text-[10px] text-gray-400">Album nội bộ · Nhấp để xem</p>
-                          </button>
-                          <div className="mt-3 flex items-center justify-between gap-2">
-                            <span className={`text-[10px] ${isDarkMode ? 'text-white/35' : 'text-gray-400'}`}>DinhThong Gallery</span>
-                            <button type="button" onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)} disabled={Boolean(zippingFolderId)} className={`flex items-center gap-1 rounded-full px-2.5 py-1.5 text-[10px] font-semibold transition disabled:opacity-50 ${isDarkMode ? 'bg-white/8 text-white/70 hover:bg-white/12' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
-                              {isThisZipping ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} {isThisZipping ? (zipProgress || 'Đợi...') : 'Tải'}
-                            </button>
+                          <button type="button" onClick={(e) => handleDeleteAlbum(album.id, e)} className="absolute right-2.5 top-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-xl border border-white/20 bg-black/35 text-white/70 backdrop-blur-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-300" title="Xóa album"><Trash2 className="h-4 w-4" /></button>
+                          <div className="absolute inset-x-0 bottom-0 p-3.5 text-white">
+                            <h3 className="truncate font-semibold text-sm">{customNames[album.id] || album.title}</h3>
+                            <div className="mt-1 flex items-center justify-between gap-2 text-[9px] text-white/68">
+                              <span>DinhThong Gallery</span>
+                              <button type="button" onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)} disabled={Boolean(zippingFolderId)} className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/30 px-2 py-1 text-white/85 backdrop-blur-md disabled:opacity-50">
+                                {isThisZipping ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}{isThisZipping ? 'Đợi...' : 'Tải'}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </article>
                     )
                   })}
                 </div>
-              </div>
-
-              {/* ADMIN ACTIVITY */}
-              <aside className="space-y-4">
-                <div className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#111a15]' : 'border-gray-200 bg-white shadow-sm'}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <h3 className="font-serif text-base font-semibold">Khách hàng đã chọn ảnh</h3>
-                      <p className="mt-0.5 text-[10px] text-gray-400">Cập nhật chung cho tất cả tài khoản admin.</p>
-                    </div>
-                    <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className="text-[10px] font-semibold text-emerald-600">Xem tất cả →</button>
-                  </div>
-
-                  <div className="mt-4 space-y-2">
-                    {guestSelectionActivity.slice(0, 4).map((activity: any) => (
-                      <button key={`${activity.albumId}-${activity.actor}`} type="button" onClick={() => openNotificationAlbum(activity)} className={`w-full rounded-2xl border p-3 text-left transition ${isDarkMode ? 'border-white/8 bg-white/[0.035] hover:bg-white/[0.06]' : 'border-gray-100 bg-gray-50 hover:bg-gray-100'}`}>
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="truncate text-xs font-semibold">{activity.guestLabel || 'Khách'}</div>
-                            <div className="mt-0.5 truncate text-[10px] text-gray-400">{activity.title}</div>
-                          </div>
-                          <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-600">{activity.count} ảnh</span>
-                        </div>
-                        <div className="mt-2 text-[9px] text-gray-400">{activity.updatedAt ? new Date(activity.updatedAt).toLocaleString('vi-VN') : ''}</div>
-                      </button>
-                    ))}
-                    {guestSelectionActivity.length === 0 && <div className="rounded-2xl border border-dashed border-gray-500/20 px-4 py-8 text-center text-[11px] text-gray-400">Chưa có lựa chọn mới từ khách.</div>}
-                  </div>
+              ) : (
+                <div className={`rounded-2xl border border-dashed px-5 py-12 text-center text-xs ${isDarkMode ? 'border-white/10 text-white/35' : 'border-gray-200 text-gray-400'}`}>
+                  Không tìm thấy album phù hợp.
                 </div>
-
-                <div className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-emerald-400/15 bg-[linear-gradient(145deg,#102319,#0c1711)]' : 'border-emerald-900/10 bg-[linear-gradient(145deg,#eef8f1,#ffffff)] shadow-sm'}`}>
-                  <div className="flex items-start gap-3">
-                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isDarkMode ? 'bg-emerald-400/10 text-emerald-300' : 'bg-emerald-600/10 text-emerald-700'}`}><ClipboardList className="h-5 w-5" /></span>
-                    <div>
-                      <h3 className="text-sm font-semibold">File ảnh khách chọn</h3>
-                      <p className="mt-1 text-[10px] leading-5 text-gray-400">Một file TXT chung được tạo từ dữ liệu Supabase. Đăng nhập bằng admin nào cũng thấy cùng dữ liệu đã chọn.</p>
-                    </div>
-                  </div>
-                  <button type="button" onClick={handleDownloadSharedSelectionTxt} disabled={isDownloadingSharedTxt} className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
-                    {isDownloadingSharedTxt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    {isDownloadingSharedTxt ? 'Đang tạo file...' : 'Tải file .txt chung'}
-                  </button>
-                </div>
-              </aside>
+              )}
             </section>
 
-            {/* QUICK ADMIN TOOLS - giữ toàn bộ tính năng quản trị cũ */}
-            <section className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-white/[0.025]' : 'border-gray-200 bg-white shadow-sm'}`}>
-              <div className="mb-4">
-                <h2 className="font-serif text-lg font-semibold">Công cụ quản trị nhanh</h2>
-                <p className="mt-0.5 text-[11px] text-gray-400">Các chức năng cũ được giữ nguyên, chỉ sắp xếp lại để dễ thao tác.</p>
+            {/* CÔNG CỤ QUẢN TRỊ */}
+            <section className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#0b1711]/72' : 'border-emerald-950/8 bg-white/80 shadow-sm'}`}>
+              <div className="mb-4 flex items-end justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Settings className="h-4 w-4 text-amber-400" />
+                    <h2 className="font-serif text-xl font-semibold">Công cụ quản trị nhanh</h2>
+                  </div>
+                  <p className={`mt-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/40' : 'text-gray-400'}`}>Giữ nguyên toàn bộ chức năng cũ, sắp xếp lại theo nhóm dễ thao tác.</p>
+                </div>
               </div>
+
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-                <button type="button" onClick={() => router.push('/money')} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Wallet className="h-4 w-4 text-orange-500" /><span>Thu Chi</span></button>
-                <button type="button" onClick={() => setIsKeyGenOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><KeyRound className="h-4 w-4 text-amber-500" /><span>Key Panel</span></button>
-                <button type="button" onClick={() => setIsModalOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Plus className="h-4 w-4 text-emerald-500" /><span>Thêm album</span></button>
-                <button type="button" onClick={() => checkAllMasterFolders(masterFoldersList, true)} disabled={isSyncing} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'} disabled:opacity-50`}><RefreshCw className={`h-4 w-4 text-emerald-500 ${isSyncing ? 'animate-spin' : ''}`} /><span>Quét thư mục mới</span></button>
-                <button type="button" onClick={() => setIsMasterModalOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><FolderSync className="h-4 w-4 text-emerald-500" /><span>Cài đặt thư mục tổng</span></button>
-                <button type="button" onClick={handleCleanHomePage} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Trash2 className="h-4 w-4 text-amber-500" /><span>Dọn dẹp trang chủ</span></button>
-                <button type="button" onClick={handleDeleteAllGuestSelectionsFromAllAlbums} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Trash2 className="h-4 w-4 text-red-500" /><span>Xóa ảnh khách chọn</span></button>
-                <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Bell className="h-4 w-4 text-emerald-500" /><span>Thông báo khách</span></button>
+                <button type="button" onClick={() => router.push('/money')} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Wallet className="h-4 w-4 text-emerald-400" /><span>Thu Chi</span></button>
+                <button type="button" onClick={() => setIsKeyGenOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><KeyRound className="h-4 w-4 text-amber-400" /><span>Key Panel</span></button>
+                <button type="button" onClick={() => setIsModalOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Plus className="h-4 w-4 text-emerald-400" /><span>Thêm album</span></button>
+                <button type="button" onClick={() => checkAllMasterFolders(masterFoldersList, true)} disabled={isSyncing} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'} disabled:opacity-50`}><RefreshCw className={`h-4 w-4 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} /><span>Quét thư mục mới</span></button>
+                <button type="button" onClick={() => setIsMasterModalOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><FolderSync className="h-4 w-4 text-emerald-400" /><span>Cài đặt thư mục tổng</span></button>
+                <button type="button" onClick={handleCleanHomePage} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Trash2 className="h-4 w-4 text-amber-400" /><span>Dọn dẹp trang chủ</span></button>
+                <button type="button" onClick={handleDeleteAllGuestSelectionsFromAllAlbums} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Trash2 className="h-4 w-4 text-red-400" /><span>Xóa ảnh khách chọn</span></button>
+                <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Bell className="h-4 w-4 text-emerald-400" /><span>Thông báo khách</span></button>
+              </div>
+            </section>
+
+            {/* HOẠT ĐỘNG KHÁCH + FILE TXT CHUNG */}
+            <section className="grid lg:grid-cols-[1.2fr_.8fr] gap-4">
+              <div className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#0b1711]/72' : 'border-gray-200 bg-white shadow-sm'}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-serif text-base sm:text-lg font-semibold">Khách hàng đã chọn ảnh</h3>
+                    <p className="mt-0.5 text-[10px] text-gray-400">Thông báo dùng chung cho mọi tài khoản admin.</p>
+                  </div>
+                  <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className="text-[10px] font-semibold text-emerald-500">Xem tất cả →</button>
+                </div>
+                <div className="mt-4 grid sm:grid-cols-2 gap-2.5">
+                  {guestSelectionActivity.slice(0, 4).map((activity: any) => (
+                    <button key={`${activity.albumId}-${activity.actor}`} type="button" onClick={() => openNotificationAlbum(activity)} className={`rounded-2xl border p-3 text-left transition ${isDarkMode ? 'border-white/8 bg-white/[0.035] hover:bg-white/[0.06]' : 'border-gray-100 bg-gray-50 hover:bg-gray-100'}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-semibold">{activity.guestLabel || 'Khách'}</div>
+                          <div className="mt-0.5 truncate text-[10px] text-gray-400">{activity.title}</div>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-500">{activity.count} ảnh</span>
+                      </div>
+                      <div className="mt-2 text-[9px] text-gray-400">{activity.updatedAt ? new Date(activity.updatedAt).toLocaleString('vi-VN') : ''}</div>
+                    </button>
+                  ))}
+                  {guestSelectionActivity.length === 0 && <div className="sm:col-span-2 rounded-2xl border border-dashed border-gray-500/20 px-4 py-8 text-center text-[11px] text-gray-400">Chưa có lựa chọn mới từ khách.</div>}
+                </div>
+              </div>
+
+              <div className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-emerald-300/15 bg-[linear-gradient(145deg,#0d2418,#09150f)]' : 'border-emerald-900/10 bg-[linear-gradient(145deg,#eef8f1,#ffffff)] shadow-sm'}`}>
+                <div className="flex items-start gap-3">
+                  <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isDarkMode ? 'bg-emerald-400/10 text-emerald-300' : 'bg-emerald-600/10 text-emerald-700'}`}><ClipboardList className="h-5 w-5" /></span>
+                  <div>
+                    <h3 className="text-sm font-semibold">File ảnh khách chọn chung</h3>
+                    <p className="mt-1 text-[10px] leading-5 text-gray-400">Dữ liệu lấy từ Supabase nên admin nào đăng nhập cũng xem và tải cùng một file TXT.</p>
+                  </div>
+                </div>
+                <button type="button" onClick={handleDownloadSharedSelectionTxt} disabled={isDownloadingSharedTxt} className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  {isDownloadingSharedTxt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  {isDownloadingSharedTxt ? 'Đang tạo file...' : 'Tải file .txt chung'}
+                </button>
+
+                <div className={`mt-4 rounded-2xl border px-3 py-3 ${isDarkMode ? 'border-white/8 bg-black/15' : 'border-emerald-900/8 bg-white/70'}`}>
+                  <div className="flex items-center gap-2 text-[10px] font-semibold"><Sun className="h-3.5 w-3.5 text-amber-400" /> 06:00 – 18:00 <span className="font-normal text-gray-400">Giao diện sáng</span></div>
+                  <div className="mt-2 flex items-center gap-2 text-[10px] font-semibold"><Moon className="h-3.5 w-3.5 text-indigo-300" /> 18:00 – 06:00 <span className="font-normal text-gray-400">Giao diện tối</span></div>
+                </div>
               </div>
             </section>
           </div>
@@ -3481,204 +3429,169 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           </div>
         ) : (
           <div>
-            <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3 flex-wrap">
-              <button 
-                onClick={() => handleNavigateBreadcrumb(-1)}
-                className={`transition font-medium cursor-pointer ${
-                  folderHistory.length === 0 ? 'text-emerald-600 font-bold' : 'hover:text-emerald-600'
-                }`}
-              >
-                {customNames[selectedAlbum.id] || selectedAlbum.title}
-              </button>
-              {folderHistory.map((folder, index) => (
-                <React.Fragment key={folder.id}>
-                  <ChevronPath className="w-3.5 h-3.5 text-gray-400" />
-                  <button
-                    onClick={() => handleNavigateBreadcrumb(index)}
-                    className={`hover:text-emerald-600 transition cursor-pointer ${
-                      index === folderHistory.length - 1 ? 'text-emerald-600 font-bold' : 'font-medium'
-                    }`}
-                  >
-                    {customNames[folder.id] || folder.title}
-                  </button>
-                </React.Fragment>
-              ))}
-            </div>
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 mb-6 border-b border-gray-200 dark:border-white/10">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-bold font-serif">
-                  {currentActiveFolderTitle}
-                </h2>
-                <div className="flex items-center gap-2 mt-1">
-                  <p className="text-xs text-gray-400">
-                    {loadingImages ? 'Vui lòng đợi' : `${subFolders.length} thư mục, ${mediaFiles.length} hình ảnh`}
-                  </p>
-                  {isSharedGuest && activeSetting.max_select ? (
-                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                      Chọn tối đa: {activeSetting.max_select} ảnh
-                    </span>
-                  ) : null}
-                </div>
+            {/* ALBUM HERO */}
+            <section className={`relative overflow-hidden rounded-[24px] sm:rounded-[28px] border shadow-[0_24px_70px_rgba(0,0,0,.16)] ${isDarkMode ? 'border-emerald-200/12 bg-[#081811]' : 'border-emerald-950/8 bg-[#eff6f0]'}`}>
+              <div className="absolute inset-0">
+                <img src="/banner.jpg" alt="Album background" className="h-full w-full object-cover" />
+                <div className={`absolute inset-0 ${isDarkMode ? 'bg-[linear-gradient(90deg,rgba(3,22,15,.95),rgba(4,28,18,.82),rgba(4,22,15,.50))]' : 'bg-[linear-gradient(90deg,rgba(245,249,246,.96),rgba(239,247,241,.86),rgba(235,245,238,.58))]'}`} />
               </div>
 
-              <div className="flex items-center gap-2 flex-wrap">
-                {!isSharedGuest && (
-                  <>
-                    <button
-                      onClick={handleDeleteGuestSelectionsInCurrentAlbum}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 border border-red-500/20 transition cursor-pointer shadow-2xs"
-                      title="Xóa toàn bộ ảnh khách đã chọn trong album này"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                      <span>Xóa ảnh khách chọn</span>
-                    </button>
-
-                    <button
-                      onClick={handleOpenCurrentFolderSetting}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 transition cursor-pointer shadow-2xs"
-                      title={`Cài đặt riêng cho thư mục: ${currentActiveFolderTitle}`}
-                    >
-                      <Settings className="w-3.5 h-3.5" />
-                      <span>Cài đặt Album</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        fetchComments()
-                        setIsCommentModalOpen(true)
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 border border-amber-500/20 transition cursor-pointer shadow-2xs"
-                      title="Xem danh sách bình luận yêu cầu của khách"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      <span>Bình luận</span>
-                      <span className="bg-amber-500/20 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded-full text-[10px] font-bold">
-                        {commentedImagesList.length}
-                      </span>
-                    </button>
-
-                    <button
-                      onClick={handleOpenVisibilityManager}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-500/10 text-gray-700 dark:text-gray-300 hover:bg-gray-500/20 border border-gray-500/20 transition cursor-pointer shadow-2xs"
-                      title="Xem danh sách tick chọn các mục ẩn / hiện trong album này"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Ẩn / Hiện mục</span>
-                    </button>
-                  </>
-                )}
-
-                {mediaFiles.length > 0 && (
-                  <>
-                    <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 p-1 rounded-xl border border-gray-200 dark:border-white/10 text-xs overflow-x-auto max-w-full">
-                      <span className="px-2 py-1 font-semibold text-gray-500 text-[11px]">Lọc:</span>
-                      <button
-                        onClick={() => { setStarFilter('all'); setCurrentPage(1); }}
-                        className={`px-2.5 py-1 rounded-lg transition font-medium cursor-pointer text-[11px] ${
-                          starFilter === 'all' ? 'bg-emerald-600 text-white shadow' : 'hover:bg-gray-200 dark:hover:bg-white/10'
-                        }`}
-                      >
-                        Tất cả
+              <div className="relative z-10 p-4 sm:p-6 lg:p-7">
+                <div className={`flex items-center gap-1.5 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/48' : 'text-emerald-950/50'}`}>
+                  {!isSharedGuest && (
+                    <button onClick={() => setSelectedAlbum(null)} className="hover:text-emerald-500 transition">Trang chủ</button>
+                  )}
+                  {!isSharedGuest && <ChevronPath className="h-3.5 w-3.5" />}
+                  <button onClick={() => handleNavigateBreadcrumb(-1)} className="hover:text-emerald-500 transition">Album</button>
+                  {folderHistory.map((folder, index) => (
+                    <React.Fragment key={folder.id}>
+                      <ChevronPath className="h-3.5 w-3.5" />
+                      <button onClick={() => handleNavigateBreadcrumb(index)} className={`max-w-[150px] truncate hover:text-emerald-500 transition ${index === folderHistory.length - 1 ? 'font-semibold text-emerald-500' : ''}`}>
+                        {customNames[folder.id] || folder.title}
                       </button>
-                      {[0, 1, 2, 3, 4, 5].map((star) => (
-                        <button
-                          key={star}
-                          onClick={() => { setStarFilter(star); setCurrentPage(1); }}
-                          className={`px-2.5 py-1 rounded-lg transition flex items-center gap-0.5 cursor-pointer text-[11px] ${
-                            starFilter === star ? 'bg-emerald-600 text-white shadow' : 'hover:bg-gray-200 dark:hover:bg-white/10'
-                          }`}
-                        >
-                          <Star className="w-3 h-3 fill-current text-emerald-400" />
-                          <span>{star}</span>
-                        </button>
-                      ))}
+                    </React.Fragment>
+                  ))}
+                </div>
+
+                <div className="mt-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 sm:gap-6">
+                  <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                    <div className={`relative h-20 w-20 sm:h-28 sm:w-28 shrink-0 overflow-hidden rounded-2xl border shadow-xl ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-white bg-white'}`}>
+                      {(selectedAlbum.coverUrl || (albumCovers[selectedAlbum.id] && albumCovers[selectedAlbum.id] !== 'NO_IMAGE')) ? (
+                        <img
+                          src={(selectedAlbum.coverUrl || albumCovers[selectedAlbum.id]).replace(/=w\d+.*$/, '=w480-h480-p-k-no')}
+                          alt={currentActiveFolderTitle}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center"><CustomFolderGraphic className="h-16 w-16" /></div>
+                      )}
                     </div>
 
-                    {selectedImagesList.length > 0 && (
-                      <button
-                        onClick={handleClearAllSelections}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 transition cursor-pointer"
-                        title="Xóa tất cả đánh giá sao"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Xóa ({selectedImagesList.length})</span>
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* MOBILE: chỉ có 1 loại tick trên ảnh = chọn để tải. TXT chỉ lấy từ số sao. */}
-            {downloadableImages.length > 0 && (
-              <div className={`sm:hidden sticky top-16 z-20 -mx-3 mb-5 px-3 py-3 border-y backdrop-blur-xl ${
-                isDarkMode
-                  ? 'bg-[#0f1115]/95 border-white/10'
-                  : 'bg-white/95 border-gray-100'
-              }`}>
-                <div className="flex items-center justify-between gap-2 mb-2.5">
-                  <button
-                    type="button"
-                    onClick={toggleSelectAllDownloadImages}
-                    disabled={isPreparingMobileImages}
-                    className={`flex items-center gap-2 min-w-0 text-left px-2.5 py-2 rounded-xl border transition active:scale-[0.98] disabled:opacity-50 ${
-                      areAllDownloadImagesSelected
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600'
-                        : isDarkMode
-                          ? 'bg-white/5 border-white/10 text-white'
-                          : 'bg-gray-50 border-gray-200 text-gray-700'
-                    }`}
-                  >
-                    {areAllDownloadImagesSelected ? (
-                      <X className="w-4 h-4 flex-shrink-0" />
-                    ) : (
-                      <Check className="w-4 h-4 flex-shrink-0" />
-                    )}
-                    <span className="text-[11px] font-semibold truncate">
-                      {areAllDownloadImagesSelected ? 'Bỏ chọn tất cả' : 'Chọn tất cả để tải'}
-                    </span>
-                  </button>
-
-                  <span className="text-[11px] font-bold text-emerald-600 whitespace-nowrap">
-                    Đã tick tải: {selectedDownloadImages.length}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={handleDownloadSelectedImagesToPhone}
-                    disabled={selectedDownloadImages.length === 0 || isPreparingMobileImages || Boolean(pendingMobileBatchShare)}
-                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold shadow-sm transition active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {isPreparingMobileImages ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>Lưu ảnh đã chọn</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleDownloadAllImagesToPhone}
-                    disabled={isPreparingMobileImages || Boolean(pendingMobileBatchShare)}
-                    className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-[11px] font-bold border transition active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed ${
-                      isDarkMode
-                        ? 'bg-white/10 hover:bg-white/15 border-white/10 text-white'
-                        : 'bg-gray-900 hover:bg-black border-gray-900 text-white'
-                    }`}
-                  >
-                    {isPreparingMobileImages ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>Lưu tất cả ảnh</span>
-                  </button>
-                </div>
-
-                {mobileDownloadProgress && (
-                  <div className="mt-2 text-center text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                    {mobileDownloadProgress}
+                    <div className="min-w-0">
+                      <h1 className={`truncate font-serif text-2xl sm:text-3xl lg:text-[36px] font-semibold tracking-tight ${isDarkMode ? 'text-white' : 'text-[#0e2c1e]'}`}>{currentActiveFolderTitle}</h1>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] sm:text-[10px] font-semibold ${isSharedGuest ? 'border-emerald-400/20 bg-emerald-500/12 text-emerald-400' : isDarkMode ? 'border-white/10 bg-white/6 text-white/55' : 'border-gray-200 bg-white/70 text-gray-500'}`}>
+                          {isSharedGuest ? <Share2 className="h-3 w-3" /> : <LockIcon className="h-3 w-3" />}
+                          {isSharedGuest ? 'Được chia sẻ qua link' : 'Album nội bộ'}
+                        </span>
+                        {activeSetting.max_select ? (
+                          <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-[9px] sm:text-[10px] font-semibold text-amber-500">Tối đa {activeSetting.max_select} ảnh</span>
+                        ) : null}
+                      </div>
+                      <div className={`mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/48' : 'text-gray-500'}`}>
+                        <span>{mediaFiles.length} ảnh</span>
+                        {subFolders.length > 0 && <><span>•</span><span>{subFolders.length} thư mục</span></>}
+                        <span>•</span><span>Bởi DinhThong</span>
+                      </div>
+                    </div>
                   </div>
-                )}
+
+                  {welcomeMessage && (
+                    <div className={`sm:max-w-[280px] sm:text-right rounded-2xl border px-3.5 py-3 backdrop-blur-xl ${isDarkMode ? 'border-white/8 bg-black/15' : 'border-white/70 bg-white/55'}`}>
+                      <div className={`text-sm sm:text-base font-semibold ${isDarkMode ? 'text-white' : 'text-[#153326]'}`}>{welcomeMessage}</div>
+                      <div className={`mt-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/45' : 'text-gray-500'}`}>Cảm ơn bạn đã xem album này!</div>
+                    </div>
+                  )}
+                </div>
               </div>
+            </section>
+
+            {/* MAIN ALBUM CONTROLS */}
+            <section className={`mt-3 rounded-[20px] border p-2.5 sm:p-3 ${isDarkMode ? 'border-white/10 bg-[#0a1510]/88' : 'border-gray-200 bg-white/90 shadow-sm'}`}>
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
+                <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+                  <button
+                    onClick={() => { setStarFilter('all'); setCurrentPage(1) }}
+                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'all' ? 'border-emerald-500 bg-emerald-600 text-white shadow' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                  >
+                    <ImageIcon className="h-3.5 w-3.5" /> Tất cả ảnh ({mediaFiles.length})
+                  </button>
+                  <button
+                    onClick={() => { setStarFilter('selected'); setCurrentPage(1) }}
+                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'selected' ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                  >
+                    <Star className="h-3.5 w-3.5 fill-current" /> Ảnh đã chọn ({displaySelectedImagesList.length})
+                  </button>
+                  <button
+                    onClick={() => { setStarFilter(5); setCurrentPage(1) }}
+                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 5 ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                  >
+                    <Star className="h-3.5 w-3.5 fill-current" /> Ảnh 5 sao ({mediaFiles.filter(img => (displayRatings[img.id] || 0) === 5).length})
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1 lg:w-[230px] lg:flex-none">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Tìm kiếm ảnh..."
+                      className={`h-9 w-full rounded-xl border pl-9 pr-3 text-[11px] outline-none transition ${isDarkMode ? 'border-white/10 bg-white/5 text-white placeholder:text-white/30 focus:border-emerald-500' : 'border-gray-200 bg-gray-50 text-gray-900 focus:border-emerald-500'}`}
+                    />
+                  </div>
+                  <div className={`hidden sm:flex items-center gap-1 rounded-xl border p-1 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-50'}`}>
+                    <button type="button" onClick={() => setGridDensity('comfortable')} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${gridDensity === 'comfortable' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-emerald-500'}`} title="Ảnh lớn"><ImageIcon className="h-3.5 w-3.5" /></button>
+                    <button type="button" onClick={() => setGridDensity('compact')} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${gridDensity === 'compact' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-emerald-500'}`} title="Ảnh nhỏ"><Square className="h-3.5 w-3.5" /></button>
+                  </div>
+                  <button
+                    onClick={() => setIsAdminPanelOpen(true)}
+                    className="hidden sm:inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-[11px] font-bold text-white hover:bg-emerald-700"
+                  >
+                    <ClipboardList className="h-3.5 w-3.5" /> Ảnh chọn <span className="rounded-full bg-black/20 px-1.5 py-0.5 text-[9px]">{displaySelectedImagesList.length}</span>
+                  </button>
+                  <button
+                    onClick={(e) => handleDownloadAlbumZip(undefined, e)}
+                    disabled={Boolean(zippingFolderId)}
+                    className="hidden sm:inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 text-[11px] font-bold text-emerald-500 hover:bg-emerald-500/15 disabled:opacity-50"
+                  >
+                    {zippingFolderId === (currentActiveFolderId || 'global') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                    Tải album
+                  </button>
+                </div>
+              </div>
+
+              {/* Bộ lọc sao chi tiết */}
+              {mediaFiles.length > 0 && (
+                <div className="mt-2.5 flex items-center gap-1.5 overflow-x-auto border-t pt-2.5 scrollbar-none border-gray-200/70 dark:border-white/8">
+                  <span className={`shrink-0 px-1 text-[10px] font-semibold ${isDarkMode ? 'text-white/35' : 'text-gray-400'}`}>Lọc:</span>
+                  <button onClick={() => { setStarFilter('all'); setCurrentPage(1) }} className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === 'all' ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>Tất cả</button>
+                  {[0,1,2,3,4,5].map((star) => (
+                    <button key={star} onClick={() => { setStarFilter(star); setCurrentPage(1) }} className={`shrink-0 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === star ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>
+                      <Star className="h-3 w-3 fill-current text-emerald-400" /> {star}
+                    </button>
+                  ))}
+                  {selectedImagesList.length > 0 && (
+                    <button onClick={handleClearAllSelections} className="ml-auto shrink-0 inline-flex items-center gap-1 rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-red-500"><Trash2 className="h-3 w-3" /> Xóa sao ({selectedImagesList.length})</button>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* ADMIN ALBUM TOOLS — compact, không chiếm không gian của khách */}
+            {!isSharedGuest && (
+              <section className="mt-3 flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+                <button onClick={handleDeleteGuestSelectionsInCurrentAlbum} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-red-500/20 bg-red-500/10 px-3 text-[10px] font-semibold text-red-500"><Trash2 className="h-3.5 w-3.5" /> Xóa ảnh khách chọn</button>
+                <button onClick={handleOpenCurrentFolderSetting} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-500"><Settings className="h-3.5 w-3.5" /> Cài đặt Album</button>
+                <button onClick={() => { fetchComments(); setIsCommentModalOpen(true) }} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 text-[10px] font-semibold text-amber-500"><MessageSquare className="h-3.5 w-3.5" /> Bình luận <span className="rounded-full bg-amber-500/15 px-1.5">{commentedImagesList.length}</span></button>
+                <button onClick={handleOpenVisibilityManager} className={`shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[10px] font-semibold ${isDarkMode ? 'border-white/10 bg-white/5 text-white/60' : 'border-gray-200 bg-gray-50 text-gray-600'}`}><Eye className="h-3.5 w-3.5" /> Ẩn / Hiện mục</button>
+              </section>
             )}
 
+            {/* MOBILE DOWNLOAD ACTIONS — tick chỉ dùng tải ảnh; sao mới dùng TXT */}
+            {downloadableImages.length > 0 && (
+              <section className={`sm:hidden mt-3 rounded-[18px] border p-2.5 ${isDarkMode ? 'border-white/10 bg-[#0a1510]' : 'border-gray-200 bg-white shadow-sm'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <button type="button" onClick={toggleSelectAllDownloadImages} disabled={isPreparingMobileImages} className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[10px] font-semibold ${areAllDownloadImagesSelected ? 'border-emerald-500/30 bg-emerald-500/12 text-emerald-500' : isDarkMode ? 'border-white/10 bg-white/5 text-white/62' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>
+                    {areAllDownloadImagesSelected ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                    {areAllDownloadImagesSelected ? 'Bỏ chọn tải' : 'Chọn tất cả để tải'}
+                  </button>
+                  <span className="text-[10px] font-bold text-emerald-500">Đã tick {selectedDownloadImages.length}</span>
+                </div>
+                {mobileDownloadProgress && <div className="mt-2 text-center text-[9px] text-gray-400">{mobileDownloadProgress}</div>}
+              </section>
+            )}
             {loadingImages ? (
               <div className="flex flex-col items-center justify-center py-24 text-gray-400">
                 <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
@@ -3827,7 +3740,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       </div>
                     )}
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                    <div className={`grid gap-2.5 sm:gap-3 ${gridDensity === 'compact' ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}`}>
                       {paginatedImages
                         .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map((item) => {
@@ -3848,7 +3761,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                             >
                               <div 
                                 onClick={() => setPreviewMedia(item)}
-                                className="h-44 sm:h-56 bg-gray-100 dark:bg-gray-800 relative cursor-pointer overflow-hidden flex items-center justify-center select-none"
+                                className="aspect-[4/5] bg-gray-100 dark:bg-gray-800 relative cursor-pointer overflow-hidden flex items-center justify-center select-none"
                               >
                                 {item.type === 'video' ? (
                                   <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white relative">
@@ -3932,30 +3845,36 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                 )}
                               </div>
 
-                              <div className="p-2.5 sm:p-3 flex items-center justify-between text-xs">
-                                <div className="truncate flex-1 pr-1">
-                                  <span className={`truncate font-medium text-[11px] sm:text-xs block ${isDarkMode ? 'text-white' : 'text-gray-900'}`} title={displayName}>
-                                    {displayName}
-                                  </span>
-                                  {comments[item.id] && (
-                                    <span className="text-[10px] text-amber-500 flex items-center gap-1 truncate mt-0.5 font-medium">
-                                      <MessageSquare className="w-2.5 h-2.5 flex-shrink-0" /> {comments[item.id]}
-                                    </span>
-                                  )}
+                              <div className={`px-2 py-2 sm:px-2.5 sm:py-2.5 border-t ${isDarkMode ? 'border-white/8 bg-[#0d1712]' : 'border-gray-100 bg-white'}`}>
+                                <div className="flex items-center justify-between gap-1">
+                                  <div className="flex min-w-0 items-center gap-0 sm:gap-0.5">
+                                    {[1,2,3,4,5].map((star) => (
+                                      <button
+                                        key={star}
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleRateImage(item.id, currentStar === star ? 0 : star) }}
+                                        className="p-0.5 transition hover:scale-110"
+                                        title={`${star} sao`}
+                                      >
+                                        <Star className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${currentStar >= star ? 'fill-amber-400 text-amber-400' : isDarkMode ? 'text-white/28' : 'text-gray-300'}`} />
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    {comments[item.id] && <MessageSquare className="h-3.5 w-3.5 text-amber-400" />}
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); setPreviewMedia(item) }} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${isDarkMode ? 'text-white/55 hover:bg-white/8 hover:text-white' : 'text-gray-400 hover:bg-gray-100 hover:text-emerald-600'}`} title="Xem lớn"><ZoomIn className="h-3.5 w-3.5" /></button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleDownloadMedia(item, e)}
+                                      disabled={Boolean(downloadingId)}
+                                      className={`hidden sm:flex h-7 w-7 items-center justify-center rounded-lg transition disabled:opacity-50 ${isDarkMode ? 'text-white/55 hover:bg-white/8 hover:text-emerald-300' : 'text-gray-400 hover:bg-gray-100 hover:text-emerald-600'}`}
+                                      title="Tải ảnh"
+                                    >
+                                      {isThisDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                                    </button>
+                                  </div>
                                 </div>
-
-                                <button 
-                                  onClick={(e) => handleDownloadMedia(item, e)}
-                                  disabled={Boolean(downloadingId)}
-                                  className="p-1 text-gray-400 hover:text-emerald-600 transition cursor-pointer disabled:opacity-50 flex-shrink-0"
-                                  title="Lưu tệp về máy"
-                                >
-                                  {isThisDownloading ? (
-                                    <Loader2 className="w-4 h-4 animate-spin text-emerald-600" />
-                                  ) : (
-                                    <Download className="w-4 h-4" />
-                                  )}
-                                </button>
+                                <div className={`mt-1 truncate text-[8px] sm:text-[9px] ${isDarkMode ? 'text-white/26' : 'text-gray-400'}`} title={displayName}>{displayName}</div>
                               </div>
                             </div>
                           )
@@ -3999,7 +3918,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="flex items-center justify-between px-3 py-2 text-white/90 z-30">
+          <div className="sm:hidden grid grid-cols-[42px_1fr_42px] items-center px-1 py-2 text-white z-30">
+            <button onClick={handleClosePreview} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md" aria-label="Đóng ảnh">
+              <BackIcon className="h-5 w-5" />
+            </button>
+            <div className="text-center text-xs font-semibold">{currentIndex + 1} / {previewSourceList.length}</div>
+            <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md disabled:opacity-50" aria-label="Tải ảnh">
+              {downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            </button>
+          </div>
+
+          <div className="hidden sm:flex items-center justify-between px-3 py-2 text-white/90 z-30">
             <div className="truncate max-w-[50vw]">
               <h4 className="text-xs sm:text-sm font-medium truncate">
                 {customNames[previewMedia.id] || previewMedia.name}
@@ -4110,7 +4039,52 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             )}
           </div>
 
-          <div className="flex flex-col items-center gap-2 pb-2 z-30 max-w-xl mx-auto w-full px-2">
+          <div className="sm:hidden z-30 w-full px-1 pb-[max(8px,env(safe-area-inset-bottom))]">
+            <div className="rounded-2xl border border-white/12 bg-black/72 p-2.5 shadow-2xl backdrop-blur-xl">
+              {activeSetting.allow_comments && (
+                <div className="mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-white/6 px-2.5 py-2">
+                  <MessageSquare className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                  <input
+                    type="text"
+                    value={currentCommentInput}
+                    onChange={(e) => setCurrentCommentInput(e.target.value)}
+                    placeholder="Ghi chú yêu cầu sửa ảnh..."
+                    className="min-w-0 flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/35"
+                  />
+                  <button onClick={() => handleSaveComment(previewMedia.id)} disabled={isSavingComment} className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-white disabled:opacity-50">
+                    {isSavingComment ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-center justify-center gap-1 border-b border-white/10 pb-2">
+                {[1,2,3,4,5].map((star) => (
+                  <button key={star} onClick={() => handleRateImage(previewMedia.id, (ratings[previewMedia.id] || 0) === star ? 0 : star)} className="p-1.5">
+                    <Star className={`h-5 w-5 ${(ratings[previewMedia.id] || 0) >= star ? 'fill-amber-400 text-amber-400' : 'text-white/35'}`} />
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {previewMedia.type === 'image' ? (
+                  <button
+                    type="button"
+                    onClick={(e) => toggleMobileDownloadSelection(previewMedia.id, e)}
+                    className={`flex h-10 items-center justify-center gap-2 rounded-xl border text-[11px] font-semibold ${downloadSelectedIds.has(previewMedia.id) ? 'border-emerald-400/35 bg-emerald-500/16 text-emerald-300' : 'border-white/12 bg-white/6 text-white/75'}`}
+                  >
+                    {downloadSelectedIds.has(previewMedia.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                    {downloadSelectedIds.has(previewMedia.id) ? 'Đã chọn tải' : 'Chọn để tải'}
+                  </button>
+                ) : <div />}
+                <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 text-[11px] font-bold text-white disabled:opacity-50">
+                  {downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  Tải ảnh
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="hidden sm:flex flex-col items-center gap-2 pb-2 z-30 max-w-xl mx-auto w-full px-2">
             {activeSetting.allow_comments && (
               <div className="w-full flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl backdrop-blur-md border border-white/15 shadow-xl">
                 <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
@@ -4240,6 +4214,32 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MOBILE: thanh tải cố định giống app ảnh — không ZIP, lưu thẳng qua Share Sheet */}
+      {selectedAlbum && !isLocked && downloadableImages.length > 0 && !previewMedia && (
+        <div className="sm:hidden fixed inset-x-0 bottom-0 z-40 px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 bg-gradient-to-t from-black/85 via-black/70 to-transparent">
+          <div className={`grid grid-cols-2 gap-2 rounded-2xl border p-2 shadow-2xl backdrop-blur-xl ${isDarkMode ? 'border-white/12 bg-[#07150f]/92' : 'border-gray-200 bg-white/94'}`}>
+            <button
+              type="button"
+              onClick={handleDownloadAllImagesToPhone}
+              disabled={isPreparingMobileImages || Boolean(pendingMobileBatchShare)}
+              className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 text-[11px] font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-45"
+            >
+              {isPreparingMobileImages ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Tải album
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadSelectedImagesToPhone}
+              disabled={selectedDownloadImages.length === 0 || isPreparingMobileImages || Boolean(pendingMobileBatchShare)}
+              className={`flex h-11 items-center justify-center gap-2 rounded-xl border text-[11px] font-bold disabled:opacity-40 ${isDarkMode ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300' : 'border-emerald-600/20 bg-emerald-50 text-emerald-700'}`}
+            >
+              <ClipboardList className="h-4 w-4" />
+              Ảnh tải <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[9px] text-white">{selectedDownloadImages.length}</span>
+            </button>
           </div>
         </div>
       )}
