@@ -928,6 +928,26 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
   const subFolders = visibleItems.filter(item => item.type === 'folder')
   const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
+
+  // Quy tắc bìa dứt điểm:
+  // - Thư mục hiện tại có ảnh: luôn hiển thị ảnh bìa.
+  // - Thư mục hiện tại không có ảnh (chỉ chứa thư mục con): mới hiển thị icon folder.
+  // Không bao giờ lấy nhầm cover của selectedAlbum khi đang đứng ở thư mục con.
+  const firstCurrentImage = visibleItems.find(item => item.type === 'image')
+  const cachedCurrentFolderCover = currentActiveFolderId ? albumCovers[currentActiveFolderId] : ''
+  const cachedCoverIsImage = Boolean(cachedCurrentFolderCover && cachedCurrentFolderCover !== 'NO_IMAGE')
+  const currentFolderHasImages = Boolean(firstCurrentImage) || cachedCoverIsImage
+  const rootCustomCover = currentActiveFolderId === selectedAlbum?.id ? (selectedAlbum?.coverUrl || '') : ''
+  const currentFolderCoverUrl = currentFolderHasImages
+    ? String(
+        rootCustomCover ||
+        (cachedCoverIsImage ? cachedCurrentFolderCover : '') ||
+        firstCurrentImage?.coverUrl ||
+        firstCurrentImage?.url ||
+        firstCurrentImage?.fullUrl ||
+        ''
+      )
+    : ''
   const downloadableImages = mediaFiles.filter(item => item.type === 'image')
   const selectedDownloadImages = downloadableImages.filter(item => downloadSelectedIds.has(item.id))
   const areAllDownloadImagesSelected = downloadableImages.length > 0 && selectedDownloadImages.length === downloadableImages.length
@@ -1355,6 +1375,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const fetchAlbumImages = async (driveUrl: string, folderId?: string, guestMode = isSharedGuest) => {
     setLoadingImages(true)
+    // Xóa nội dung thư mục cũ ngay khi chuyển thư mục để header không nháy nhầm ảnh bìa.
+    setItems([])
     setStarFilter('all')
     setCurrentPage(1)
     setSelectedItemIds(new Set())
@@ -1369,8 +1391,26 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         throw new Error(data?.error || `Không thể tải nội dung album (HTTP ${res.status})`)
       }
       const files = Array.isArray(data?.files) ? data.files : []
-      setItems(files)
       const effectiveFolderId = folderId || (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : selectedAlbum?.id || '')
+
+      // Cache bìa THEO CHÍNH THƯ MỤC ĐANG MỞ, không dùng bìa album cha.
+      // Có ảnh => dùng ảnh đầu tiên hợp lệ làm cover. Không có ảnh => đánh dấu NO_IMAGE
+      // để hero chỉ hiện biểu tượng thư mục. Cách này hoạt động ở mọi cấp thư mục con.
+      if (effectiveFolderId) {
+        const firstImage = files.find((f: any) =>
+          f && f.type === 'image' && !hiddenItemIds.has(String(f.id || ''))
+        )
+        const detectedCover = firstImage
+          ? String(firstImage.coverUrl || firstImage.url || firstImage.fullUrl || '')
+          : ''
+
+        setAlbumCovers(prev => ({
+          ...prev,
+          [effectiveFolderId]: detectedCover || 'NO_IMAGE',
+        }))
+      }
+
+      setItems(files)
       if (effectiveFolderId) {
         const mediaItemIds = files.filter((f: any) => f && f.type !== 'folder').map((f: any) => f.id)
         await fetchSelectionsForFolder(effectiveFolderId, true, mediaItemIds, guestMode)
@@ -2301,6 +2341,13 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const handleOpenSubFolder = (folderItem: MediaItem) => {
     const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
     const displayName = customNames[folderItem.id] || folderItem.name
+
+    // Nếu API danh sách cha đã trả sẵn cover của thư mục con thì dùng ngay,
+    // sau đó fetchAlbumImages sẽ xác nhận/làm mới cover theo nội dung thật bên trong.
+    if (folderItem.coverUrl) {
+      setAlbumCovers(prev => ({ ...prev, [folderItem.id]: folderItem.coverUrl as string }))
+    }
+
     const nextHistory = [...folderHistory, { id: folderItem.id, title: displayName, driveUrl: folderDriveUrl }]
     setFolderHistory(nextHistory)
     persistAdminLocation(selectedAlbum, nextHistory)
@@ -3485,12 +3532,28 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <div className="mt-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 sm:gap-6">
                   <div className="flex min-w-0 items-center gap-3 sm:gap-4">
                     <div className={`relative h-20 w-20 sm:h-28 sm:w-28 shrink-0 overflow-hidden rounded-2xl border shadow-xl ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-white bg-white'}`}>
-                      {(selectedAlbum.coverUrl || (albumCovers[selectedAlbum.id] && albumCovers[selectedAlbum.id] !== 'NO_IMAGE')) ? (
+                      {currentFolderCoverUrl ? (
                         <img
-                          src={(selectedAlbum.coverUrl || albumCovers[selectedAlbum.id]).replace(/=w\d+.*$/, '=w480-h480-p-k-no')}
+                          src={currentFolderCoverUrl.replace(/=w\d+.*$/, '=w480-h480-p-k-no')}
                           alt={currentActiveFolderTitle}
                           className="h-full w-full object-cover"
+                          loading="eager"
+                          decoding="async"
+                          onError={(e) => {
+                            // Nếu URL thumbnail lỗi, thử trực tiếp qua Google Drive theo ID ảnh hiện tại.
+                            const fallbackId = firstCurrentImage?.id
+                            if (fallbackId) {
+                              const fallback = `https://lh3.googleusercontent.com/d/${fallbackId}=w480-h480-p-k-no`
+                              if ((e.currentTarget as HTMLImageElement).src !== fallback) {
+                                ;(e.currentTarget as HTMLImageElement).src = fallback
+                              }
+                            }
+                          }}
                         />
+                      ) : loadingImages ? (
+                        <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-white/5' : 'bg-white/70'}`}>
+                          <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
+                        </div>
                       ) : (
                         <div className="flex h-full w-full items-center justify-center"><CustomFolderGraphic className="h-16 w-16" /></div>
                       )}
