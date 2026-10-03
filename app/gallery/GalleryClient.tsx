@@ -3126,10 +3126,64 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#06140f] text-white' : 'bg-[#f5f7f3] text-[#1c1d21]'}`}>
       
       {/* HEADER */}
-      <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#071710]/94 border-white/10' : 'bg-[#fbfdf9]/94 border-emerald-950/8'}`}>
-        <div className="max-w-[1500px] mx-auto px-3 sm:px-6 h-16 sm:h-[72px] flex items-center justify-between gap-2">
+      <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#071710]/94 border-white/10' : 'bg-[#fbfdf9]/94 border-emerald-950/8'} ${selectedAlbum && !isSharedGuest ? 'lg:fixed lg:inset-x-0 lg:top-0 lg:z-[90] lg:h-[66px]' : ''}`}>
+        <div className="max-w-[1500px] mx-auto px-3 sm:px-6 h-16 sm:h-[72px] lg:h-[66px] flex items-center justify-between gap-2">
           
-          <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+          {/* DESKTOP ADMIN ALBUM HEADER — BACK + BRAND */}
+          {selectedAlbum && !isSharedGuest && (
+            <div className="hidden lg:flex items-center gap-3 shrink-0">
+
+              <button
+                type="button"
+                onClick={handleBackToParentFolder}
+                className={`flex h-9 w-9 items-center justify-center rounded-xl border transition ${
+                  isDarkMode
+                    ? 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
+                    : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                }`}
+                title="Quay lại"
+                aria-label="Quay lại"
+              >
+                <BackIcon className="h-4 w-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedAlbum(null)
+                  setFolderHistory([])
+                }}
+                className="flex items-center gap-2.5 text-left"
+              >
+                <span
+                  className={`flex h-9 w-9 items-center justify-center rounded-xl border ${
+                    isDarkMode
+                      ? 'border-emerald-300/20 bg-emerald-500/10 text-emerald-300'
+                      : 'border-emerald-800/15 bg-emerald-700/8 text-emerald-800'
+                  }`}
+                >
+                  <Camera className="h-4 w-4" />
+                </span>
+
+                <span>
+                  <span className="block font-serif text-[15px] font-semibold leading-none">
+                    Dinh Thong Gallery
+                  </span>
+
+                  <span
+                    className={`mt-1 block text-[7px] font-semibold uppercase tracking-[0.2em] ${
+                      isDarkMode ? 'text-white/30' : 'text-gray-400'
+                    }`}
+                  >
+                    Admin workspace
+                  </span>
+                </span>
+              </button>
+
+            </div>
+          )}
+
+          <div className="lg:hidden flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             {((selectedAlbum && !isSharedGuest) || (isSharedGuest && folderHistory.length > 0)) && (
               <button 
                 onClick={handleBackToParentFolder}
@@ -3151,43 +3205,71 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <Camera className="h-4.5 w-4.5" />
               </span>
               <span className="min-w-0">
-                <span className="block truncate font-serif text-sm sm:text-lg font-semibold tracking-tight">DinhThong Gallery</span>
+                <span className="block truncate font-serif text-sm sm:text-lg font-semibold tracking-tight">Dinh Thong Gallery</span>
                 <span className={`hidden sm:block text-[7px] uppercase tracking-[.18em] ${isDarkMode ? 'text-white/35' : 'text-gray-400'}`}>Moments For A Lifetime</span>
               </span>
             </button>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
-            {selectedAlbum && !isLocked ? (
-              <div className={`hidden sm:flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-semibold ${isDarkMode ? 'border-white/10 bg-white/5 text-white/55' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>
-                <ImageIcon className="h-3.5 w-3.5 text-emerald-500" />
-                <span className="max-w-[220px] truncate">{currentActiveFolderTitle || 'Album'}</span>
-              </div>
-            ) : (
-              !isSharedGuest && (
-                <>
-                  <nav className="hidden lg:flex items-center gap-1 flex-shrink-0">
-                    <button type="button" className="px-3 py-2 text-xs font-semibold text-emerald-600 border-b-2 border-emerald-600">Trang chủ</button>
-                    <button type="button" onClick={() => document.getElementById('all-albums')?.scrollIntoView({ behavior: 'smooth' })} className={`px-3 py-2 text-xs font-semibold transition ${isDarkMode ? 'text-white/65 hover:text-white' : 'text-gray-500 hover:text-gray-900'}`}>Album</button>
-                    <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className={`px-3 py-2 text-xs font-semibold transition ${isDarkMode ? 'text-white/65 hover:text-white' : 'text-gray-500 hover:text-gray-900'}`}>Khách chọn</button>
-                  </nav>
+          <div className="ml-auto flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
+            {!selectedAlbum && !isSharedGuest && (
+              <>
+                <nav className="hidden lg:flex items-center gap-1 flex-shrink-0">
+                  <button
+                    type="button"
+                    className="px-3 py-2 text-xs font-semibold text-emerald-600 border-b-2 border-emerald-600"
+                  >
+                    Trang chủ
+                  </button>
 
-                  <div className="relative hidden sm:block sm:w-48 flex-shrink-0">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                    <input 
-                      type="text"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Tìm album..."
-                      className={`w-full pl-7 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
-                        isDarkMode 
-                          ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' 
-                          : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-2xs'
-                      }`}
-                    />
-                  </div>
-                </>
-              )
+                  <button
+                    type="button"
+                    onClick={() =>
+                      document
+                        .getElementById('all-albums')
+                        ?.scrollIntoView({ behavior: 'smooth' })
+                    }
+                    className={`px-3 py-2 text-xs font-semibold transition ${
+                      isDarkMode
+                        ? 'text-white/65 hover:text-white'
+                        : 'text-gray-500 hover:text-gray-900'
+                    }`}
+                  >
+                    Album
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fetchNotifications()
+                      setIsNotificationOpen(true)
+                    }}
+                    className={`px-3 py-2 text-xs font-semibold transition ${
+                      isDarkMode
+                        ? 'text-white/65 hover:text-white'
+                        : 'text-gray-500 hover:text-gray-900'
+                    }`}
+                  >
+                    Khách chọn
+                  </button>
+                </nav>
+
+                <div className="relative hidden sm:block sm:w-48 flex-shrink-0">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Tìm album..."
+                    className={`w-full pl-7 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
+                      isDarkMode
+                        ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500'
+                        : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-2xs'
+                    }`}
+                  />
+                </div>
+              </>
             )}
 
             <div className="flex items-center gap-1.5 pl-1.5 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
@@ -3247,7 +3329,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       </header>
 
       {/* Main Body */}
-      <main className="max-w-[1500px] mx-auto px-3 sm:px-6 py-4 sm:py-6 w-full flex-1">
+      <main className={`max-w-[1500px] mx-auto px-3 sm:px-6 py-4 sm:py-6 w-full flex-1 ${
+        selectedAlbum && !isSharedGuest ? 'lg:pt-[90px]' : ''
+      }`}>
         
         {/* BANNER CẢNH BÁO ĐỊNH KỲ NGÀY 30 */}
         {!isSharedGuest && getMonthlyCleanWarning() && (
@@ -3391,30 +3475,537 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               )}
             </section>
 
-            {/* CÔNG CỤ QUẢN TRỊ */}
-            <section className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#0b1711]/72' : 'border-emerald-950/8 bg-white/80 shadow-sm'}`}>
-              <div className="mb-4 flex items-end justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Settings className="h-4 w-4 text-amber-400" />
-                    <h2 className="font-serif text-xl font-semibold">Công cụ quản trị nhanh</h2>
+            {/* SIDEBAR QUẢN TRỊ DESKTOP */}
+            <aside
+              className={`fixed left-0 top-0 z-[80] hidden h-screen w-[252px] flex-col border-r lg:flex ${
+                isDarkMode
+                  ? 'border-white/10 bg-[#07140e] text-white'
+                  : 'border-emerald-950/10 bg-[#f8faf7] text-[#153426]'
+              }`}
+            >
+              {/* BRAND */}
+              <div
+                className={`flex h-[66px] items-center border-b px-4 py-0 ${
+                  isDarkMode ? 'border-white/10' : 'border-emerald-950/10'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
+                      isDarkMode
+                        ? 'bg-emerald-400/10 text-emerald-300'
+                        : 'bg-emerald-900 text-white'
+                    }`}
+                  >
+                    <Camera className="h-4.5 w-4.5" />
                   </div>
-                  <p className={`mt-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/40' : 'text-gray-400'}`}>Giữ nguyên toàn bộ chức năng cũ, sắp xếp lại theo nhóm dễ thao tác.</p>
+
+                  <div className="min-w-0">
+                    <div className="truncate font-serif text-[15px] font-semibold">
+                      DinhThong Gallery
+                    </div>
+
+                    <div
+                      className={`mt-1 text-[8px] font-semibold uppercase tracking-[0.22em] ${
+                        isDarkMode ? 'text-white/35' : 'text-emerald-950/40'
+                      }`}
+                    >
+                      Admin workspace
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-                <button type="button" onClick={() => router.push('/money')} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Wallet className="h-4 w-4 text-emerald-400" /><span>Thu Chi</span></button>
-                <button type="button" onClick={() => setIsKeyGenOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><KeyRound className="h-4 w-4 text-amber-400" /><span>Key Panel</span></button>
-                <button type="button" onClick={() => router.push('/admin/customer-products')} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><ImageIcon className="h-4 w-4 text-cyan-400" /><span>Dashboard sản phẩm khách hàng</span></button>
-                <button type="button" onClick={() => setIsModalOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Plus className="h-4 w-4 text-emerald-400" /><span>Thêm album</span></button>
-                <button type="button" onClick={() => checkAllMasterFolders(masterFoldersList, true)} disabled={isSyncing} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'} disabled:opacity-50`}><RefreshCw className={`h-4 w-4 text-emerald-400 ${isSyncing ? 'animate-spin' : ''}`} /><span>Quét thư mục mới</span></button>
-                <button type="button" onClick={() => setIsMasterModalOpen(true)} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><FolderSync className="h-4 w-4 text-emerald-400" /><span>Cài đặt thư mục tổng</span></button>
-                <button type="button" onClick={handleCleanHomePage} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Trash2 className="h-4 w-4 text-amber-400" /><span>Dọn dẹp trang chủ</span></button>
-                <button type="button" onClick={handleDeleteAllGuestSelectionsFromAllAlbums} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Trash2 className="h-4 w-4 text-red-400" /><span>Xóa ảnh khách chọn</span></button>
-                <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className={`admin-tool-card ${isDarkMode ? 'admin-tool-dark' : 'admin-tool-light'}`}><Bell className="h-4 w-4 text-emerald-400" /><span>Thông báo khách</span></button>
+              {/* NAV */}
+              <div className="flex-1 overflow-y-auto px-3 py-4">
+
+                {/* ĐIỀU HƯỚNG */}
+                <div className="mb-5">
+                  <div
+                    className={`mb-2 px-2 text-[8px] font-bold uppercase tracking-[0.22em] ${
+                      isDarkMode ? 'text-white/25' : 'text-emerald-950/35'
+                    }`}
+                  >
+                    Điều hướng
+                  </div>
+
+                  <div className="space-y-1">
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.scrollTo({
+                          top: 0,
+                          behavior: 'smooth',
+                        })
+                      }
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Camera className="h-4 w-4 text-emerald-400" />
+                      <span>Trang chủ</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        fetchNotifications()
+                        setIsNotificationOpen(true)
+                      }}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Bell className="h-4 w-4 text-emerald-400" />
+                      <span>Khách chọn</span>
+                    </button>
+
+                  </div>
+                </div>
+
+                {/* SẢN PHẨM KHÁCH HÀNG */}
+                <div className="mb-5">
+                  <div
+                    className={`mb-2 px-2 text-[8px] font-bold uppercase tracking-[0.22em] ${
+                      isDarkMode ? 'text-white/25' : 'text-emerald-950/35'
+                    }`}
+                  >
+                    Sản phẩm khách hàng
+                  </div>
+
+                  <div className="space-y-1">
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        router.push('/admin/customer-products')
+                      }
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <ImageIcon className="h-4 w-4 text-cyan-400" />
+                      <span>Dashboard sản phẩm</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.open('/albumpublic', '_blank')
+                      }
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Eye className="h-4 w-4 text-emerald-400" />
+                      <span>Web Publish</span>
+                    </button>
+
+                  </div>
+                </div>
+
+                {/* QUẢN LÝ ALBUM */}
+                <div className="mb-5">
+                  <div
+                    className={`mb-2 px-2 text-[8px] font-bold uppercase tracking-[0.22em] ${
+                      isDarkMode ? 'text-white/25' : 'text-emerald-950/35'
+                    }`}
+                  >
+                    Quản lý album
+                  </div>
+
+                  <div className="space-y-1">
+
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(true)}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Plus className="h-4 w-4 text-emerald-400" />
+                      <span>Thêm album</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        checkAllMasterFolders(masterFoldersList, true)
+                      }
+                      disabled={isSyncing}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      } disabled:opacity-40`}
+                    >
+                      <RefreshCw
+                        className={`h-4 w-4 text-emerald-400 ${
+                          isSyncing ? 'animate-spin' : ''
+                        }`}
+                      />
+                      <span>Quét thư mục mới</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsMasterModalOpen(true)}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <FolderSync className="h-4 w-4 text-emerald-400" />
+                      <span>Cài đặt thư mục tổng</span>
+                    </button>
+
+                  </div>
+                </div>
+
+                {/* CÔNG CỤ */}
+                <div className="mb-5">
+                  <div
+                    className={`mb-2 px-2 text-[8px] font-bold uppercase tracking-[0.22em] ${
+                      isDarkMode ? 'text-white/25' : 'text-emerald-950/35'
+                    }`}
+                  >
+                    Công cụ
+                  </div>
+
+                  <div className="space-y-1">
+
+                    <button
+                      type="button"
+                      onClick={() => router.push('/money')}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Wallet className="h-4 w-4 text-emerald-400" />
+                      <span>Thu Chi</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsKeyGenOpen(true)}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <KeyRound className="h-4 w-4 text-amber-400" />
+                      <span>Key Panel</span>
+                    </button>
+
+                  </div>
+                </div>
+
+                {/* DỮ LIỆU */}
+                <div className="mb-5">
+                  <div
+                    className={`mb-2 px-2 text-[8px] font-bold uppercase tracking-[0.22em] ${
+                      isDarkMode ? 'text-white/25' : 'text-emerald-950/35'
+                    }`}
+                  >
+                    Dữ liệu
+                  </div>
+
+                  <div className="space-y-1">
+
+                    <button
+                      type="button"
+                      onClick={handleCleanHomePage}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Trash2 className="h-4 w-4 text-amber-400" />
+                      <span>Dọn dẹp trang chủ</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleDeleteAllGuestSelectionsFromAllAlbums}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Trash2 className="h-4 w-4 text-red-400" />
+                      <span>Xóa ảnh khách chọn</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        fetchNotifications()
+                        setIsNotificationOpen(true)
+                      }}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Bell className="h-4 w-4 text-emerald-400" />
+                      <span>Thông báo khách</span>
+                    </button>
+
+                  </div>
+                </div>
+
+              </div>
+
+            </aside>
+
+            {/* MOBILE: CÔNG CỤ QUẢN TRỊ */}
+            <section
+              className={`rounded-[26px] border p-4 lg:hidden ${
+                isDarkMode
+                  ? 'border-white/10 bg-[#0b1711]/72'
+                  : 'border-emerald-950/8 bg-white/80 shadow-sm'
+              }`}
+            >
+              <div className="mb-3 flex items-center gap-2">
+                <Settings className="h-4 w-4 text-amber-400" />
+                <h2 className="font-serif text-lg font-semibold">
+                  Công cụ quản trị
+                </h2>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push('/admin/customer-products')
+                  }
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <ImageIcon className="h-4 w-4 text-cyan-400" />
+                  <span>Sản phẩm khách</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push('/money')}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <Wallet className="h-4 w-4 text-emerald-400" />
+                  <span>Thu Chi</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsKeyGenOpen(true)}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <KeyRound className="h-4 w-4 text-amber-400" />
+                  <span>Key Panel</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(true)}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <Plus className="h-4 w-4 text-emerald-400" />
+                  <span>Thêm album</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    checkAllMasterFolders(masterFoldersList, true)
+                  }
+                  disabled={isSyncing}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  } disabled:opacity-50`}
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 text-emerald-400 ${
+                      isSyncing ? 'animate-spin' : ''
+                    }`}
+                  />
+                  <span>Quét thư mục</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsMasterModalOpen(true)}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <FolderSync className="h-4 w-4 text-emerald-400" />
+                  <span>Thư mục tổng</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCleanHomePage}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <Trash2 className="h-4 w-4 text-amber-400" />
+                  <span>Dọn trang chủ</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    fetchNotifications()
+                    setIsNotificationOpen(true)
+                  }}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <Bell className="h-4 w-4 text-emerald-400" />
+                  <span>Thông báo</span>
+                </button>
+
               </div>
             </section>
+
+            {/* Desktop sidebar chiếm 252px bên trái.
+                Shift toàn bộ giao diện quản trị sang phải. */}
+            <style jsx global>{`
+              @media (min-width: 1024px) {
+                body {
+                  padding-left: 252px;
+                  padding-top: 66px;
+                }
+
+                /* HEADER QUẢN TRỊ CỐ ĐỊNH BÊN PHẢI SIDEBAR */
+                header {
+                  position: fixed !important;
+                  height: 66px !important;
+                  min-height: 66px !important;
+                  top: 0 !important;
+                  left: 252px !important;
+                  right: 0 !important;
+                  width: auto !important;
+                  z-index: 70 !important;
+                  margin: 0 !important;
+                }
+
+                /* Header full phần bên phải */
+                header > div {
+                  height: 66px !important;
+                  min-height: 66px !important;
+                  width: 100% !important;
+                  max-width: none !important;
+                  margin-left: 0 !important;
+                  margin-right: 0 !important;
+                  padding-left: 20px !important;
+                  padding-right: 24px !important;
+
+                  /* Dồn TOÀN BỘ cụm menu + search + icon sang phải */
+                  display: flex !important;
+                  justify-content: flex-end !important;
+                  align-items: center !important;
+                }
+
+                header nav {
+                  margin-left: 0 !important;
+                  flex-shrink: 0 !important;
+                }
+
+                header nav + * {
+                  flex-shrink: 0 !important;
+                }
+              }
+
+              @media (max-width: 1023px) {
+                body {
+                  padding-left: 0;
+                  padding-top: 0;
+                }
+              }
+
+              .dt-sidebar-item {
+                display: flex;
+                width: 100%;
+                align-items: center;
+                gap: 0.7rem;
+                border-radius: 0.85rem;
+                padding: 0.65rem 0.7rem;
+                text-align: left;
+                font-size: 11px;
+                font-weight: 600;
+                transition:
+                  background-color 160ms ease,
+                  color 160ms ease,
+                  transform 160ms ease;
+              }
+
+              .dt-sidebar-item:active {
+                transform: scale(0.985);
+              }
+
+              .dt-sidebar-item-dark {
+                color: rgba(255,255,255,.62);
+              }
+
+              .dt-sidebar-item-dark:hover {
+                background: rgba(255,255,255,.06);
+                color: white;
+              }
+
+              .dt-sidebar-item-light {
+                color: rgba(21,52,38,.66);
+              }
+
+              .dt-sidebar-item-light:hover {
+                background: rgba(6,95,70,.065);
+                color: rgb(6,78,59);
+              }
+            `}</style>
 
             {/* HOẠT ĐỘNG KHÁCH + FILE TXT CHUNG */}
             <section className="grid lg:grid-cols-[1.2fr_.8fr] gap-4">

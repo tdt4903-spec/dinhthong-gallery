@@ -35,7 +35,7 @@ export default function GalleryPage() {
         const session = sessionData.session
 
         if (!session) {
-          router.replace('/')
+          router.replace('/admin')
           return
         }
 
@@ -43,7 +43,7 @@ export default function GalleryPage() {
 
         if (!email) {
           await supabase.auth.signOut()
-          router.replace('/')
+          router.replace('/admin')
           return
         }
 
@@ -56,14 +56,14 @@ export default function GalleryPage() {
         if (whitelistError) {
           console.error('Lỗi đọc allowed_emails:', whitelistError)
           await showAlert('Không thể kiểm tra thông tin tài khoản. Vui lòng thử lại.')
-          router.replace('/')
+          router.replace('/admin')
           return
         }
 
         if (!whitelist) {
           await showAlert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
           await supabase.auth.signOut()
-          router.replace('/')
+          router.replace('/admin')
           return
         }
 
@@ -93,7 +93,7 @@ export default function GalleryPage() {
         console.error('Lỗi kiểm tra đăng nhập:', error)
 
         if (mounted) {
-          router.replace('/')
+          router.replace('/admin')
         }
       }
     }
@@ -122,7 +122,7 @@ export default function GalleryPage() {
       const session = sessionData.session
 
       if (!session?.user?.email) {
-        router.replace('/')
+        router.replace('/admin')
         return
       }
 
