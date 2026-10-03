@@ -1098,7 +1098,16 @@ export default function CustomerProductsDashboard() {
           </button>
         </Modal>
       )}
-    </main>
+    
+      <a
+        href="/admin/customer-products/photos"
+        className="fixed bottom-5 right-5 z-[80] inline-flex items-center gap-2 rounded-full bg-emerald-500 px-5 py-3 text-xs font-bold text-white shadow-2xl transition hover:bg-emerald-400"
+        title="Quản lý ảnh được phép hiển thị trên Web Public"
+      >
+        Ảnh Public
+      </a>
+
+</main>
   )
 }
 
