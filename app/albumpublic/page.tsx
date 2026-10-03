@@ -345,7 +345,7 @@ export default function AlbumPublicPage() {
             {filteredAlbums.map((album) => (
               <a
                 key={album.id}
-                href={album.album_url}
+                href={`/album-${album.slug}`}
                 target="_blank"
                 rel="noreferrer"
                 className="group block"
