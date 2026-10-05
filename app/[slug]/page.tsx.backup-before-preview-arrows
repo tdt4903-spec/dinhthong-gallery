@@ -58,156 +58,6 @@ export default function PublicAlbumPage() {
     null
   )
 
-  function showPreviousImage() {
-    if (
-      !preview ||
-      images.length <= 1
-    ) {
-      return
-    }
-
-    const currentIndex =
-      images.findIndex(
-        item =>
-          item.id === preview.id
-      )
-
-    if (currentIndex === -1) {
-      return
-    }
-
-    const previousIndex =
-      (
-        currentIndex -
-        1 +
-        images.length
-      ) % images.length
-
-    setPreview(
-      images[previousIndex]
-    )
-  }
-
-  function showNextImage() {
-    if (
-      !preview ||
-      images.length <= 1
-    ) {
-      return
-    }
-
-    const currentIndex =
-      images.findIndex(
-        item =>
-          item.id === preview.id
-      )
-
-    if (currentIndex === -1) {
-      return
-    }
-
-    const nextIndex =
-      (
-        currentIndex +
-        1
-      ) % images.length
-
-    setPreview(
-      images[nextIndex]
-    )
-  }
-
-  useEffect(() => {
-    if (!preview) {
-      return
-    }
-
-    const previewId = preview.id
-
-    function handlePreviewKey(
-      event: KeyboardEvent
-    ) {
-      if (
-        event.key === 'Escape'
-      ) {
-        setPreview(null)
-        return
-      }
-
-      if (
-        event.key === 'ArrowLeft'
-      ) {
-        event.preventDefault()
-
-        const currentIndex =
-          images.findIndex(
-            item =>
-              item.id === previewId
-          )
-
-        if (
-          currentIndex >= 0 &&
-          images.length > 1
-        ) {
-          const previousIndex =
-            (
-              currentIndex -
-              1 +
-              images.length
-            ) % images.length
-
-          setPreview(
-            images[previousIndex]
-          )
-        }
-
-        return
-      }
-
-      if (
-        event.key === 'ArrowRight'
-      ) {
-        event.preventDefault()
-
-        const currentIndex =
-          images.findIndex(
-            item =>
-              item.id === previewId
-          )
-
-        if (
-          currentIndex >= 0 &&
-          images.length > 1
-        ) {
-          const nextIndex =
-            (
-              currentIndex +
-              1
-            ) % images.length
-
-          setPreview(
-            images[nextIndex]
-          )
-        }
-      }
-    }
-
-    window.addEventListener(
-      'keydown',
-      handlePreviewKey
-    )
-
-    return () => {
-      window.removeEventListener(
-        'keydown',
-        handlePreviewKey
-      )
-    }
-  }, [
-    preview,
-    images,
-  ])
-
   useEffect(() => {
     let active = true
 
@@ -607,105 +457,20 @@ export default function PublicAlbumPage() {
         >
           <button
             type="button"
-            aria-label="Đóng ảnh"
-            onClick={(event) => {
-              event.stopPropagation()
-              setPreview(null)
-            }}
-            className="absolute right-4 top-4 z-30 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-md transition hover:bg-white/20 sm:right-5 sm:top-5"
+            onClick={() => setPreview(null)}
+            className="absolute right-5 top-5 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-md"
           >
             <X className="h-5 w-5" />
           </button>
 
-          {images.length > 1 && (
-            <>
-              <button
-                type="button"
-                aria-label="Ảnh trước"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  showPreviousImage()
-                }}
-                className="absolute left-2 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-md transition hover:bg-white/20 sm:left-5 sm:h-12 sm:w-12"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="h-6 w-6"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M15 18L9 12L15 6"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-
-              <button
-                type="button"
-                aria-label="Ảnh sau"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  showNextImage()
-                }}
-                className="absolute right-2 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-md transition hover:bg-white/20 sm:right-5 sm:h-12 sm:w-12"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="h-6 w-6"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M9 6L15 12L9 18"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-            </>
-          )}
-
-          <div
-            className="flex h-full w-full items-center justify-center"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
-          >
-            <img
-              src={publicImageUrl(preview.id)}
-              alt={preview.name}
-              draggable={false}
-              onDragStart={(event) =>
-                event.preventDefault()
-              }
-              onContextMenu={(event) =>
-                event.preventDefault()
-              }
-              className="pointer-events-none max-h-[90vh] max-w-[96vw] select-none object-contain"
-            />
-          </div>
-
-          {images.length > 1 && (
-            <div
-              className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/40 px-3 py-1.5 text-[10px] font-medium text-white/75 backdrop-blur-md"
-            >
-              {Math.max(
-                1,
-                images.findIndex(
-                  item =>
-                    item.id === preview.id
-                ) + 1
-              )}
-              {' / '}
-              {images.length}
-            </div>
-          )}
+          <img
+            src={publicImageUrl(preview.id)}
+            alt={preview.name}
+            draggable={false}
+            onDragStart={(event) => event.preventDefault()}
+            onContextMenu={(event) => event.preventDefault()}
+            className="pointer-events-none max-h-[90vh] max-w-[96vw] select-none object-contain"
+          />
         </div>
       )}
     </main>

@@ -560,19 +560,16 @@ export default function BookingPage() {
       return
     }
 
-    const customerEmail =
-      form.email.trim()
-
-    if (!customerEmail) {
+    if (!form.email.trim()) {
       setErrorText(
-        'Vui lòng nhập Email.'
+        'Vui lòng nhập Email để nhận xác nhận lịch.'
       )
       return
     }
 
     if (
-      !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(
-        customerEmail
+      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(
+        form.email.trim()
       )
     ) {
       setErrorText(
@@ -580,6 +577,7 @@ export default function BookingPage() {
       )
       return
     }
+
 
     setSending(true)
     setErrorText('')
@@ -1128,8 +1126,6 @@ export default function BookingPage() {
                 </Label>
 
                 <input
-                autoComplete="email"
-                type="email"
                   value={form.note}
                   onChange={e =>
                     setForm({

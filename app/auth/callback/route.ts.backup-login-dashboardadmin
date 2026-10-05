@@ -6,7 +6,7 @@ export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
   // Đổi mặc định chuyển hướng sang /gallery sau khi đăng nhập thành công
-  const next = searchParams.get('next') ?? '/dashboardadmin'
+  const next = searchParams.get('next') ?? '/gallery'
 
   if (code) {
     const cookieStore = await cookies()
