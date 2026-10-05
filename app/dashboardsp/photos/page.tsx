@@ -284,7 +284,7 @@ export default function CustomerProductPhotosPage() {
         <div className="mx-auto flex h-[68px] max-w-[1600px] items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-4">
             <Link
-              href="/admin/customer-products"
+              href="/dashboardsp"
               className={`flex h-9 w-9 items-center justify-center rounded-full border ${
                 isDarkMode
                   ? 'border-white/10 hover:bg-white/10'

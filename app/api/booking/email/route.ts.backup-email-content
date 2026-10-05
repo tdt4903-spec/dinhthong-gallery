@@ -1,0 +1,511 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+import nodemailer from 'nodemailer'
+
+export const runtime = 'nodejs'
+
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+
+const anonKey =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+
+const serviceKey =
+  process.env.SUPABASE_SECRET_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  ''
+
+const gmailUser =
+  process.env.GMAIL_USER || ''
+
+const gmailAppPassword =
+  process.env.GMAIL_APP_PASSWORD || ''
+
+const transporter =
+  nodemailer.createTransport({
+    service: 'gmail',
+
+    auth: {
+      user: gmailUser,
+      pass: gmailAppPassword,
+    },
+  })
+
+
+function esc(value: unknown) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function money(value: number) {
+  return (
+    new Intl.NumberFormat('vi-VN').format(
+      Number(value || 0)
+    ) + ' đ'
+  )
+}
+
+async function sendEmail({
+  to,
+  subject,
+  html,
+}: {
+  to: string
+  subject: string
+  html: string
+}) {
+  if (
+    !gmailUser ||
+    !gmailAppPassword
+  ) {
+    throw new Error(
+      'Thiếu cấu hình Gmail SMTP.'
+    )
+  }
+
+  return transporter.sendMail({
+    from:
+      `DinhThong Gallery <${gmailUser}>`,
+
+    to,
+    subject,
+    html,
+  })
+}
+
+
+export async function POST(
+  request: NextRequest
+) {
+  try {
+    if (
+      !supabaseUrl ||
+      !serviceKey
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'Server chưa có Supabase service key.',
+        },
+        { status: 500 }
+      )
+    }
+
+    const body = await request.json()
+
+    const action =
+      String(body?.action || '')
+
+    const bookingId =
+      String(body?.bookingId || '')
+
+    if (!bookingId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Thiếu bookingId.',
+        },
+        { status: 400 }
+      )
+    }
+
+    // Khi Admin xác nhận lịch:
+    // dùng chính access token của Admin để đọc Booking.
+    // Các action server khác vẫn dùng service key.
+    const requestAuthorization =
+      request.headers.get(
+        'authorization'
+      ) || ''
+
+    const requestToken =
+      requestAuthorization.replace(
+        /^Bearer\s+/i,
+        ''
+      )
+
+    const admin =
+      action === 'confirm_booking' &&
+      requestToken &&
+      anonKey
+        ? createClient(
+            supabaseUrl,
+            anonKey,
+            {
+              global: {
+                headers: {
+                  Authorization:
+                    `Bearer ${requestToken}`,
+                },
+              },
+
+              auth: {
+                persistSession: false,
+                autoRefreshToken: false,
+              },
+            }
+          )
+        : createClient(
+            supabaseUrl,
+            serviceKey,
+            {
+              auth: {
+                persistSession: false,
+                autoRefreshToken: false,
+              },
+            }
+          )
+
+    const {
+      data: booking,
+      error,
+    } =
+      await admin
+        .from('booking_requests')
+        .select('*')
+        .eq('id', bookingId)
+        .maybeSingle()
+
+    if (error) {
+      console.error(
+        '[BOOKING LOOKUP ERROR]',
+        {
+          action,
+          bookingId,
+          code: error.code,
+          message: error.message,
+          details: error.details,
+        }
+      )
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            `Lỗi đọc Booking: ${error.message}`,
+        },
+        { status: 500 }
+      )
+    }
+
+    if (!booking) {
+      console.error(
+        '[BOOKING NOT FOUND]',
+        {
+          action,
+          bookingId,
+        }
+      )
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'Không tìm thấy Booking với ID được gửi từ Dashboard.',
+        },
+        { status: 404 }
+      )
+    }
+
+    const { data: settings } =
+      await admin
+        .from('booking_payment_settings')
+        .select('*')
+        .eq('id', 'main')
+        .maybeSingle()
+
+
+    /* =========================================
+       BOOKING MỚI -> EMAIL ADMIN
+    ========================================== */
+
+    if (action === 'new_booking') {
+      const adminEmail =
+        String(
+          settings?.admin_notification_email ||
+          ''
+        ).trim()
+
+      if (!adminEmail) {
+        return NextResponse.json({
+          ok: true,
+          skipped: true,
+          reason:
+            'Chưa thiết lập email Admin.',
+        })
+      }
+
+      if (booking.admin_notified_at) {
+        return NextResponse.json({
+          ok: true,
+          alreadySent: true,
+        })
+      }
+
+      const site =
+        request.nextUrl.origin
+
+      await sendEmail({
+        to: adminEmail,
+
+        subject:
+          `Booking mới - ${booking.full_name}`,
+
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto">
+            <h2>Booking mới</h2>
+
+            <p><b>Khách hàng:</b> ${esc(booking.full_name)}</p>
+            <p><b>SĐT:</b> ${esc(booking.phone)}</p>
+            <p><b>Zalo:</b> ${esc(booking.zalo)}</p>
+            <p><b>Email:</b> ${esc(booking.email || '—')}</p>
+
+            <hr>
+
+            <p><b>Thể loại:</b> ${esc(booking.service_name)}</p>
+            <p><b>Gói:</b> ${esc(booking.package_name)}</p>
+            <p><b>Giá:</b> ${esc(money(booking.package_price || booking.service_price))}</p>
+
+            <p><b>Ngày:</b> ${esc(booking.event_date || '—')}</p>
+            <p><b>Địa điểm:</b> ${esc(booking.location)}</p>
+
+            <p><b>Thanh toán:</b> ${
+              booking.payment_option === 'deposit'
+                ? `Cọc ${esc(booking.payment_percent)}% - ${esc(money(booking.payment_amount))}`
+                : booking.payment_option === 'full'
+                ? `Chuyển toàn bộ - ${esc(money(booking.payment_amount))}`
+                : 'Thanh toán sau'
+            }</p>
+
+            <p style="margin-top:28px">
+              <a href="${site}/dashboardsp/booking"
+                 style="background:#07865f;color:white;padding:12px 18px;border-radius:8px;text-decoration:none">
+                Mở Dashboard Booking
+              </a>
+            </p>
+          </div>
+        `,
+      })
+
+      await admin
+        .from('booking_requests')
+        .update({
+          admin_notified_at:
+            new Date().toISOString(),
+        })
+        .eq('id', bookingId)
+
+      return NextResponse.json({
+        ok: true,
+      })
+    }
+
+
+    /* =========================================
+       ADMIN XÁC NHẬN LỊCH -> EMAIL KHÁCH
+    ========================================== */
+
+    if (action === 'confirm_booking') {
+      const authorization =
+        request.headers.get(
+          'authorization'
+        ) || ''
+
+      const token =
+        authorization.replace(
+          /^Bearer\s+/i,
+          ''
+        )
+
+      if (
+        !token ||
+        !anonKey
+      ) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Chưa xác thực Admin.',
+          },
+          { status: 401 }
+        )
+      }
+
+      const authClient =
+        createClient(
+          supabaseUrl,
+          anonKey,
+          {
+            auth: {
+              persistSession: false,
+              autoRefreshToken: false,
+            },
+          }
+        )
+
+      const {
+        data: userResult,
+      } =
+        await authClient.auth.getUser(
+          token
+        )
+
+      const adminUser =
+        userResult.user
+
+      if (!adminUser?.email) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Phiên Admin không hợp lệ.',
+          },
+          { status: 401 }
+        )
+      }
+
+      const {
+        data: allowed,
+      } =
+        await admin
+          .from('allowed_emails')
+          .select('email')
+          .eq(
+            'email',
+            adminUser.email
+          )
+          .maybeSingle()
+
+      if (!allowed) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Không có quyền xác nhận.',
+          },
+          { status: 403 }
+        )
+      }
+
+      if (
+        booking.payment_requested &&
+        !booking.transferred
+      ) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Booking này chưa được xác nhận đã chuyển khoản.',
+          },
+          { status: 409 }
+        )
+      }
+
+      const now =
+        new Date().toISOString()
+
+      await admin
+        .from('booking_requests')
+        .update({
+          status: 'confirmed',
+          confirmed_at: now,
+          updated_at: now,
+        })
+        .eq('id', bookingId)
+
+      const customerEmail =
+        String(
+          booking.email || ''
+        ).trim()
+
+      if (!customerEmail) {
+        return NextResponse.json({
+          ok: true,
+          emailSent: false,
+          warning:
+            'Đã xác nhận lịch nhưng khách không nhập Email.',
+        })
+      }
+
+      if (
+        booking.customer_confirmed_email_at
+      ) {
+        return NextResponse.json({
+          ok: true,
+          emailSent: true,
+          alreadySent: true,
+        })
+      }
+
+      await sendEmail({
+        to: customerEmail,
+
+        subject:
+          'Lịch chụp của bạn đã được xác nhận - DinhThong Gallery',
+
+        html: `
+          <div style="font-family:Arial,sans-serif;max-width:620px;margin:auto">
+            <h2>Lịch chụp đã được xác nhận</h2>
+
+            <p>Xin chào <b>${esc(booking.full_name)}</b>,</p>
+
+            <p>DinhThong Photos đã xác nhận lịch chụp của bạn.</p>
+
+            <hr>
+
+            <p><b>Thể loại:</b> ${esc(booking.service_name)}</p>
+            <p><b>Gói:</b> ${esc(booking.package_name)}</p>
+            <p><b>Ngày chụp:</b> ${esc(booking.event_date || '—')}</p>
+            <p><b>Địa điểm:</b> ${esc(booking.location)}</p>
+            <p><b>Giá:</b> ${esc(money(booking.package_price || booking.service_price))}</p>
+
+            <p style="margin-top:28px">
+              Cảm ơn bạn đã lựa chọn DinhThong Photos.
+            </p>
+          </div>
+        `,
+      })
+
+      await admin
+        .from('booking_requests')
+        .update({
+          customer_confirmed_email_at:
+            now,
+        })
+        .eq('id', bookingId)
+
+      return NextResponse.json({
+        ok: true,
+        emailSent: true,
+      })
+    }
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          'Action không hợp lệ.',
+      },
+      { status: 400 }
+    )
+  } catch (error: any) {
+    console.error(
+      '[BOOKING EMAIL]',
+      error
+    )
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          error?.message ||
+          'Lỗi gửi email.',
+      },
+      { status: 500 }
+    )
+  }
+}

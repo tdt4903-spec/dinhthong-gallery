@@ -24,6 +24,10 @@ type DriveItem = {
   downloadUrl: string
 }
 
+function publicImageUrl(fileId: string) {
+  return `https://lh3.googleusercontent.com/d/${fileId}=s1500`
+}
+
 export default function PublicAlbumPage() {
   const params = useParams()
 
@@ -44,7 +48,7 @@ export default function PublicAlbumPage() {
 
   const albumSlug = rawSlug.startsWith('album-')
     ? rawSlug.slice(6)
-    : ''
+    : rawSlug
 
   const [album, setAlbum] = useState<any>(null)
   const [images, setImages] = useState<DriveItem[]>([])
@@ -207,6 +211,16 @@ export default function PublicAlbumPage() {
     }
   }, [preview])
 
+  useEffect(() => {
+    if (!album?.title) return
+
+    document.title = `${album.title} - Dinh Thong Gallery`
+
+    return () => {
+      document.title = 'Dinh Thong Gallery'
+    }
+  }, [album?.title])
+
   if (loading) {
     return (
       <main
@@ -216,8 +230,14 @@ export default function PublicAlbumPage() {
             : 'bg-[#f5f7f3] text-[#1c1d21]'
         }`}
       >
-        <div className="text-[10px] uppercase tracking-[0.24em] opacity-45">
-          Đang đọc album từ Google Drive...
+        <div className="text-center">
+          <div className="font-serif text-2xl sm:text-3xl">
+            Vui lòng chờ
+          </div>
+
+          <div className="mt-3 text-[9px] uppercase tracking-[0.22em] opacity-40">
+            Album đang được chuẩn bị
+          </div>
         </div>
       </main>
     )
@@ -242,7 +262,7 @@ export default function PublicAlbumPage() {
           </p>
 
           <Link
-            href="/albumpublic"
+            href="/"
             className="mt-7 inline-flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em]"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -262,7 +282,8 @@ export default function PublicAlbumPage() {
 
   return (
     <main
-      className={`min-h-screen transition-colors ${
+      onContextMenu={(event) => event.preventDefault()}
+      className={`min-h-screen select-none transition-colors ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'
@@ -277,7 +298,7 @@ export default function PublicAlbumPage() {
       >
         <div className="mx-auto flex h-[68px] max-w-[1600px] items-center justify-between px-5 sm:px-8">
           <Link
-            href="/albumpublic"
+            href="/"
             className="flex items-center gap-3"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -394,13 +415,18 @@ export default function PublicAlbumPage() {
                 key={image.id}
                 type="button"
                 onClick={() => setPreview(image)}
+                onContextMenu={(event) => event.preventDefault()}
                 className="group mb-2 block w-full break-inside-avoid overflow-hidden sm:mb-3 lg:mb-4"
               >
                 <img
-                  src={image.url}
+                  src={publicImageUrl(image.id)}
                   alt={image.name || `${album.title} ${index + 1}`}
                   loading={index < 4 ? 'eager' : 'lazy'}
-                  className="h-auto w-full transition-transform duration-700 group-hover:scale-[1.01]"
+                  decoding="async"
+                  draggable={false}
+                  onDragStart={(event) => event.preventDefault()}
+                  onContextMenu={(event) => event.preventDefault()}
+                  className="pointer-events-none h-auto w-full select-none transition-transform duration-700 group-hover:scale-[1.01]"
                 />
               </button>
             ))}
@@ -438,12 +464,12 @@ export default function PublicAlbumPage() {
           </button>
 
           <img
-            src={preview.fullUrl || preview.url}
+            src={publicImageUrl(preview.id)}
             alt={preview.name}
-            className="max-h-[95vh] max-w-[96vw] object-contain"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
+            draggable={false}
+            onDragStart={(event) => event.preventDefault()}
+            onContextMenu={(event) => event.preventDefault()}
+            className="pointer-events-none max-h-[90vh] max-w-[96vw] select-none object-contain"
           />
         </div>
       )}

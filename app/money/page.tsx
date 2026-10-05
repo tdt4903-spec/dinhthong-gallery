@@ -936,7 +936,7 @@ export default function MoneyManagerPage() {
           
           <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <button
-              onClick={() => router.push('/gallery')}
+              onClick={() => router.push('/dashboardadmin')}
               className="p-1.5 sm:p-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition cursor-pointer"
               title="Quay lại Thư viện ảnh"
             >

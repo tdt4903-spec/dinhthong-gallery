@@ -25,7 +25,7 @@ export default function LoginPage() {
       .getSession()
       .then(({ data }) => {
         if (!mounted) return
-        if (data.session) router.replace('/gallery')
+        if (data.session) router.replace('/dashboardadmin')
         else setChecking(false)
       })
       .catch(() => mounted && setChecking(false))

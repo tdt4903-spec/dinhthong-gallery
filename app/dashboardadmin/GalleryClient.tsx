@@ -1,0 +1,5915 @@
+'use client'
+
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
+import { createBrowserClient } from '@supabase/ssr'
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
+import { 
+  Search, Sun, Moon, Plus, Camera, 
+  Trash2, LogOut, User as UserIcon,
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, Lock as LockIcon, ZoomIn, ZoomOut, RotateCcw, Send, Bell
+} from 'lucide-react'
+
+interface MediaItem {
+  id: string
+  name: string
+  type: 'image' | 'video' | 'folder'
+  url: string
+  fullUrl: string
+  downloadUrl: string
+  coverUrl?: string
+}
+
+interface Album {
+  id: string
+  title: string
+  coverUrl: string
+  driveUrl: string
+  password?: string
+  max_select?: number
+  allow_comments?: boolean
+  enable_watermark?: boolean
+  collect_customer_info?: boolean
+  max_viewers?: number
+}
+
+interface FolderSettings {
+  id: string
+  title: string
+  password?: string
+  max_select?: number
+  allow_comments?: boolean
+  enable_watermark?: boolean
+  collect_customer_info?: boolean
+  max_viewers?: number
+}
+
+interface MasterFolderItem {
+  id: string
+  name: string
+  url: string
+}
+
+interface FolderBreadcrumb {
+  id: string
+  title: string
+  driveUrl: string
+}
+
+interface KeyRecord {
+  id: string
+  customer_name: string
+  serial: string
+  duration_label: string
+  license_key: string
+  status: 'active' | 'revoked'
+  created_at?: string
+}
+
+const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
+const preloadedCache = new Set<string>()
+
+// Domain Cloudflare Worker thực tế của bạn
+const VIDEO_WORKER_BASE = (process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || 'https://dinhthong-video-proxy.tdt4903.workers.dev').replace(/\/$/, '')
+
+// iPhone/Safari dễ thiếu RAM nếu giữ quá nhiều ảnh gốc cùng lúc. Tách thành
+// từng đợt nhỏ nhưng vẫn lần lượt lưu hết số ảnh người dùng yêu cầu.
+const MOBILE_IMAGE_SHARE_BATCH_SIZE = 10
+
+// Ảnh tải xuống cũng đi qua Cloudflare Worker để không phát sinh Fast Origin Transfer trên Vercel.
+const getImageWorkerDownloadUrl = (fileId: string, fileName: string) =>
+  `${VIDEO_WORKER_BASE}/image?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+
+const extractDriveId = (url: string) => {
+  if (!url) return ''
+  const clean = url.trim()
+  const matchFolder = clean.match(/folders\/([a-zA-Z0-9_-]+)/)
+  if (matchFolder && matchFolder[1]) return matchFolder[1]
+  const matchFile = clean.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  if (matchFile && matchFile[1]) return matchFile[1]
+  return clean.replace(/[^a-zA-Z0-9_-]/g, '')
+}
+
+const toNumericCode = (str: string) => {
+  if (!str) return ''
+  if (/^\d{6}$/.test(str)) return str
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i)
+    hash |= 0
+  }
+  return String(Math.abs(hash) % 900000 + 100000)
+}
+
+function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }) {
+  return (
+    <div className={`flex items-center justify-center p-3 rounded-2xl bg-[#FFF6EB] dark:bg-[#2A2016] shadow-sm ${className}`}>
+      <svg 
+        viewBox="0 0 100 80" 
+        className="w-full h-full drop-shadow-sm" 
+        fill="none" 
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path 
+          d="M12 18C12 11.3726 17.3726 6 24 6H38.5858C41.7684 6 44.8208 7.26428 47.0711 9.51472L53.5147 15.9583C55.765 18.2087 58.8174 19.473 62 19.473H76C82.6274 19.473 88 24.8456 88 31.473V62C88 68.6274 82.6274 74 76 74H24C17.3726 74 12 68.6274 12 62V18Z" 
+          fill="#FDE4BA" 
+          stroke="#F59E0B" 
+          strokeWidth="7" 
+          strokeLinejoin="round" 
+        />
+        <path 
+          d="M14 31H86" 
+          stroke="#F59E0B" 
+          strokeWidth="5" 
+          strokeLinecap="round" 
+          opacity="0.3" 
+        />
+      </svg>
+    </div>
+  )
+}
+
+const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG GALLERY'): Promise<Blob> => {
+  if (typeof window === 'undefined') return blob
+  return new Promise((resolve) => {
+    const img = new window.Image()
+    const objectUrl = URL.createObjectURL(blob)
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl)
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth || img.width
+      canvas.height = img.naturalHeight || img.height
+      const ctx = canvas.getContext('2d')
+      
+      if (!ctx) {
+        resolve(blob)
+        return
+      }
+
+      ctx.drawImage(img, 0, 0)
+
+      const fontSize = Math.max(Math.floor(canvas.width / 15), 36)
+      ctx.save()
+      ctx.translate(canvas.width / 2, canvas.height / 2)
+      ctx.rotate((-18 * Math.PI) / 180)
+      ctx.font = `900 ${fontSize}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)'
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)'
+      ctx.lineWidth = Math.max(fontSize / 20, 2)
+      
+      ctx.strokeText(watermarkText, 0, 0)
+      ctx.fillText(watermarkText, 0, 0)
+      ctx.restore()
+
+      canvas.toBlob((watermarkedBlob) => {
+        if (watermarkedBlob) resolve(watermarkedBlob)
+        else resolve(blob)
+      }, 'image/jpeg', 0.95)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      resolve(blob)
+    }
+    img.src = objectUrl
+  })
+}
+
+// 1. TẢI VIDEO: 100% ĐI QUA CLOUDFLARE WORKER /video (KHÔNG QUA VERCEL)
+const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
+  const downloadUrl = `${VIDEO_WORKER_BASE}/video?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
+
+  const link = document.createElement('a')
+  link.href = downloadUrl
+  link.setAttribute('download', fileName)
+  link.style.display = 'none'
+  document.body.appendChild(link)
+  link.click()
+
+  window.setTimeout(() => {
+    if (document.body.contains(link)) {
+      document.body.removeChild(link)
+    }
+  }, 2000)
+}
+
+interface GalleryClientProps {
+  displayName?: string
+}
+
+export default function GalleryClient({ displayName = '' }: GalleryClientProps) {
+  const router = useRouter()
+  const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const { popup, showAlert, showConfirm, resolvePopup } = useAppPopup()
+
+  const isTimeForDarkMode = () => {
+    const currentHour = new Date().getHours()
+    return currentHour < 6 || currentHour >= 18
+  }
+
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => isTimeForDarkMode())
+  const hasUserToggledMode = useRef<boolean>(false)
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!hasUserToggledMode.current) {
+        setIsDarkMode(isTimeForDarkMode())
+      }
+    }, 60 * 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const handleToggleDarkMode = () => {
+    hasUserToggledMode.current = true
+    setIsDarkMode(prev => !prev)
+  }
+
+  const [searchTerm, setSearchTerm] = useState('')
+  const [albums, setAlbums] = useState<Album[]>([])
+  
+  const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null)
+  const [folderHistory, setFolderHistory] = useState<FolderBreadcrumb[]>([])
+  const [items, setItems] = useState<MediaItem[]>([])
+  const [customNames, setCustomNames] = useState<Record<string, string>>({})
+  const [hiddenItemIds, setHiddenItemIds] = useState<Set<string>>(new Set())
+  const [knownFolderIds, setKnownFolderIds] = useState<Set<string>>(new Set())
+
+  const [folderSettingsMap, setFolderSettingsMap] = useState<Record<string, FolderSettings>>({})
+
+  const [loadingImages, setLoadingImages] = useState(false)
+  const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+
+  const [selectedAlbumIds, setSelectedAlbumIds] = useState<Set<string>>(new Set())
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
+
+  const [albumCovers, setAlbumCovers] = useState<Record<string, string>>({})
+  const [editingFolderSetting, setEditingFolderSetting] = useState<FolderSettings | null>(null)
+
+  const [ratings, setRatings] = useState<Record<string, number>>({})
+  const [comments, setComments] = useState<Record<string, string>>({})
+  const [currentCommentInput, setCurrentCommentInput] = useState('')
+  const [isSavingComment, setIsSavingComment] = useState(false)
+
+  const [zoomScale, setZoomScale] = useState(1)
+  const [panPosition, setPanPosition] = useState({ x: 0, y: 0 })
+  const lastTapRef = useRef<number>(0)
+
+  const [starFilter, setStarFilter] = useState<number | 'all' | 'selected'>('all')
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
+  const [isCommentModalOpen, setIsCommentModalOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [commentCopied, setCommentCopied] = useState(false)
+  const [shareCopiedId, setShareCopiedId] = useState<string | null>(null)
+  const [isSharedGuest, setIsSharedGuest] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [guestId, setGuestId] = useState('')
+  const [guestSelectionRows, setGuestSelectionRows] = useState<any[]>([])
+  const [isLoadingGuestSelections, setIsLoadingGuestSelections] = useState(false)
+  const [showGuestNameModal, setShowGuestNameModal] = useState(false)
+  const [guestNameInput, setGuestNameInput] = useState('')
+  const [guestCustomerName, setGuestCustomerName] = useState('')
+  const [guestCanSelect, setGuestCanSelect] = useState(false)
+  const [guestViewerCount, setGuestViewerCount] = useState(0)
+  const [guestAccessDenied, setGuestAccessDenied] = useState(false)
+  const [guestNamePurpose, setGuestNamePurpose] = useState<'collect' | 'capacity' | null>(null)
+  const [notificationItems, setNotificationItems] = useState<any[]>([])
+  const [guestSelectionActivity, setGuestSelectionActivity] = useState<any[]>([])
+  const [isDownloadingSharedTxt, setIsDownloadingSharedTxt] = useState(false)
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false)
+  const [notificationTab, setNotificationTab] = useState<'selected' | 'viewers' | 'full' | 'joined'>('selected')
+
+  const [isLocked, setIsLocked] = useState(false)
+  const [passwordInput, setPasswordInput] = useState('')
+  const [passwordError, setPasswordError] = useState(false)
+
+  const [masterFoldersList, setMasterFoldersList] = useState<MasterFolderItem[]>([])
+  const [isMasterModalOpen, setIsMasterModalOpen] = useState(false)
+  const [newMasterName, setNewMasterName] = useState('')
+  const [newMasterUrl, setNewMasterUrl] = useState('')
+  const [isSyncing, setIsSyncing] = useState(false)
+
+  const [pendingSyncAlbums, setPendingSyncAlbums] = useState<{ id: string; name: string; driveUrl: string; parentTitle: string }[]>([])
+  const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(new Set())
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
+
+  const [isManageVisibilityOpen, setIsManageVisibilityOpen] = useState(false)
+  const [tempVisibleIds, setTempVisibleIds] = useState<Set<string>>(new Set())
+  const [isSavingVisibility, setIsSavingVisibility] = useState(false)
+
+  const [isKeyGenOpen, setIsKeyGenOpen] = useState(false)
+  const [customerName, setCustomerName] = useState('')
+  const [serialInput, setSerialInput] = useState('')
+  const [duration, setDuration] = useState('LIFE')
+  const [generatedKey, setGeneratedKey] = useState('')
+  const [keyRecords, setKeyRecords] = useState<KeyRecord[]>([])
+  const [isSavingKey, setIsSavingKey] = useState(false)
+  const [isLoadingKeys, setIsLoadingKeys] = useState(false)
+  const [keyLoadError, setKeyLoadError] = useState('')
+
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [zippingFolderId, setZippingFolderId] = useState<string | null>(null)
+  const [zipProgress, setZipProgress] = useState('')
+  const [pendingMobileShare, setPendingMobileShare] = useState<{ blob: Blob; fileName: string } | null>(null)
+
+  // Một vùng tick duy nhất dành cho TẢI ẢNH trên cả desktop và mobile.
+  // Desktop: ảnh đã tick được nén ZIP. Mobile: ảnh đã tick được chuyển sang
+  // bảng lưu/chia sẻ hệ thống để lưu vào Photos. Danh sách TXT chỉ dựa trên ratings (số sao).
+  const [downloadSelectedIds, setDownloadSelectedIds] = useState<Set<string>>(new Set())
+  const [isPreparingMobileImages, setIsPreparingMobileImages] = useState(false)
+  const [mobileDownloadProgress, setMobileDownloadProgress] = useState('')
+  const [pendingMobileBatchShare, setPendingMobileBatchShare] = useState<{
+    files: File[]
+    remainingItems: MediaItem[]
+    label: string
+    batchNumber: number
+    totalBatches: number
+    totalImages: number
+  } | null>(null)
+
+  const [currentPage, setCurrentPage] = useState(1)
+  const [gridDensity, setGridDensity] = useState<'comfortable' | 'compact'>('comfortable')
+  const itemsPerPage = 24
+
+  const [useComma, setUseComma] = useState(true)
+  const [useSpace, setUseSpace] = useState(true)
+  const [useNewline, setUseNewline] = useState(false)
+  const [useFileExtension, setUseFileExtension] = useState(false)
+
+  const thumbnailRef = useRef<HTMLDivElement>(null)
+  const touchStartX = useRef<number | null>(null)
+  const touchEndX = useRef<number | null>(null)
+
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+
+  const currentActiveFolderId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
+  const currentActiveFolderTitle = customNames[currentActiveFolderId] || (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : (selectedAlbum?.title || ''))
+
+  const guestRootAlbumId = selectedAlbum?.id || currentActiveFolderId
+
+  const activeSetting: FolderSettings = folderSettingsMap[currentActiveFolderId] || {
+    id: currentActiveFolderId,
+    title: currentActiveFolderTitle,
+    password: selectedAlbum?.password || '',
+    max_select: selectedAlbum?.max_select || 0,
+    allow_comments: selectedAlbum?.allow_comments ?? true,
+    enable_watermark: selectedAlbum?.enable_watermark ?? false,
+    collect_customer_info: selectedAlbum?.collect_customer_info ?? false,
+    max_viewers: selectedAlbum?.max_viewers ?? 0
+  }
+
+  const getActorKey = (guestMode = isSharedGuest) => {
+    if (guestMode) {
+      return guestId || 'guest'
+    }
+    return (user?.email || 'unknown-user').trim().toLowerCase()
+  }
+
+  const getGuestBrowserId = () => {
+    if (typeof window === 'undefined') return ''
+    const storageKey = 'dinhthong_gallery_guest_id'
+    const existing = localStorage.getItem(storageKey)
+    if (existing) return existing
+    const generated = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    localStorage.setItem(storageKey, generated)
+    return generated
+  }
+
+  const ADMIN_LOCATION_STORAGE_KEY = 'dinhthong_gallery_admin_location'
+
+  const persistAdminLocation = (album: Album | null, history: FolderBreadcrumb[]) => {
+    if (typeof window === 'undefined' || isSharedGuest) return
+    try {
+      window.sessionStorage.setItem(ADMIN_LOCATION_STORAGE_KEY, JSON.stringify({
+        selectedAlbum: album ? { id: album.id, title: album.title, driveUrl: album.driveUrl } : null,
+        folderHistory: history,
+      }))
+    } catch {}
+  }
+
+  const clearAdminLocation = () => {
+    if (typeof window === 'undefined') return
+    try { window.sessionStorage.removeItem(ADMIN_LOCATION_STORAGE_KEY) } catch {}
+  }
+
+  const readSavedAdminLocation = () => {
+    if (typeof window === 'undefined') return null
+    try {
+      const raw = window.sessionStorage.getItem(ADMIN_LOCATION_STORAGE_KEY)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object') return null
+      return {
+        selectedAlbum: parsed.selectedAlbum || null,
+        folderHistory: Array.isArray(parsed.folderHistory) ? parsed.folderHistory : [],
+      } as { selectedAlbum: { id: string; title?: string; driveUrl: string } | null; folderHistory: FolderBreadcrumb[] }
+    } catch { return null }
+  }
+
+  const getGuestIdentityStorageKey = (folderId: string) => `dinhthong_gallery_guest_name_${folderId}`
+
+  const getMonthlyCleanWarning = () => {
+    const today = new Date()
+    const currentDate = today.getDate()
+
+    if (currentDate >= 27 && currentDate < 30) {
+      const daysLeft = 30 - currentDate
+      return `Chú ý: Còn ${daysLeft} ngày nữa (ngày 30) hệ thống sẽ tự động xóa sạch dữ liệu khách truy cập và ảnh đã chọn của tháng này!`
+    }
+    if (currentDate === 30) {
+      return `Hôm nay là ngày 30: Dữ liệu khách truy cập và ảnh đã chọn tháng này sẽ được dọn sạch!`
+    }
+    return null
+  }
+
+  useEffect(() => {
+    if (isSharedGuest) return
+
+    const checkAndTriggerMonthlyClean = async () => {
+      const today = new Date()
+      const currentDate = today.getDate()
+      const currentMonthKey = `${today.getFullYear()}-${today.getMonth() + 1}`
+      const lastCleanMonth = localStorage.getItem('dinhthong_last_monthly_clean')
+
+      if (currentDate >= 30 && lastCleanMonth !== currentMonthKey) {
+        try {
+          const res = await fetch('/api/admin/clean-data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'monthly_auto_clean' }),
+          })
+          if (res.ok) {
+            localStorage.setItem('dinhthong_last_monthly_clean', currentMonthKey)
+            await fetchNotifications()
+            if (currentActiveFolderId) {
+              await fetchSelectionsForFolder(currentActiveFolderId, true)
+              await fetchGuestSelections(currentActiveFolderId)
+            }
+          }
+        } catch (e) {
+          console.error('Lỗi khi tự động dọn dẹp định kỳ ngày 30:', e)
+        }
+      }
+    }
+
+    checkAndTriggerMonthlyClean()
+  }, [isSharedGuest, currentActiveFolderId])
+
+  const handleDeleteAllGuestSelectionsFromAllAlbums = async () => {
+    if (!await showConfirm('CẢNH BÁO: Bạn có chắc chắn muốn XÓA TẤT CẢ ảnh khách đã chọn từ TẤT CẢ các album trên hệ thống không? Hành động này không thể hoàn tác!')) {
+      return
+    }
+
+    try {
+      const res = await fetch('/api/admin/clean-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_all_guest_selections' }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi khi xóa.')
+
+      void showAlert('Đã xóa thành công tất cả ảnh khách chọn trên toàn bộ các album!')
+      await fetchNotifications()
+      if (currentActiveFolderId) {
+        await fetchSelectionsForFolder(currentActiveFolderId, true)
+        await fetchGuestSelections(currentActiveFolderId)
+      }
+    } catch (e: any) {
+      void showAlert('Lỗi: ' + e.message)
+    }
+  }
+
+  const handleDeleteGuestSelectionsInCurrentAlbum = async () => {
+    if (!await showConfirm(`Bạn có chắc chắn muốn xóa toàn bộ ảnh khách đã chọn trong "${currentActiveFolderTitle}" không?`)) {
+      return
+    }
+
+    try {
+      const res = await fetch('/api/admin/clean-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          action: 'delete_album_guest_selections',
+          albumId: currentActiveFolderId 
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi khi xóa.')
+
+      void showAlert('Đã xóa thành công ảnh khách chọn trong album này!')
+      await fetchNotifications()
+      await fetchSelectionsForFolder(currentActiveFolderId, true)
+      await fetchGuestSelections(currentActiveFolderId)
+    } catch (e: any) {
+      void showAlert('Lỗi: ' + e.message)
+    }
+  }
+
+  const registerGuestViewer = async (folderId: string, customerName = '') => {
+    const targetAlbumId = isSharedGuest ? (guestRootAlbumId || folderId) : folderId
+    if (!targetAlbumId || !guestId) return { allowed: true, viewerCount: 0, trackingUnavailable: true, reason: '' }
+
+    const cleanName = customerName.trim()
+    const setting = getFolderSettingFromState(targetAlbumId)
+    const collectCustomerInfo = Boolean(setting.collect_customer_info ?? selectedAlbum?.collect_customer_info)
+    const maxViewers = Number(setting.max_viewers || selectedAlbum?.max_viewers || 0)
+
+    if (collectCustomerInfo && !cleanName) {
+      setGuestAccessDenied(false)
+      return { allowed: false, viewerCount: guestViewerCount, trackingUnavailable: false, waitingForName: true, reason: 'NAME_REQUIRED' }
+    }
+
+    try {
+      const res = await fetch('/api/guest/register-viewer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          albumId: targetAlbumId,
+          visitorId: guestId,
+          customerName: cleanName,
+          maxViewers,
+        }),
+      })
+
+      const result = await res.json().catch(() => ({}))
+      const viewerCount = Number(result?.viewer_count || 0)
+      setGuestViewerCount(viewerCount)
+
+      if (!res.ok || result?.allowed === false) {
+        return {
+          allowed: false,
+          viewerCount,
+          trackingUnavailable: false,
+          reason: String(result?.reason || 'DENIED'),
+          sameName: Boolean(result?.same_name),
+        }
+      }
+
+      setGuestAccessDenied(false)
+      return {
+        allowed: true,
+        viewerCount,
+        trackingUnavailable: false,
+        reason: '',
+        sameName: Boolean(result?.same_name),
+      }
+    } catch (e) {
+      console.warn('Không ghi nhận được lượt xem album:', e)
+      return { allowed: true, viewerCount: 0, trackingUnavailable: true, reason: '' }
+    }
+  }
+
+  const getFolderSettingFromState = (folderId: string, fallback?: any) => ({
+    ...folderSettingsMap[folderId],
+    ...(fallback || {}),
+  })
+
+  const startGuestEntry = async (folderId: string, fallbackSetting?: Partial<FolderSettings>) => {
+    const rootId = guestRootAlbumId || folderId
+    if (!rootId) return false
+
+    const setting = getFolderSettingFromState(rootId, fallbackSetting)
+    const collect = Boolean(setting.collect_customer_info ?? selectedAlbum?.collect_customer_info)
+    const savedName = typeof window !== 'undefined'
+      ? (localStorage.getItem(getGuestIdentityStorageKey(rootId)) || '')
+      : ''
+
+    setGuestAccessDenied(false)
+    setGuestNamePurpose(null)
+
+    // Album có bật thu thập thông tin: luôn hỏi tên trước khi cho khách xem album.
+    if (collect) {
+      if (guestCustomerName.trim()) {
+        const result = await registerGuestViewer(rootId, guestCustomerName.trim())
+        if (result.allowed) {
+          setGuestCanSelect(true)
+          return true
+        }
+      }
+
+      setGuestNameInput(savedName.trim())
+      setGuestNamePurpose('collect')
+      setShowGuestNameModal(true)
+      return false
+    }
+
+    // Album không thu thập thông tin: khách vào thẳng album.
+    // Nếu album đã đủ số người xem, khi đó mới hỏi tên để kiểm tra khách cũ.
+    const result = await registerGuestViewer(rootId, '')
+    if (result.allowed) {
+      setGuestCustomerName('')
+      setGuestCanSelect(true)
+      return true
+    }
+
+    if (result.reason === 'FULL') {
+      setGuestNameInput(savedName.trim())
+      setGuestNamePurpose('capacity')
+      setShowGuestNameModal(true)
+      setGuestAccessDenied(false)
+      return false
+    }
+
+    setGuestCanSelect(false)
+    setGuestAccessDenied(true)
+    return false
+  }
+
+  const finalizeGuestEntry = async () => {
+    const cleanName = guestNameInput.trim()
+    if (!cleanName) {
+      void showAlert('Vui lòng nhập tên của bạn.')
+      return
+    }
+    if (cleanName.length > 100) {
+      void showAlert('Tên không được dài quá 100 ký tự.')
+      return
+    }
+
+    const rootId = guestRootAlbumId || currentActiveFolderId
+    if (!rootId) return
+
+    setGuestAccessDenied(false)
+    const result = await registerGuestViewer(rootId, cleanName)
+
+    if (!result.allowed) {
+      setGuestCanSelect(false)
+      setShowGuestNameModal(false)
+      setGuestAccessDenied(true)
+      return
+    }
+
+    // Chỉ dùng tên để chào khi album thực sự bật thu thập thông tin.
+    // Với bước kiểm tra album đầy, tên chỉ là khóa nhận diện khách cũ.
+    if (guestNamePurpose === 'collect') {
+      setGuestCustomerName(cleanName)
+    } else {
+      setGuestCustomerName('')
+    }
+
+    setGuestCanSelect(true)
+    setShowGuestNameModal(false)
+    setGuestNameInput('')
+    setGuestNamePurpose(null)
+
+    try {
+      localStorage.setItem(getGuestIdentityStorageKey(rootId), cleanName)
+    } catch {}
+
+    const targetUrl = folderHistory.length > 0
+      ? folderHistory[folderHistory.length - 1].driveUrl
+      : (selectedAlbum?.driveUrl || '')
+    if (targetUrl) await fetchAlbumImages(targetUrl, currentActiveFolderId, true)
+  }
+
+  const getNotificationClearTime = () => {
+    if (typeof window === 'undefined') return 0
+    try {
+      return Number(window.localStorage.getItem('dinhthong_gallery_notifications_cleared_at') || 0)
+    } catch {
+      return 0
+    }
+  }
+
+  const clearNotifications = () => {
+    const now = Date.now()
+    try { localStorage.setItem('dinhthong_gallery_notifications_cleared_at', String(now)) } catch {}
+    setNotificationItems(prev => prev.map(item => ({ ...item, full: false, joined: [] })))
+    setNotificationTab('selected')
+  }
+
+  const getNotificationTitle = (albumId: string, fallback = 'DinhThong Album') => {
+    const id = String(albumId || '')
+    return customNames[id] || albums.find(a => String(a.id) === id)?.title || id || fallback
+  }
+
+  const openNotificationAlbum = async (item: any) => {
+    const albumId = String(item?.albumId || '')
+    if (!albumId) return
+
+    const direct = albums.find(a => String(a.id) === albumId)
+    if (direct) {
+      handleOpenAlbum(direct)
+      setIsNotificationOpen(false)
+      return
+    }
+
+    const resolved = await resolveSharedFolder(albumId)
+    if (!resolved) {
+      void showAlert('Không tìm thấy album/thư mục này trên Drive.')
+      return
+    }
+
+    const fallbackAlbum: Album = {
+      id: resolved.id,
+      title: resolved.title || getNotificationTitle(resolved.id),
+      coverUrl: '',
+      driveUrl: resolved.driveUrl,
+    }
+    setSelectedAlbum(fallbackAlbum)
+    setFolderHistory([])
+    setIsLocked(false)
+    setIsNotificationOpen(false)
+    await fetchAlbumImages(resolved.driveUrl, resolved.id)
+  }
+
+  const deleteViewerRecords = async (albumId?: string) => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) {
+        throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
+      }
+
+      const res = await fetch('/api/admin/delete-viewers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(albumId ? { albumId } : {}),
+      })
+
+      const result = await res.json().catch(() => ({}))
+      if (!res.ok || !result?.ok) {
+        throw new Error(result?.error || `Không thể xóa người xem (HTTP ${res.status})`)
+      }
+
+      await fetchNotifications()
+      setGuestViewerCount(0)
+      void showAlert(albumId ? 'Đã xóa số lượng người xem của album này.' : 'Đã xóa toàn bộ số lượng người xem.')
+    } catch (e: any) {
+      void showAlert('Lỗi xóa số người xem: ' + (e?.message || e))
+    }
+  }
+
+  const handleDownloadSharedSelectionTxt = async () => {
+    if (isSharedGuest || isDownloadingSharedTxt) return
+    setIsDownloadingSharedTxt(true)
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const accessToken = sessionData.session?.access_token
+      if (!accessToken) throw new Error('Phiên đăng nhập đã hết hạn.')
+
+      const res = await fetch('/api/admin/selected-txt', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: 'no-store',
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err?.error || `Không thể tạo file TXT (HTTP ${res.status})`)
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'danh-sach-anh-khach-chon.txt'
+      link.style.display = 'none'
+      document.body.appendChild(link)
+      link.click()
+      setTimeout(() => {
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+      }, 1000)
+    } catch (e: any) {
+      void showAlert('Không thể tải file TXT chung: ' + (e?.message || e))
+    } finally {
+      setIsDownloadingSharedTxt(false)
+    }
+  }
+
+  const fetchNotifications = async () => {
+    if (isSharedGuest) return
+    try {
+      const clearedAt = getNotificationClearTime()
+      const [{ data: guestRows, error: guestError }, { data: visitorRows, error: visitorError }, { data: knownRows }] = await Promise.all([
+        supabase.from('gallery_photo_selections').select('album_id, item_id, stars, actor_key, guest_label, updated_at').eq('scope', 'guest').order('updated_at', { ascending: false }),
+        supabase.from('gallery_album_visitors').select('album_id, visitor_id, customer_name, last_seen_at, updated_at').order('last_seen_at', { ascending: false }),
+        supabase.from('known_drive_folders').select('id, name, parent_url'),
+      ])
+
+      if (guestError) throw guestError
+      if (visitorError) throw visitorError
+
+      const nameMap: Record<string, string> = { ...customNames }
+      ;(knownRows || []).forEach((row: any) => {
+        if (row?.id && row?.name) nameMap[String(row.id)] = String(row.name)
+      })
+
+      const getTitle = (id: string) => {
+        return nameMap[String(id)] || albums.find(a => String(a.id) === String(id))?.title || String(id)
+      }
+
+      const viewerGroups: Record<string, any[]> = {}
+      ;(visitorRows || []).forEach((row: any) => {
+        const albumId = String(row.album_id || '')
+        const name = String(row.customer_name || '').trim()
+        const key = `${albumId}::${name ? `name:${name.toLocaleLowerCase()}` : `visitor:${row.visitor_id}`}`
+        if (!viewerGroups[key]) viewerGroups[key] = []
+        viewerGroups[key].push(row)
+      })
+
+      const viewerCountByAlbum: Record<string, number> = {}
+      const joinedByAlbum: Record<string, any[]> = {}
+      Object.values(viewerGroups).forEach((rows: any[]) => {
+        if (!rows.length) return
+        const row = rows.sort((a, b) => new Date(b.last_seen_at || b.updated_at || 0).getTime() - new Date(a.last_seen_at || a.updated_at || 0).getTime())[0]
+        const albumId = String(row.album_id || '')
+        viewerCountByAlbum[albumId] = (viewerCountByAlbum[albumId] || 0) + 1
+        if (!joinedByAlbum[albumId]) joinedByAlbum[albumId] = []
+        const joinedAt = new Date(row.updated_at || row.last_seen_at || Date.now()).getTime()
+        joinedByAlbum[albumId].push({
+          name: String(row.customer_name || '').trim() || `Khách ${String(row.visitor_id || '').slice(0, 6).toUpperCase()}`,
+          joinedAt,
+        })
+      })
+
+      const latestByAlbumActor: Record<string, any> = {}
+      ;(guestRows || []).forEach((row: any) => {
+        const key = `${row.album_id}::${row.actor_key}`
+        const time = new Date(row.updated_at || 0).getTime()
+        if (!latestByAlbumActor[key] || time > new Date(latestByAlbumActor[key].updated_at || 0).getTime()) {
+          latestByAlbumActor[key] = row
+        }
+      })
+
+      const latestActorPerAlbum: Record<string, { actor: string; updated_at: string }> = {}
+      Object.values(latestByAlbumActor).forEach((row: any) => {
+        const albumId = String(row.album_id || '')
+        const old = latestActorPerAlbum[albumId]
+        if (!old || new Date(row.updated_at || 0).getTime() > new Date(old.updated_at || 0).getTime()) {
+          latestActorPerAlbum[albumId] = { actor: String(row.actor_key), updated_at: String(row.updated_at || '') }
+        }
+      })
+
+      const fullByAlbum: Record<string, any> = {}
+      Object.entries(latestActorPerAlbum).forEach(([albumId, info]) => {
+        const selectedRows = (guestRows || []).filter((r: any) => String(r.album_id) === albumId && String(r.actor_key) === info.actor && Number(r.stars) > 0)
+        const max = Number(folderSettingsMap[albumId]?.max_select || albums.find(a => String(a.id) === albumId)?.max_select || 0)
+        const latestTime = Math.max(...selectedRows.map((r: any) => new Date(r.updated_at || 0).getTime()), 0)
+        if (max > 0 && selectedRows.length >= max) {
+          fullByAlbum[albumId] = {
+            albumId,
+            title: getTitle(albumId),
+            chosen: selectedRows.length,
+            max,
+            actor: info.actor,
+            guestLabel: selectedRows.find((r: any) => r.guest_label)?.guest_label || '',
+            updatedAt: latestTime,
+          }
+        }
+      })
+
+      const allAlbumIds = new Set<string>()
+      albums.forEach(a => allAlbumIds.add(String(a.id)))
+      ;(knownRows || []).forEach((r: any) => r?.id && allAlbumIds.add(String(r.id)))
+      ;(visitorRows || []).forEach((r: any) => r?.album_id && allAlbumIds.add(String(r.album_id)))
+      ;(guestRows || []).forEach((r: any) => r?.album_id && allAlbumIds.add(String(r.album_id)))
+
+      const notices = Array.from(allAlbumIds).map((albumId) => ({
+        albumId,
+        title: getTitle(albumId),
+        viewers: viewerCountByAlbum[albumId] || 0,
+        fullData: fullByAlbum[albumId] || null,
+        full: Boolean(fullByAlbum[albumId] && Number(fullByAlbum[albumId].updatedAt || 0) > clearedAt),
+        joined: (joinedByAlbum[albumId] || []).filter((row: any) => Number(row.joinedAt || 0) > clearedAt).sort((a: any, b: any) => b.joinedAt - a.joinedAt),
+      })).filter(item => item.viewers > 0 || item.full || item.joined.length > 0)
+
+      const selectionGroups: Record<string, any> = {}
+      ;(guestRows || []).forEach((row: any) => {
+        if (Number(row.stars || 0) <= 0) return
+        const albumId = String(row.album_id || '')
+        const actor = String(row.actor_key || '')
+        const key = `${albumId}::${actor}`
+        const updatedAt = new Date(row.updated_at || 0).getTime()
+        if (!selectionGroups[key]) {
+          selectionGroups[key] = {
+            albumId,
+            actor,
+            title: getTitle(albumId),
+            guestLabel: String(row.guest_label || '').trim() || 'Khách',
+            count: 0,
+            updatedAt: 0,
+          }
+        }
+        selectionGroups[key].count += 1
+        if (updatedAt >= selectionGroups[key].updatedAt) {
+          selectionGroups[key].updatedAt = updatedAt
+          if (String(row.guest_label || '').trim()) selectionGroups[key].guestLabel = String(row.guest_label).trim()
+        }
+      })
+
+      setGuestSelectionActivity(
+        Object.values(selectionGroups)
+          .sort((a: any, b: any) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+          .slice(0, 12)
+      )
+      setNotificationItems(notices)
+    } catch (e) {
+      console.error('Lỗi tải thông báo:', e)
+    }
+  }
+
+  const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
+  const subFolders = visibleItems.filter(item => item.type === 'folder')
+  const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
+
+  // Quy tắc bìa dứt điểm:
+  // - Thư mục hiện tại có ảnh: luôn hiển thị ảnh bìa.
+  // - Thư mục hiện tại không có ảnh (chỉ chứa thư mục con): mới hiển thị icon folder.
+  // Không bao giờ lấy nhầm cover của selectedAlbum khi đang đứng ở thư mục con.
+  const firstCurrentImage = visibleItems.find(item => item.type === 'image')
+  const cachedCurrentFolderCover = currentActiveFolderId ? albumCovers[currentActiveFolderId] : ''
+  const cachedCoverIsImage = Boolean(cachedCurrentFolderCover && cachedCurrentFolderCover !== 'NO_IMAGE')
+  const currentFolderHasImages = Boolean(firstCurrentImage) || cachedCoverIsImage
+  const rootCustomCover = currentActiveFolderId === selectedAlbum?.id ? (selectedAlbum?.coverUrl || '') : ''
+  const currentFolderCoverUrl = currentFolderHasImages
+    ? String(
+        rootCustomCover ||
+        (cachedCoverIsImage ? cachedCurrentFolderCover : '') ||
+        firstCurrentImage?.coverUrl ||
+        firstCurrentImage?.url ||
+        firstCurrentImage?.fullUrl ||
+        ''
+      )
+    : ''
+  const downloadableImages = mediaFiles.filter(item => item.type === 'image')
+  const selectedDownloadImages = downloadableImages.filter(item => downloadSelectedIds.has(item.id))
+  const areAllDownloadImagesSelected = downloadableImages.length > 0 && selectedDownloadImages.length === downloadableImages.length
+
+  const selectedImagesList = visibleItems.filter(img => img.type !== 'folder' && (ratings[img.id] || 0) > 0)
+
+  const latestGuestActor = !isSharedGuest ? guestSelectionRows[0]?.actor_key : null
+  const latestGuestRatings = latestGuestActor
+    ? guestSelectionRows.reduce((acc: Record<string, number>, row: any) => {
+        if (row.actor_key === latestGuestActor) {
+          acc[row.item_id] = Number(row.stars || 0)
+        }
+        return acc
+      }, {})
+    : {}
+  const hasLatestGuestSelections = Object.values(latestGuestRatings).some(stars => Number(stars) > 0)
+  const displayRatings = !isSharedGuest && hasLatestGuestSelections ? latestGuestRatings : ratings
+
+  const filteredMediaFiles = mediaFiles.filter(img => {
+    if (starFilter === 'all') return true
+    const imgStar = displayRatings[img.id] || 0
+    if (starFilter === 'selected') return imgStar > 0
+    return imgStar === starFilter
+  })
+
+  const guestSelectedImagesList = hasLatestGuestSelections
+    ? visibleItems.filter(img => img.type !== 'folder' && Number(latestGuestRatings[img.id] || 0) > 0)
+    : []
+  const displaySelectedImagesList = !isSharedGuest && hasLatestGuestSelections
+    ? guestSelectedImagesList
+    : selectedImagesList
+  const txtSelectedImagesList = guestSelectedImagesList.length > 0 ? guestSelectedImagesList : selectedImagesList
+
+  const commentedImagesList = visibleItems.filter(img => img.type !== 'folder' && comments[img.id] && comments[img.id].trim() !== '')
+  const commentTextListContent = commentedImagesList.map(img => `${img.name} - ${comments[img.id]}`).join('\n')
+
+  let separator = ' '
+  if (useNewline) {
+    separator = '\n'
+  } else {
+    let sep = ''
+    if (useComma) sep += ','
+    if (useSpace) sep += ' '
+    if (!sep) sep = ' '
+    separator = sep
+  }
+
+  const displaySelectedFileName = (name: string) => {
+    if (useFileExtension) return name
+    return name.replace(/\.[^/.]+$/, '')
+  }
+
+  const textFileContent = txtSelectedImagesList.map(img => {
+    const cmt = comments[img.id] ? ` (Ghi chú: ${comments[img.id]})` : ''
+    return `${displaySelectedFileName(img.name)}${cmt}`
+  }).join(separator)
+
+  const filteredAlbums = (albums || []).filter(album => album && album.title && album.title.toLowerCase().includes(searchTerm.toLowerCase()))
+  const currentSelectionCount = selectedAlbum ? selectedItemIds.size : selectedAlbumIds.size
+
+  const totalPages = Math.ceil(filteredMediaFiles.length / itemsPerPage)
+  const paginatedImages = filteredMediaFiles.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+  const previewSourceList = filteredMediaFiles
+  const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
+
+  const durationOptions = [
+    { value: '10m', label: '10 Phút' },
+    { value: '7d', label: '7 Ngày' },
+    { value: '1M', label: '1 Tháng' },
+    { value: '3M', label: '3 Tháng' },
+    { value: '6M', label: '6 Tháng' },
+    { value: '1Y', label: '1 Năm' },
+    { value: 'LIFE', label: 'Vĩnh viễn' },
+  ]
+
+  const formatDriveCoverUrl = (url: string) => {
+    if (!url) return ''
+    const cleanId = extractDriveId(url)
+    if (cleanId) {
+      return `https://lh3.googleusercontent.com/d/${cleanId}=w500-h500-p-k-no`
+    }
+    return url
+  }
+
+  const fetchHiddenItemIds = async () => {
+    try {
+      const { data } = await supabase.from('hidden_items').select('id')
+      if (data) setHiddenItemIds(new Set(data.map((item: any) => item.id)))
+    } catch {}
+  }
+
+  const fetchComments = async () => {
+    try {
+      const { data } = await supabase.from('item_comments').select('id, comment')
+      if (data) {
+        const commentMap: Record<string, string> = {}
+        data.forEach((c: any) => { 
+          if (c.comment && c.comment.trim()) {
+            commentMap[c.id] = c.comment 
+          }
+        })
+        setComments(commentMap)
+        return commentMap
+      }
+    } catch {}
+    return {}
+  }
+
+  const fetchFolderSettings = async () => {
+    try {
+      const { data } = await supabase.from('folder_settings').select('*')
+      if (data) {
+        const map: Record<string, FolderSettings> = {}
+        data.forEach((f: any) => {
+          map[f.id] = {
+            id: f.id,
+            title: '',
+            password: f.password || '',
+            max_select: Number(f.max_select || 0),
+            allow_comments: f.allow_comments ?? true,
+            enable_watermark: f.enable_watermark ?? false,
+            collect_customer_info: f.collect_customer_info ?? false,
+            max_viewers: Number(f.max_viewers || 0)
+          }
+        })
+        setFolderSettingsMap(map)
+        return map
+      }
+    } catch {}
+    return {}
+  }
+
+  const fetchKnownFolderIds = async (): Promise<Set<string>> => {
+    try {
+      const { data } = await supabase.from('known_drive_folders').select('id')
+      if (data) {
+        const idSet = new Set<string>(data.map((item: any) => String(item.id)))
+        setKnownFolderIds(idSet)
+        return idSet
+      }
+    } catch {}
+    return new Set<string>()
+  }
+
+  const fetchCustomNames = async () => {
+    try {
+      const { data } = await supabase.from('custom_item_names').select('id, custom_name')
+      if (data) {
+        const nameMap: Record<string, string> = {}
+        data.forEach((item: any) => { nameMap[item.id] = item.custom_name })
+        setCustomNames(nameMap)
+      }
+    } catch {}
+  }
+
+  const fetchCustomCovers = async () => {
+    try {
+      const { data } = await supabase.from('custom_covers').select('id, cover_url')
+      if (data) {
+        setAlbumCovers(prev => {
+          const next = { ...prev }
+          data.forEach((item: any) => { next[item.id] = item.cover_url })
+          return next
+        })
+      }
+    } catch {}
+  }
+
+  const fetchAlbumsFromSupabase = async () => {
+    try {
+      const { data, error } = await supabase.from('albums').select('*').order('id', { ascending: false })
+      if (!error && data) {
+        const formatted: Album[] = data.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          driveUrl: item.drive_url,
+          coverUrl: item.cover_url || '',
+          password: item.password || '',
+          max_select: Number(item.max_select || 0),
+          allow_comments: item.allow_comments ?? true,
+          enable_watermark: item.enable_watermark ?? false
+        }))
+        setAlbums(formatted)
+        return formatted
+      }
+    } catch (e) {
+      console.error(e)
+    }
+    setAlbums([])
+    return []
+  }
+
+  const fetchMasterFoldersList = async () => {
+    try {
+      const { data, error } = await supabase.from('master_folders').select('*').order('created_at', { ascending: false })
+      if (!error && data) {
+        setMasterFoldersList(data)
+        return data
+      }
+    } catch (e) {
+      console.error(e)
+    }
+    return []
+  }
+
+  const fetchLicenses = async () => {
+    setIsLoadingKeys(true)
+    setKeyLoadError('')
+    try {
+      const { data, error } = await supabase
+        .from('panel_licenses')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Không thể tải danh sách Key Panel:', error)
+        setKeyLoadError('Không thể tải danh sách máy. Vui lòng thử lại.')
+        return
+      }
+
+      setKeyRecords((data || []) as KeyRecord[])
+    } catch (error) {
+      console.error('Không thể tải danh sách Key Panel:', error)
+      setKeyLoadError('Không thể tải danh sách máy. Vui lòng thử lại.')
+    } finally {
+      setIsLoadingKeys(false)
+    }
+  }
+
+  // Danh sách Key Panel phải hiển thị ngay khi mở cửa sổ quản lý.
+  // Trước đây fetchLicenses() chỉ chạy sau khi tạo/khóa/xóa một key mới,
+  // khiến modal ban đầu luôn trống dù Supabase đã có dữ liệu.
+  useEffect(() => {
+    if (!isKeyGenOpen) return
+    void fetchLicenses()
+  }, [isKeyGenOpen])
+
+  const checkAllMasterFolders = async (folders: MasterFolderItem[], isManual = false, existingKnown?: Set<string>) => {
+    if (!folders || folders.length === 0) {
+      if (isManual) void showAlert('Vui lòng thêm ít nhất 1 Thư Mục Tổng trước khi quét!')
+      return
+    }
+    setIsSyncing(true)
+    try {
+      const { data: latestKnownData } = await supabase.from('known_drive_folders').select('id')
+      const currentKnown = new Set(latestKnownData ? latestKnownData.map((i: any) => i.id) : (existingKnown || knownFolderIds))
+      const newFoldersDetected: { id: string; name: string; driveUrl: string; parentTitle: string }[] = []
+
+      for (const f of folders) {
+        if (!f || !f.url) continue
+        const res = await fetch(`/api/sync-check?masterUrl=${encodeURIComponent(f.url)}&_t=${Date.now()}`, { cache: 'no-store' })
+        const data = await res.json()
+        if (data.albums && Array.isArray(data.albums)) {
+          const unapproved = data.albums.filter((sub: any) => sub && !currentKnown.has(sub.id))
+          unapproved.forEach((sub: any) => {
+            newFoldersDetected.push({ id: sub.id, name: sub.title, driveUrl: sub.driveUrl, parentTitle: f.name })
+          })
+        }
+      }
+
+      if (newFoldersDetected.length === 0) {
+        if (isManual) void showAlert('Tất cả thư mục trên Drive đã được đồng bộ đầy đủ!')
+      } else {
+        setPendingSyncAlbums(newFoldersDetected)
+        setSelectedPendingIds(new Set(newFoldersDetected.map(a => a.id)))
+        setIsSyncModalOpen(true)
+      }
+    } catch (e) {
+      console.error('Lỗi quét thư mục mới:', e)
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  const fetchSelectionsForFolder = async (folderId: string, force = false, itemIds: string[] = [], guestMode = isSharedGuest) => {
+    if (!folderId) return {} as Record<string, number>
+
+    const actor = getActorKey()
+    const scope = guestMode ? 'guest' : (isAdmin ? 'default' : 'user')
+    const actorKey = guestMode ? actor : (isAdmin ? 'admin' : actor)
+
+    if (guestMode) {
+      try {
+        const saved = localStorage.getItem('dinhthong_image_ratings')
+        const localRatings = saved ? JSON.parse(saved) : {}
+        const nextRatings: Record<string, number> = {}
+        itemIds.forEach(id => {
+          const value = Number(localRatings?.[id] || 0)
+          if (value > 0) nextRatings[id] = value
+        })
+        setRatings(prev => {
+          const next = { ...prev }
+          itemIds.forEach(id => delete next[id])
+          Object.keys(nextRatings).forEach(id => { next[id] = nextRatings[id] })
+          return next
+        })
+        return nextRatings
+      } catch {
+        return {} as Record<string, number>
+      }
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('gallery_photo_selections')
+        .select('item_id, stars, scope, actor_key, updated_at')
+        .eq('album_id', folderId)
+        .in('scope', ['default', 'user'])
+        .order('updated_at', { ascending: false })
+
+      if (error) {
+        console.error('Lỗi tải trạng thái chọn ảnh:', error)
+        return {} as Record<string, number>
+      }
+
+      const nextRatings: Record<string, number> = {}
+      const rows = data || []
+
+      rows.forEach((row: any) => {
+        if (row.scope === 'default' && row.actor_key === 'admin' && !(row.item_id in nextRatings)) {
+          nextRatings[row.item_id] = Number(row.stars || 0)
+        }
+      })
+
+      const hasDefaultRows = rows.some((row: any) => row.scope === 'default' && row.actor_key === 'admin')
+      const hasUserRows = rows.some((row: any) => row.scope === 'user' && row.actor_key === actorKey)
+
+      if (itemIds.length > 0 && !hasDefaultRows && !hasUserRows) {
+        try {
+          const savedRatings = localStorage.getItem('dinhthong_image_ratings')
+          const oldLocal = savedRatings ? JSON.parse(savedRatings) : {}
+          const legacyEntries = itemIds
+            .map(id => [id, Number(oldLocal?.[id] || 0)] as [string, number])
+            .filter(([, value]) => value > 0)
+
+          if (legacyEntries.length > 0) {
+            await Promise.all(legacyEntries.map(([id, value]) => saveSelectionToCloud(folderId, id, value)))
+            legacyEntries.forEach(([id, value]) => { nextRatings[id] = value })
+          }
+        } catch {}
+      }
+
+      if (!isAdmin) {
+        ;(data || []).forEach((row: any) => {
+          if (row.scope === 'user' && row.actor_key === actorKey) {
+            nextRatings[row.item_id] = Number(row.stars || 0)
+          }
+        })
+      }
+
+      if (!force && Object.keys(nextRatings).length === 0) {
+        const savedRatings = localStorage.getItem('dinhthong_image_ratings')
+        if (savedRatings) {
+          try {
+            const local = JSON.parse(savedRatings)
+            if (local && typeof local === 'object') return local
+          } catch {}
+        }
+      }
+
+      setRatings(prev => {
+        const next = { ...prev }
+        itemIds.forEach(id => delete next[id])
+        Object.keys(nextRatings).forEach(id => { next[id] = nextRatings[id] })
+        return next
+      })
+
+      localStorage.setItem('dinhthong_image_ratings', JSON.stringify(nextRatings))
+      return nextRatings
+    } catch (e) {
+      console.error('Lỗi đồng bộ lựa chọn ảnh:', e)
+      return {} as Record<string, number>
+    }
+  }
+
+  const saveSelectionToCloud = async (folderId: string, imageId: string, stars: number) => {
+    if (!folderId || !imageId) return
+
+    const actor = getActorKey()
+    const scope = isSharedGuest ? 'guest' : (isAdmin ? 'default' : 'user')
+    const actorKey = isSharedGuest ? actor : (isAdmin ? 'admin' : actor)
+
+    try {
+      const payload: any = {
+        album_id: folderId,
+        item_id: imageId,
+        scope,
+        actor_key: actorKey,
+        stars: Number(stars || 0),
+        updated_at: new Date().toISOString(),
+      }
+      if (isSharedGuest) payload.guest_label = guestCustomerName.trim() || `Khách ${actor.slice(0, 6).toUpperCase()}`
+
+      const { error } = await supabase
+        .from('gallery_photo_selections')
+        .upsert(payload, { onConflict: 'album_id,item_id,scope,actor_key' })
+
+      if (error) throw error
+    } catch (e) {
+      console.error('Lỗi lưu lựa chọn ảnh:', e)
+    }
+  }
+
+  const fetchGuestSelections = async (folderId: string) => {
+    if (!folderId || isSharedGuest) return
+    setIsLoadingGuestSelections(true)
+    try {
+      const { data, error } = await supabase
+        .from('gallery_photo_selections')
+        .select('album_id, item_id, stars, actor_key, guest_label, updated_at')
+        .eq('album_id', folderId)
+        .eq('scope', 'guest')
+        .gt('stars', 0)
+        .order('updated_at', { ascending: false })
+
+      if (error) throw error
+      setGuestSelectionRows(data || [])
+    } catch (e) {
+      console.error('Lỗi tải lựa chọn của khách:', e)
+      setGuestSelectionRows([])
+    } finally {
+      setIsLoadingGuestSelections(false)
+    }
+  }
+
+  const fetchAlbumImages = async (driveUrl: string, folderId?: string, guestMode = isSharedGuest) => {
+    setLoadingImages(true)
+    // Xóa nội dung thư mục cũ ngay khi chuyển thư mục để header không nháy nhầm ảnh bìa.
+    setItems([])
+    setStarFilter('all')
+    setCurrentPage(1)
+    setSelectedItemIds(new Set())
+    setDownloadSelectedIds(new Set())
+    setPendingMobileBatchShare(null)
+    setMobileDownloadProgress('')
+    setIsPreparingMobileImages(false)
+    try {
+      const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}&_t=${Date.now()}`, { cache: 'no-store' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data?.error || `Không thể tải nội dung album (HTTP ${res.status})`)
+      }
+      const files = Array.isArray(data?.files) ? data.files : []
+      const effectiveFolderId = folderId || (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : selectedAlbum?.id || '')
+
+      // Cache bìa THEO CHÍNH THƯ MỤC ĐANG MỞ, không dùng bìa album cha.
+      // Có ảnh => dùng ảnh đầu tiên hợp lệ làm cover. Không có ảnh => đánh dấu NO_IMAGE
+      // để hero chỉ hiện biểu tượng thư mục. Cách này hoạt động ở mọi cấp thư mục con.
+      if (effectiveFolderId) {
+        const firstImage = files.find((f: any) =>
+          f && f.type === 'image' && !hiddenItemIds.has(String(f.id || ''))
+        )
+        const detectedCover = firstImage
+          ? String(firstImage.coverUrl || firstImage.url || firstImage.fullUrl || '')
+          : ''
+
+        setAlbumCovers(prev => ({
+          ...prev,
+          [effectiveFolderId]: detectedCover || 'NO_IMAGE',
+        }))
+      }
+
+      setItems(files)
+      if (effectiveFolderId) {
+        const mediaItemIds = files.filter((f: any) => f && f.type !== 'folder').map((f: any) => f.id)
+        await fetchSelectionsForFolder(effectiveFolderId, true, mediaItemIds, guestMode)
+        if (!guestMode) await fetchGuestSelections(effectiveFolderId)
+      }
+      return files
+    } catch (e) {
+      console.error(e)
+      setItems([])
+      return []
+    } finally {
+      setLoadingImages(false)
+      fetchComments()
+    }
+  }
+
+  const handleCopyText = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleCopyCommentList = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCommentCopied(true)
+    setTimeout(() => setCommentCopied(false), 2000)
+  }
+
+  const handleDownloadTxt = () => {
+    const blob = new Blob([textFileContent], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'danh-sach-tieu-de-chon.txt'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleDownloadCommentTxt = () => {
+    const blob = new Blob([commentTextListContent], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'danh-sach-binh-luan-khach.txt'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // DESKTOP: dùng chính vùng tick tải ảnh ở trên để nén các ảnh đã chọn thành ZIP.
+  // Không dùng selectedItemIds và không liên quan đến ratings / file TXT.
+  const handleDownloadSelectedImagesDesktopZip = async () => {
+    if (zippingFolderId) return
+    if (selectedDownloadImages.length === 0) {
+      void showAlert('Hãy tick ít nhất 1 ảnh trước khi tải.')
+      return
+    }
+
+    setZippingFolderId('download_selected_images')
+    setZipProgress('Chuẩn bị...')
+
+    try {
+      const zip = new JSZip()
+      const total = selectedDownloadImages.length
+      let completedCount = 0
+      const CONCURRENCY_LIMIT = 5
+
+      const fetchImage = async (fileItem: MediaItem) => {
+        const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
+        try {
+          const downloadEndpoint = getImageWorkerDownloadUrl(fileItem.id, exactFileName)
+          const res = await fetch(downloadEndpoint, { cache: 'no-store' })
+          if (!res.ok) throw new Error(`${exactFileName}: HTTP ${res.status}`)
+
+          let blob = await res.blob()
+          if (activeSetting.enable_watermark) {
+            blob = await applyWatermarkToImageBlob(blob)
+          }
+          zip.file(exactFileName, blob, { compression: 'STORE' })
+        } finally {
+          completedCount++
+          setZipProgress(`${completedCount}/${total}`)
+        }
+      }
+
+      for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+        const chunk = selectedDownloadImages.slice(i, i + CONCURRENCY_LIMIT)
+        await Promise.all(chunk.map(fetchImage))
+      }
+
+      setZipProgress('Tạo file ZIP...')
+      const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+      saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
+      setDownloadSelectedIds(new Set())
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      void showAlert('Không thể tạo ZIP ảnh đã chọn: ' + message)
+    } finally {
+      setZippingFolderId(null)
+      setZipProgress('')
+    }
+  }
+
+  // 2. TẢI ẢNH ĐƠN
+  // Mobile: dùng Web Share API để iOS/Android hiện thao tác lưu vào thư viện Ảnh.
+  // Tuyệt đối KHÔNG tạo ZIP hoặc fallback sang saveAs() trên điện thoại.
+  const isMobileDevice = () => typeof navigator !== 'undefined' && (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  )
+
+  const sharePreparedMobileImage = async (prepared: { blob: Blob; fileName: string }) => {
+    const mimeType = prepared.blob.type && prepared.blob.type.startsWith('image/')
+      ? prepared.blob.type
+      : 'image/jpeg'
+    const fileObj = new File([prepared.blob], prepared.fileName, { type: mimeType })
+
+    if (
+      typeof navigator.share !== 'function' ||
+      typeof navigator.canShare !== 'function' ||
+      !navigator.canShare({ files: [fileObj] })
+    ) {
+      void showAlert('Trình duyệt này chưa hỗ trợ lưu ảnh trực tiếp vào Ảnh. Hãy mở bằng Safari/Chrome mới nhất trên điện thoại.')
+      return false
+    }
+
+    try {
+      await navigator.share({ files: [fileObj], title: prepared.fileName })
+      return true
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return false
+      console.warn('Web Share chưa mở được:', err)
+      return false
+    }
+  }
+
+  const handleConfirmMobileSave = async () => {
+    if (!pendingMobileShare) return
+    // Hàm này được gọi trực tiếp từ một lần bấm của người dùng, vì vậy
+    // navigator.share() luôn có user activation mới trên iOS.
+    const prepared = pendingMobileShare
+    const ok = await sharePreparedMobileImage(prepared)
+    if (ok) setPendingMobileShare(null)
+  }
+
+  const toggleMobileDownloadSelection = (itemId: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    setDownloadSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(itemId)) next.delete(itemId)
+      else next.add(itemId)
+      return next
+    })
+  }
+
+  const toggleSelectAllDownloadImages = () => {
+    if (areAllDownloadImagesSelected) {
+      setDownloadSelectedIds(new Set())
+      return
+    }
+    setDownloadSelectedIds(new Set(downloadableImages.map(item => item.id)))
+  }
+
+  const prepareMobileImageBatch = async (
+    sourceItems: MediaItem[],
+    label: string,
+    batchNumber: number,
+    totalBatches: number,
+    totalImages: number
+  ) => {
+    const currentBatch = sourceItems.slice(0, MOBILE_IMAGE_SHARE_BATCH_SIZE)
+    const remainingItems = sourceItems.slice(MOBILE_IMAGE_SHARE_BATCH_SIZE)
+
+    if (currentBatch.length === 0) return
+
+    setIsPreparingMobileImages(true)
+    setMobileDownloadProgress(`Đang chuẩn bị ${Math.min((batchNumber - 1) * MOBILE_IMAGE_SHARE_BATCH_SIZE + 1, totalImages)}-${Math.min(batchNumber * MOBILE_IMAGE_SHARE_BATCH_SIZE, totalImages)} / ${totalImages}`)
+
+    try {
+      const preparedFiles: Array<File | null> = new Array(currentBatch.length).fill(null)
+      let completed = 0
+      const CONCURRENCY_LIMIT = 3
+
+      const prepareOne = async (item: MediaItem, index: number) => {
+        const exactFileName = item.name.includes('.') ? item.name : `${item.name}.jpg`
+        const downloadEndpoint = getImageWorkerDownloadUrl(item.id, exactFileName)
+        const res = await fetch(downloadEndpoint, { cache: 'no-store' })
+        if (!res.ok) throw new Error(`${exactFileName}: HTTP ${res.status}`)
+
+        let blob = await res.blob()
+        if (activeSetting.enable_watermark) {
+          blob = await applyWatermarkToImageBlob(blob)
+        }
+
+        const mimeType = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
+        preparedFiles[index] = new File([blob], exactFileName, { type: mimeType })
+
+        completed++
+        const preparedOverall = Math.min((batchNumber - 1) * MOBILE_IMAGE_SHARE_BATCH_SIZE + completed, totalImages)
+        setMobileDownloadProgress(`Đã chuẩn bị ${preparedOverall}/${totalImages} ảnh`)
+      }
+
+      for (let i = 0; i < currentBatch.length; i += CONCURRENCY_LIMIT) {
+        const chunk = currentBatch.slice(i, i + CONCURRENCY_LIMIT)
+        await Promise.all(chunk.map((item, offset) => prepareOne(item, i + offset)))
+      }
+
+      const files = preparedFiles.filter((file): file is File => Boolean(file))
+      if (files.length === 0) throw new Error('Không chuẩn bị được ảnh nào để lưu.')
+
+      const preparedBatch = {
+        files,
+        remainingItems,
+        label,
+        batchNumber,
+        totalBatches,
+        totalImages,
+      }
+
+      setMobileDownloadProgress('')
+
+      // Thử mở ngay bảng lưu ảnh ở lần bấm đầu tiên. Nếu Safari đã làm mất
+      // user activation trong lúc tải ảnh gốc từ Worker, ta giữ batch đã chuẩn bị
+      // và hiện nút “Lưu ... ảnh vào album” để người dùng bấm một lần nữa.
+      const canNativeShare =
+        typeof navigator.share === 'function' &&
+        typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files })
+
+      if (batchNumber === 1 && canNativeShare) {
+        try {
+          await navigator.share({ files, title: label })
+
+          if (remainingItems.length > 0) {
+            await prepareMobileImageBatch(
+              remainingItems,
+              label,
+              batchNumber + 1,
+              totalBatches,
+              totalImages
+            )
+          } else {
+            setPendingMobileBatchShare(null)
+            setDownloadSelectedIds(new Set())
+          }
+          return
+        } catch (shareErr: unknown) {
+          // NotAllowedError thường xảy ra khi iOS hết transient user activation
+          // sau quá trình fetch. AbortError cũng giữ batch để người dùng có thể thử lại.
+          console.warn('Cần thao tác bấm mới để mở bảng lưu ảnh:', shareErr)
+        }
+      }
+
+      setPendingMobileBatchShare(preparedBatch)
+    } catch (err: unknown) {
+      console.error('Lỗi chuẩn bị ảnh hàng loạt:', err)
+      const message = err instanceof Error ? err.message : String(err)
+      void showAlert('Không thể chuẩn bị ảnh để tải: ' + message)
+      setMobileDownloadProgress('')
+    } finally {
+      setIsPreparingMobileImages(false)
+    }
+  }
+
+  const startMobileImageDownload = async (sourceItems: MediaItem[], label: string) => {
+    if (isPreparingMobileImages || pendingMobileBatchShare) return
+
+    const imagesOnly = sourceItems.filter(item => item.type === 'image')
+    if (imagesOnly.length === 0) {
+      void showAlert('Không có ảnh nào để tải.')
+      return
+    }
+
+    const totalBatches = Math.ceil(imagesOnly.length / MOBILE_IMAGE_SHARE_BATCH_SIZE)
+    await prepareMobileImageBatch(imagesOnly, label, 1, totalBatches, imagesOnly.length)
+  }
+
+  const handleDownloadSelectedImagesToPhone = async () => {
+    if (selectedDownloadImages.length === 0) {
+      void showAlert('Hãy tick ít nhất 1 ảnh trước khi tải.')
+      return
+    }
+    await startMobileImageDownload(selectedDownloadImages, `${currentActiveFolderTitle}_da_chon`)
+  }
+
+  const handleDownloadAllImagesToPhone = async () => {
+    await startMobileImageDownload(downloadableImages, `${currentActiveFolderTitle}_tat_ca_anh`)
+  }
+
+  const handleConfirmMobileBatchSave = async () => {
+    const pending = pendingMobileBatchShare
+    if (!pending) return
+
+    try {
+      const canNativeShare =
+        typeof navigator.share === 'function' &&
+        typeof navigator.canShare === 'function' &&
+        navigator.canShare({ files: pending.files })
+
+      if (!canNativeShare) {
+        void showAlert('Trình duyệt này chưa hỗ trợ lưu nhiều ảnh trực tiếp vào album. Hãy mở link bằng Safari trên iPhone/iPad hoặc Chrome mới nhất trên Android.')
+        return
+      }
+
+      // Mobile tuyệt đối không đóng ZIP. Web Share API chuyển các file ảnh gốc
+      // sang bảng chia sẻ hệ thống; trên iOS người dùng chọn “Lưu X hình ảnh”.
+      await navigator.share({
+        files: pending.files,
+        title: pending.label,
+      })
+
+      if (pending.remainingItems.length > 0) {
+        const nextBatch = pending.batchNumber + 1
+        const remaining = pending.remainingItems
+        setPendingMobileBatchShare(null)
+        await prepareMobileImageBatch(
+          remaining,
+          pending.label,
+          nextBatch,
+          pending.totalBatches,
+          pending.totalImages
+        )
+      } else {
+        setPendingMobileBatchShare(null)
+        setMobileDownloadProgress('')
+        setDownloadSelectedIds(new Set())
+      }
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      console.error('Lỗi lưu nhiều ảnh:', err)
+      const message = err instanceof Error ? err.message : String(err)
+      void showAlert('Không thể mở trình lưu ảnh: ' + message)
+    }
+  }
+
+  const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    if (downloadingId || item.type === 'folder') return
+
+    setDownloadingId(item.id)
+
+    try {
+      const ext = item.type === 'video' ? 'mp4' : 'jpg'
+      const exactFileName = item.name.includes('.') ? item.name : `${item.name}.${ext}`
+
+      // VIDEO: 100% qua Cloudflare Worker /video
+      if (item.type === 'video') {
+        triggerDirectBrowserDownload(item.id, exactFileName)
+        return
+      }
+
+      // ẢNH: 100% qua Cloudflare Worker /image, không đi qua Vercel.
+      const downloadEndpoint = getImageWorkerDownloadUrl(item.id, exactFileName)
+      const res = await fetch(downloadEndpoint, { cache: 'no-store' })
+      if (!res.ok) throw new Error(`Máy chủ không thể lấy ảnh (HTTP ${res.status})`)
+
+      let blob = await res.blob()
+      if (activeSetting.enable_watermark) {
+        blob = await applyWatermarkToImageBlob(blob)
+      }
+
+      if (isMobileDevice()) {
+        const prepared = { blob, fileName: exactFileName }
+
+        // Thử mở Share Sheet ngay. Trên một số bản iOS, thời gian fetch có thể
+        // làm mất transient user activation. Nếu vậy, KHÔNG tải file kiểu browser;
+        // thay vào đó hiện nút xác nhận để tạo một user gesture mới rồi share lại.
+        const shared = await sharePreparedMobileImage(prepared)
+        if (!shared) {
+          setPendingMobileShare(prepared)
+        }
+        return
+      }
+
+      // Desktop giữ nguyên: tải file trực tiếp về máy.
+      saveAs(blob, exactFileName)
+    } catch (err: any) {
+      console.error('Lỗi khi tải ảnh:', err)
+      void showAlert('Có lỗi xảy ra khi tải ảnh: ' + (err?.message || err))
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
+  // 3. NÉN TOÀN BỘ ALBUM ZIP QUA API DRIVE ALT=MEDIA
+  const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    const currentFolder = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1] : null
+    const target = targetInfo || (currentFolder ? { id: currentFolder.id, title: currentFolder.title, driveUrl: currentFolder.driveUrl } : (selectedAlbum ? { id: selectedAlbum.id, title: selectedAlbum.title, driveUrl: selectedAlbum.driveUrl } : null))
+    if (!target || zippingFolderId) return
+
+    const targetId = target.id || target.driveUrl || 'global'
+    setZippingFolderId(targetId)
+    setZipProgress('Chuẩn bị...')
+
+    try {
+      let targetFiles: MediaItem[] = []
+      
+      if (targetInfo && targetInfo.driveUrl !== (currentFolder?.driveUrl || selectedAlbum?.driveUrl)) {
+        const res = await fetch(`/api/drive?url=${encodeURIComponent(targetInfo.driveUrl)}`)
+        const data = await res.json()
+        targetFiles = (data.files || []).filter((f: any) => f.type !== 'folder' && !hiddenItemIds.has(f.id))
+      } else {
+        targetFiles = visibleItems.filter(f => f.type !== 'folder')
+      }
+
+      if (targetFiles.length === 0) {
+        void showAlert(`Thư mục "${target.title}" hiện không có tệp nào để tải!`)
+        setZippingFolderId(null)
+        setZipProgress('')
+        return
+      }
+
+      const videoFiles = targetFiles.filter(f => f.type === 'video')
+      const imageFiles = targetFiles.filter(f => f.type === 'image')
+
+      // Video tải trực tiếp qua Cloudflare Worker
+      if (videoFiles.length > 0) {
+        for (let i = 0; i < videoFiles.length; i++) {
+          const v = videoFiles[i]
+          const ext = 'mp4'
+          const exactFileName = v.name.includes('.') ? v.name : `${v.name}.${ext}`
+          triggerDirectBrowserDownload(v.id, exactFileName)
+          await new Promise(resolve => setTimeout(resolve, 500))
+        }
+      }
+
+      // Nén ảnh: lấy dữ liệu qua Cloudflare Worker, không đi qua Vercel
+      if (imageFiles.length > 0) {
+        const zip = new JSZip()
+        const total = imageFiles.length
+        let completedCount = 0
+
+        const CONCURRENCY_LIMIT = 5
+        const fetchImage = async (fileItem: MediaItem) => {
+          const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
+          try {
+            const downloadEndpoint = getImageWorkerDownloadUrl(fileItem.id, exactFileName)
+            const res = await fetch(downloadEndpoint)
+            if (res.ok) {
+              let blob = await res.blob()
+              if (activeSetting.enable_watermark) {
+                blob = await applyWatermarkToImageBlob(blob)
+              }
+              zip.file(exactFileName, blob, { compression: 'STORE' })
+            }
+          } catch (err) {
+            console.error(`Lỗi tải: ${exactFileName}`, err)
+          } finally {
+            completedCount++
+            setZipProgress(`${completedCount}/${total}`)
+          }
+        }
+
+        for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+          const chunk = imageFiles.slice(i, i + CONCURRENCY_LIMIT)
+          await Promise.all(chunk.map(fileItem => fetchImage(fileItem)))
+        }
+
+        setZipProgress('Tạo file ZIP...')
+        const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+        saveAs(zipContent, `${target.title}.zip`)
+      }
+    } catch (err: any) {
+      void showAlert('Có lỗi xảy ra khi tải album: ' + err.message)
+    } finally {
+      setZippingFolderId(null)
+      setZipProgress('')
+    }
+  }
+
+  const handleBatchDownload = async () => {
+    if (zippingFolderId) return
+    if (!selectedAlbum) {
+      const selectedAlbumsList = (albums || []).filter(a => a && selectedAlbumIds.has(a.id))
+      if (selectedAlbumsList.length === 0) return
+
+      setZippingFolderId('batch_albums')
+      setZipProgress('Chuẩn bị tải...')
+      try {
+        for (const alb of selectedAlbumsList) {
+          await handleDownloadAlbumZip({ id: alb.id, title: alb.title, driveUrl: alb.driveUrl })
+        }
+        setSelectedAlbumIds(new Set())
+      } finally {
+        setZippingFolderId(null)
+        setZipProgress('')
+      }
+    } else {
+      const selectedFiles = visibleItems.filter(f => selectedItemIds.has(f.id) && f.type !== 'folder')
+      if (selectedFiles.length === 0) {
+        void showAlert('Vui lòng chọn ít nhất 1 tệp ảnh/video để tải!')
+        return
+      }
+
+      setZippingFolderId('batch_items')
+      setZipProgress('Đang xử lý...')
+      try {
+        const videoFiles = selectedFiles.filter(f => f.type === 'video')
+        const imageFiles = selectedFiles.filter(f => f.type === 'image')
+
+        for (const v of videoFiles) {
+          const exactFileName = v.name.includes('.') ? v.name : `${v.name}.mp4`
+          triggerDirectBrowserDownload(v.id, exactFileName)
+          await new Promise(resolve => setTimeout(resolve, 500))
+        }
+
+        if (imageFiles.length > 0) {
+          const zip = new JSZip()
+          const total = imageFiles.length
+          let completedCount = 0
+
+          const CONCURRENCY_LIMIT = 5
+          const fetchImage = async (fileItem: MediaItem) => {
+            const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
+            try {
+              const downloadEndpoint = getImageWorkerDownloadUrl(fileItem.id, exactFileName)
+              const res = await fetch(downloadEndpoint)
+              if (res.ok) {
+                let blob = await res.blob()
+                if (activeSetting.enable_watermark) {
+                  blob = await applyWatermarkToImageBlob(blob)
+                }
+                zip.file(exactFileName, blob, { compression: 'STORE' })
+              }
+            } catch (err) {
+              console.error(err)
+            } finally {
+              completedCount++
+              setZipProgress(`${completedCount}/${total}`)
+            }
+          }
+
+          for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
+            const chunk = imageFiles.slice(i, i + CONCURRENCY_LIMIT)
+            await Promise.all(chunk.map(fileItem => fetchImage(fileItem)))
+          }
+
+          setZipProgress('Tạo file ZIP...')
+          const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
+          saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
+        }
+
+        setSelectedItemIds(new Set())
+      } catch (e: any) {
+        void showAlert('Lỗi tải tệp: ' + e.message)
+      } finally {
+        setZippingFolderId(null)
+        setZipProgress('')
+      }
+    }
+  }
+
+  const handleDeleteAlbum = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (isSharedGuest) return
+    if (await showConfirm('Bạn có chắc muốn xóa album này không?')) {
+      const { error } = await supabase.from('albums').delete().eq('id', id)
+      if (!error) await fetchAlbumsFromSupabase()
+      else void showAlert('Lỗi khi xóa: ' + error.message)
+    }
+  }
+
+  const handleSetAsCover = async (targetId: string, imageId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const formattedCover = `https://lh3.googleusercontent.com/d/${imageId}=w500-h500-p-k-no`
+    const isMasterAlbum = masterFoldersList.some(m => m.id === targetId) || albums.some(a => a.id === targetId && folderHistory.length === 0)
+
+    if (isMasterAlbum) {
+      const { error } = await supabase.from('albums').update({ cover_url: formattedCover }).eq('id', targetId)
+      if (!error) {
+        await fetchAlbumsFromSupabase()
+        void showAlert('Đã cập nhật ảnh bìa Album trang chủ thành công!')
+      } else {
+        void showAlert('Lỗi cập nhật ảnh bìa: ' + error.message)
+      }
+    } else {
+      const { error } = await supabase.from('custom_covers').upsert([
+        { id: targetId, cover_url: formattedCover }
+      ], { onConflict: 'id' })
+
+      if (!error) {
+        setAlbumCovers(prev => ({ ...prev, [targetId]: formattedCover }))
+        void showAlert('Đã đặt ảnh bìa cho thư mục con thành công!')
+      } else {
+        void showAlert('Lỗi lưu ảnh bìa: ' + error.message)
+      }
+    }
+  }
+
+  const handleAddAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const form = e.currentTarget
+    const titleInput = form.elements.namedItem('title') as HTMLInputElement
+    const urlInput = form.elements.namedItem('url') as HTMLInputElement
+    const coverInput = form.elements.namedItem('cover') as HTMLInputElement
+    const passInput = form.elements.namedItem('password') as HTMLInputElement
+    const maxSelectInput = form.elements.namedItem('max_select') as HTMLInputElement
+    const watermarkInput = form.elements.namedItem('enable_watermark') as HTMLInputElement
+    const commentsInput = form.elements.namedItem('allow_comments') as HTMLInputElement
+
+    const newTitle = titleInput.value
+    const newDriveUrl = urlInput.value
+    const newId = extractDriveId(newDriveUrl) || Date.now().toString()
+    const newCoverUrl = coverInput.value.trim() ? formatDriveCoverUrl(coverInput.value) : ''
+
+    const { error } = await supabase.from('albums').insert([
+      { 
+        id: newId, 
+        title: newTitle, 
+        drive_url: newDriveUrl, 
+        cover_url: newCoverUrl,
+        password: passInput.value.trim(),
+        max_select: Number(maxSelectInput.value || 0),
+        enable_watermark: watermarkInput.checked,
+        allow_comments: commentsInput.checked
+      }
+    ])
+
+    if (!error) {
+      await fetchAlbumsFromSupabase()
+      setIsModalOpen(false)
+    } else {
+      void showAlert('Lỗi khi thêm album: ' + error.message)
+    }
+  }
+
+  const handleSaveComment = async (itemId: string) => {
+    const text = currentCommentInput.trim()
+    setIsSavingComment(true)
+    try {
+      const newMap = { ...comments, [itemId]: text }
+      setComments(newMap)
+      
+      const { error } = await supabase.from('item_comments').upsert({ id: itemId, comment: text })
+      if (error) throw error
+      void showAlert('Đã lưu bình luận yêu cầu thành công!')
+    } catch (err: any) {
+      void showAlert('Lỗi lưu bình luận: ' + err.message)
+    } finally {
+      setIsSavingComment(false)
+    }
+  }
+
+  const handleDeleteAllComments = async () => {
+    if (await showConfirm('CẢNH BÁO: Bạn có chắc muốn XÓA TẤT CẢ bình luận của khách hàng trên hệ thống?')) {
+      const { error } = await supabase.from('item_comments').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+      if (!error) {
+        setComments({})
+        void showAlert('Đã xóa tất cả bình luận thành công!')
+      } else {
+        void showAlert('Lỗi xóa bình luận: ' + error.message)
+      }
+    }
+  }
+
+  const handleClosePreview = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    setDownloadingId(null)
+    setPreviewMedia(null)
+    setZoomScale(1)
+    setPanPosition({ x: 0, y: 0 })
+  }
+
+  const handleClearAllSelections = async () => {
+    if (!await showConfirm('Bạn có chắc muốn xóa tất cả các ảnh đã chọn trong album này không?')) return
+
+    const folderId = currentActiveFolderId
+    let scope = isSharedGuest ? 'guest' : 'default'
+    let actorKey = isSharedGuest ? getActorKey() : 'admin'
+
+    if (!isSharedGuest && latestGuestActor && hasLatestGuestSelections) {
+      scope = 'guest'
+      actorKey = latestGuestActor
+    }
+
+    try {
+      if (folderId) {
+        const { error } = await supabase
+          .from('gallery_photo_selections')
+          .delete()
+          .eq('album_id', folderId)
+          .eq('scope', scope)
+          .eq('actor_key', actorKey)
+        if (error) throw error
+      }
+      setRatings(prev => {
+        const next = { ...prev }
+        mediaFiles.forEach(item => delete next[item.id])
+        return next
+      })
+      localStorage.removeItem('dinhthong_image_ratings')
+      if (!isSharedGuest) { await fetchGuestSelections(folderId); await fetchNotifications() }
+    } catch (e: any) {
+      void showAlert('Lỗi xóa lựa chọn: ' + (e?.message || e))
+    }
+  }
+
+  const handleToggleSelectAlbum = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedAlbumIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleToggleSelectItem = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (isSharedGuest) return
+    const maxSel = Number(activeSetting?.max_select || 0)
+    
+    if (maxSel > 0 && !selectedItemIds.has(id) && selectedItemIds.size >= maxSel) {
+      void showAlert(`Album này chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ chọn bớt ảnh khác trước khi chọn thêm.`)
+      return
+    }
+
+    setSelectedItemIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleRateImage = async (imageId: string, stars: number) => {
+    if (isSharedGuest && !guestCanSelect) {
+      void showAlert(activeSetting.collect_customer_info ? 'Vui lòng nhập tên để bắt đầu chọn ảnh.' : 'Vui lòng chờ xác thực quyền truy cập.')
+      return
+    }
+
+    const maxSel = isSharedGuest ? Number(activeSetting?.max_select || 0) : 0
+    const isCurrentlyRated = (ratings[imageId] || 0) > 0
+
+    if (isSharedGuest && stars > 0 && !isCurrentlyRated) {
+      const currentMediaIds = new Set(mediaFiles.map(item => item.id))
+      const currentRatedCount = Object.entries(ratings).filter(([id, value]) => currentMediaIds.has(id) && Number(value) > 0).length
+      
+      if (maxSel > 0 && currentRatedCount >= maxSel) {
+        void showAlert(`Thư mục "${currentActiveFolderTitle}" chỉ cho phép chọn tối đa ${maxSel} ảnh! Vui lòng bỏ bớt ảnh khác trước khi chọn thêm.`)
+        return
+      }
+    }
+
+    const newRatings = { ...ratings, [imageId]: stars }
+    setRatings(newRatings)
+    localStorage.setItem('dinhthong_image_ratings', JSON.stringify(newRatings))
+
+    const folderId = currentActiveFolderId
+    if (folderId) {
+      await saveSelectionToCloud(folderId, imageId, stars)
+      if (!isSharedGuest) { if (isAdminPanelOpen) await fetchGuestSelections(folderId); await fetchNotifications() }
+    }
+  }
+
+  const handleBatchDelete = async () => {
+    if (isSharedGuest) return
+    if (!selectedAlbum) {
+      if (selectedAlbumIds.size === 0) return
+      if (await showConfirm(`Bạn có chắc muốn XÓA ${selectedAlbumIds.size} album đã chọn khỏi hệ thống?`)) {
+        const idsToDelete = Array.from(selectedAlbumIds)
+        const { error } = await supabase.from('albums').delete().in('id', idsToDelete)
+        if (!error) {
+          await fetchAlbumsFromSupabase()
+          setSelectedAlbumIds(new Set())
+          void showAlert('Đã xóa thành công các album đã chọn!')
+        } else {
+          void showAlert('Lỗi khi xóa: ' + error.message)
+        }
+      }
+    } else {
+      if (selectedItemIds.size === 0) return
+      if (await showConfirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM ${selectedItemIds.size} mục đã chọn khỏi hiển thị?`)) {
+        const idsToHide = Array.from(selectedItemIds).map(id => ({ id }))
+        const { error } = await supabase.from('hidden_items').insert(idsToHide)
+        if (!error) {
+          setHiddenItemIds(prev => new Set([...Array.from(prev), ...Array.from(selectedItemIds)]))
+          setSelectedItemIds(new Set())
+          void showAlert('Đã xóa dứt điểm các mục đã chọn!')
+        } else {
+          void showAlert('Lỗi khi xóa: ' + error.message)
+        }
+      }
+    }
+  }
+
+  const handleOpenVisibilityManager = () => {
+    const visibleSet = new Set(items.map(i => i.id).filter(id => !hiddenItemIds.has(id)))
+    setTempVisibleIds(visibleSet)
+    setIsManageVisibilityOpen(true)
+  }
+
+  const handleSaveVisibilityChanges = async () => {
+    setIsSavingVisibility(true)
+    try {
+      const allCurrentItemIds = items.map(i => i.id)
+      const newlyHiddenIds = allCurrentItemIds.filter(id => !tempVisibleIds.has(id))
+      const newlyShownIds = allCurrentItemIds.filter(id => tempVisibleIds.has(id))
+
+      if (newlyHiddenIds.length > 0) {
+        await supabase.from('hidden_items').upsert(newlyHiddenIds.map(id => ({ id })), { onConflict: 'id' })
+      }
+      if (newlyShownIds.length > 0) {
+        await supabase.from('hidden_items').delete().in('id', newlyShownIds)
+      }
+
+      setHiddenItemIds(prev => {
+        const next = new Set(prev)
+        newlyHiddenIds.forEach(id => next.add(id))
+        newlyShownIds.forEach(id => next.delete(id))
+        return next
+      })
+
+      setIsManageVisibilityOpen(false)
+      void showAlert('Đã cập nhật trạng thái hiển thị thành công!')
+    } catch (err: any) {
+      void showAlert('Lỗi lưu: ' + err.message)
+    } finally {
+      setIsSavingVisibility(false)
+    }
+  }
+
+  const handleOpenCurrentFolderSetting = () => {
+    setEditingFolderSetting({
+      id: currentActiveFolderId,
+      title: currentActiveFolderTitle,
+      password: activeSetting.password || '',
+      max_select: activeSetting.max_select || 0,
+      allow_comments: activeSetting.allow_comments ?? true,
+      enable_watermark: activeSetting.enable_watermark ?? false,
+      collect_customer_info: activeSetting.collect_customer_info ?? false,
+      max_viewers: activeSetting.max_viewers ?? 0
+    })
+  }
+
+  const handleSaveCurrentFolderSetting = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingFolderSetting) return
+
+    try {
+      const newTitle = editingFolderSetting.title.trim()
+      const payload = {
+        id: editingFolderSetting.id,
+        password: editingFolderSetting.password?.trim() || '',
+        max_select: Number(editingFolderSetting.max_select || 0),
+        allow_comments: editingFolderSetting.allow_comments ?? true,
+        enable_watermark: editingFolderSetting.enable_watermark ?? false,
+        collect_customer_info: editingFolderSetting.collect_customer_info ?? false,
+        max_viewers: Math.max(0, Number(editingFolderSetting.max_viewers || 0))
+      }
+
+      await supabase.from('folder_settings').upsert(payload, { onConflict: 'id' })
+
+      if (newTitle) {
+        await supabase.from('custom_item_names').upsert({ id: editingFolderSetting.id, custom_name: newTitle }, { onConflict: 'id' })
+        setCustomNames(prev => ({ ...prev, [editingFolderSetting.id]: newTitle }))
+      }
+
+      if (folderHistory.length === 0 && selectedAlbum?.id === editingFolderSetting.id) {
+        await supabase.from('albums').update({ ...payload, title: newTitle || selectedAlbum.title }).eq('id', editingFolderSetting.id)
+        await fetchAlbumsFromSupabase()
+      }
+
+      setFolderSettingsMap(prev => ({
+        ...prev,
+        [editingFolderSetting.id]: editingFolderSetting
+      }))
+
+      setEditingFolderSetting(null)
+      void showAlert(`Đã lưu cài đặt cho "${newTitle || currentActiveFolderTitle}" thành công!`)
+    } catch (err: any) {
+      void showAlert('Lỗi lưu cài đặt: ' + err.message)
+    }
+  }
+
+  const handleShareFolder = async (folderId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    if (!folderId) return
+
+    const cleanId = String(folderId)
+    const folderItem = (items || []).find((item: any) => String(item?.id) === cleanId)
+    const historyItem = (folderHistory || []).find((item: any) => String(item?.id) === cleanId)
+    const albumItem = (albums || []).find((item: any) => String(item?.id) === cleanId)
+
+    const folderName =
+      customNames[cleanId] ||
+      folderItem?.name ||
+      historyItem?.title ||
+      albumItem?.title ||
+      cleanId
+
+    const driveUrl =
+      folderItem?.type === 'folder'
+        ? `https://drive.google.com/drive/folders/${cleanId}`
+        : historyItem?.driveUrl ||
+          albumItem?.driveUrl ||
+          `https://drive.google.com/drive/folders/${cleanId}`
+
+    try {
+      await supabase
+        .from('known_drive_folders')
+        .upsert(
+          [{ id: cleanId, name: folderName, parent_url: driveUrl }],
+          { onConflict: 'id' }
+        )
+    } catch (err) {
+      console.warn('Không lưu được mapping share folder:', err)
+    }
+
+    const numericCode = toNumericCode(cleanId)
+    const shareUrl = `${window.location.origin}/s/${numericCode}`
+    await navigator.clipboard.writeText(shareUrl)
+    setShareCopiedId(folderId)
+    setTimeout(() => setShareCopiedId(null), 2500)
+  }
+
+  const handleOpenSubFolder = (folderItem: MediaItem) => {
+    const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
+    const displayName = customNames[folderItem.id] || folderItem.name
+
+    // Nếu API danh sách cha đã trả sẵn cover của thư mục con thì dùng ngay,
+    // sau đó fetchAlbumImages sẽ xác nhận/làm mới cover theo nội dung thật bên trong.
+    if (folderItem.coverUrl) {
+      setAlbumCovers(prev => ({ ...prev, [folderItem.id]: folderItem.coverUrl as string }))
+    }
+
+    const nextHistory = [...folderHistory, { id: folderItem.id, title: displayName, driveUrl: folderDriveUrl }]
+    setFolderHistory(nextHistory)
+    persistAdminLocation(selectedAlbum, nextHistory)
+
+    const fSetting = folderSettingsMap[folderItem.id]
+    if (fSetting?.password && isSharedGuest) {
+      setIsLocked(true)
+    } else {
+      setIsLocked(false)
+      fetchAlbumImages(folderDriveUrl, folderItem.id, isSharedGuest)
+    }
+  }
+
+  const handleNavigateBreadcrumb = (index: number) => {
+    if (index === -1) {
+      if (selectedAlbum) {
+        const nextHistory: FolderBreadcrumb[] = []
+        setFolderHistory(nextHistory)
+        persistAdminLocation(selectedAlbum, nextHistory)
+        const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
+        if (mainPass && isSharedGuest) {
+          setIsLocked(true)
+        } else {
+          setIsLocked(false)
+          fetchAlbumImages(selectedAlbum.driveUrl, selectedAlbum.id)
+        }
+      }
+    } else {
+      const target = folderHistory[index]
+      const nextHistory = folderHistory.slice(0, index + 1)
+      setFolderHistory(nextHistory)
+      persistAdminLocation(selectedAlbum, nextHistory)
+      const targetPass = folderSettingsMap[target.id]?.password
+      if (targetPass && isSharedGuest) {
+        setIsLocked(true)
+      } else {
+        setIsLocked(false)
+        fetchAlbumImages(target.driveUrl, target.id)
+      }
+    }
+  }
+
+  const handleBackToParentFolder = () => {
+    if (folderHistory.length > 1) {
+      const prev = folderHistory[folderHistory.length - 2]
+      const nextHistory = folderHistory.slice(0, -1)
+      setFolderHistory(nextHistory)
+      persistAdminLocation(selectedAlbum, nextHistory)
+      const prevPass = folderSettingsMap[prev.id]?.password
+      if (prevPass && isSharedGuest) {
+        setIsLocked(true)
+      } else {
+        setIsLocked(false)
+        fetchAlbumImages(prev.driveUrl, prev.id)
+      }
+    } else if (folderHistory.length === 1 && selectedAlbum) {
+      const nextHistory: FolderBreadcrumb[] = []
+      setFolderHistory(nextHistory)
+      persistAdminLocation(selectedAlbum, nextHistory)
+      const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
+      if (mainPass && isSharedGuest) {
+        setIsLocked(true)
+      } else {
+        setIsLocked(false)
+        fetchAlbumImages(selectedAlbum.driveUrl, selectedAlbum.id)
+      }
+    } else {
+      if (!isSharedGuest) {
+        setSelectedAlbum(null)
+        clearAdminLocation()
+      }
+    }
+  }
+
+  const handleOpenAlbum = (album: Album) => {
+    const nextHistory: FolderBreadcrumb[] = []
+    setSelectedAlbum(album)
+    setFolderHistory(nextHistory)
+    persistAdminLocation(album, nextHistory)
+    const fSetting = folderSettingsMap[album.id]
+    const currentPass = fSetting?.password || album.password
+    if (currentPass && isSharedGuest) {
+      setIsLocked(true)
+    } else {
+      setIsLocked(false)
+      fetchAlbumImages(album.driveUrl, album.id)
+    }
+  }
+
+  const handlePermanentlyHideItem = async (itemId: string, itemName: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    if (isSharedGuest) return
+    if (await showConfirm(`Bạn có chắc muốn XÓA DỨT ĐIỂM mục "${itemName}" khỏi hiển thị không?`)) {
+      const { error } = await supabase.from('hidden_items').insert([{ id: itemId }])
+      if (!error) {
+        setHiddenItemIds(prev => new Set([...Array.from(prev), itemId]))
+        if (previewMedia?.id === itemId) setPreviewMedia(null)
+      } else {
+        void showAlert('Lỗi khi xóa: ' + error.message)
+      }
+    }
+  }
+
+  const handleSignOut = async () => {
+    clearAdminLocation()
+    await supabase.auth.signOut()
+    router.replace('/admin')
+  }
+
+  const handleCheckPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (passwordInput.trim() === activeSetting.password?.trim()) {
+      setIsLocked(false)
+      setPasswordError(false)
+      const targetUrl = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].driveUrl : (selectedAlbum?.driveUrl || '')
+      if (targetUrl) {
+        const targetId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
+        if (isSharedGuest) {
+          const entered = await startGuestEntry(targetId)
+          if (entered) await fetchAlbumImages(targetUrl, targetId, true)
+        } else {
+          await fetchAlbumImages(targetUrl, targetId)
+        }
+      }
+    } else {
+      setPasswordError(true)
+    }
+  }
+
+  const handleTouchStart = (e: React.TouchEvent) => { 
+    if (e.touches.length === 1) {
+      touchStartX.current = e.targetTouches[0].clientX 
+    }
+  }
+  const handleTouchMove = (e: React.TouchEvent) => { 
+    if (e.touches.length === 1) {
+      touchEndX.current = e.targetTouches[0].clientX 
+    }
+  }
+  const handleTouchEnd = () => {
+    if (zoomScale > 1) return
+    if (!touchStartX.current || !touchEndX.current) return
+    const distance = touchStartX.current - touchEndX.current
+    if (distance > 45) handleNextImage()
+    if (distance < -45) handlePrevImage()
+    touchStartX.current = null
+    touchEndX.current = null
+  }
+
+  const handleZoomIn = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setZoomScale(prev => Math.min(prev + 0.4, 4))
+  }
+
+  const handleZoomOut = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setZoomScale(prev => {
+      const next = Math.max(prev - 0.4, 1)
+      if (next === 1) setPanPosition({ x: 0, y: 0 })
+      return next
+    })
+  }
+
+  const handleResetZoom = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setZoomScale(1)
+    setPanPosition({ x: 0, y: 0 })
+  }
+
+  const handleDoubleTap = (e: React.TouchEvent | React.MouseEvent) => {
+    const now = Date.now()
+    if (now - lastTapRef.current < 300) {
+      if (zoomScale > 1) {
+        handleResetZoom()
+      } else {
+        setZoomScale(2.2)
+      }
+    }
+    lastTapRef.current = now
+  }
+
+  const handlePrevImage = useCallback(() => {
+    if (previewSourceList.length === 0) return
+    if (currentIndex > 0) setPreviewMedia(previewSourceList[currentIndex - 1])
+    else setPreviewMedia(previewSourceList[previewSourceList.length - 1])
+  }, [currentIndex, previewSourceList])
+
+  const handleNextImage = useCallback(() => {
+    if (previewSourceList.length === 0) return
+    if (currentIndex < previewSourceList.length - 1) setPreviewMedia(previewSourceList[currentIndex + 1])
+    else setPreviewMedia(previewSourceList[0])
+  }, [currentIndex, previewSourceList])
+
+  const handleGenerateKey = async () => {
+    if (!customerName.trim()) { void showAlert('Vui lòng nhập Tên khách hàng!'); return; }
+    if (!serialInput.trim()) { void showAlert('Vui lòng nhập Số Seri máy của khách!'); return; }
+
+    setIsSavingKey(true)
+    let expireTimestamp = 0
+    const now = Date.now()
+
+    switch (duration) {
+      case '10m': expireTimestamp = now + 10 * 60 * 1000; break;
+      case '7d': expireTimestamp = now + 7 * 24 * 60 * 60 * 1000; break;
+      case '1M': expireTimestamp = now + 30 * 24 * 60 * 60 * 1000; break;
+      case '3M': expireTimestamp = now + 90 * 24 * 60 * 60 * 1000; break;
+      case '6M': expireTimestamp = now + 180 * 24 * 60 * 60 * 1000; break;
+      case '1Y': expireTimestamp = now + 365 * 24 * 60 * 60 * 1000; break;
+      case 'LIFE': expireTimestamp = 9999999999999; break;
+    }
+
+    const cleanSerial = serialInput.trim().toUpperCase()
+    const payload = `${cleanSerial}|${expireTimestamp}|${SECRET_SALT}`
+    let hash = 0
+    for (let i = 0; i < payload.length; i++) {
+      hash = ((hash << 5) - hash) + payload.charCodeAt(i)
+      hash |= 0
+    }
+    const signature = Math.abs(hash).toString(36).toUpperCase()
+    const finalKey = `DT-${expireTimestamp.toString(36).toUpperCase()}-${signature}`
+    setGeneratedKey(finalKey)
+
+    const durLabel = durationOptions.find((d) => d.value === duration)?.label || duration
+    const newRecord: KeyRecord = {
+      id: Date.now().toString(),
+      customer_name: customerName.trim(),
+      serial: cleanSerial,
+      duration_label: durLabel,
+      license_key: finalKey,
+      status: 'active',
+    }
+
+    const { error } = await supabase.from('panel_licenses').upsert(newRecord, { onConflict: 'serial' })
+    if (!error) await fetchLicenses()
+    else void showAlert('Lỗi lưu Supabase: ' + error.message)
+    setIsSavingKey(false)
+  }
+
+  const handleToggleRevoke = async (record: KeyRecord) => {
+    const newStatus = record.status === 'revoked' ? 'active' : 'revoked'
+    const actionName = newStatus === 'revoked' ? 'khóa máy và thu hồi quyền' : 'mở khóa lại cho'
+    
+    if (await showConfirm(`Bạn có chắc muốn ${actionName} khách hàng: ${record.customer_name} (${record.serial})?`)) {
+      const { error } = await supabase.from('panel_licenses').update({ status: newStatus }).eq('id', record.id)
+      if (!error) await fetchLicenses()
+      else void showAlert('Lỗi cập nhật: ' + error.message)
+    }
+  }
+
+  const handleDeleteRecord = async (id: string) => {
+    if (await showConfirm('Bạn có chắc muốn xóa bản ghi này khỏi danh sách quản lý?')) {
+      const { error } = await supabase.from('panel_licenses').delete().eq('id', id)
+      if (!error) await fetchLicenses()
+      else void showAlert('Lỗi khi xóa: ' + error.message)
+    }
+  }
+
+  const handleAddMasterFolder = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newMasterName.trim() || !newMasterUrl.trim()) return
+
+    setIsSyncing(true)
+    const cleanUrl = newMasterUrl.trim()
+    const cleanName = newMasterName.trim()
+    const cleanId = extractDriveId(cleanUrl) || Date.now().toString()
+
+    try {
+      const newMaster: MasterFolderItem = { id: cleanId, name: cleanName, url: cleanUrl }
+      await supabase.from('master_folders').upsert([newMaster], { onConflict: 'id' })
+      await supabase.from('albums').upsert([{ id: cleanId, title: cleanName, drive_url: cleanUrl, cover_url: '' }], { onConflict: 'id' })
+
+      const updatedMasters = [newMaster, ...masterFoldersList.filter(m => m.id !== cleanId)]
+      setMasterFoldersList(updatedMasters)
+      setNewMasterName('')
+      setNewMasterUrl('')
+      setIsMasterModalOpen(false)
+      await fetchAlbumsFromSupabase()
+      checkAllMasterFolders(updatedMasters, false)
+    } catch (err: any) {
+      void showAlert('Lỗi: ' + err.message)
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  const handleDeleteMasterFolder = async (id: string) => {
+    if (await showConfirm('Bạn có chắc muốn xóa thư mục tổng này khỏi danh sách quản lý?')) {
+      const { error } = await supabase.from('master_folders').delete().eq('id', id)
+      if (!error) setMasterFoldersList(prev => prev.filter(f => f.id !== id))
+    }
+  }
+
+  const handleCleanHomePage = async () => {
+    if (!masterFoldersList || masterFoldersList.length === 0) return
+    const masterIds = new Set(masterFoldersList.map(m => m.id))
+    const masterUrls = new Set(masterFoldersList.map(m => m.url.trim()))
+
+    const childAlbumsToDelete = (albums || []).filter(a => a && !masterUrls.has(a.driveUrl.trim()) && !masterIds.has(a.id))
+    if (childAlbumsToDelete.length === 0) {
+      void showAlert('Trang chủ đã chuẩn xác, chỉ chứa các Thư Mục Tổng!')
+      return
+    }
+
+    if (await showConfirm(`Tìm thấy ${childAlbumsToDelete.length} thư mục con đang bị tràn ra ngoài trang chủ. Bấm OK để đưa toàn bộ vào bên trong Thư Mục Tổng tương ứng?`)) {
+      const idsToDelete = childAlbumsToDelete.map(a => a.id)
+      const { error } = await supabase.from('albums').delete().in('id', idsToDelete)
+      if (!error) {
+        await fetchAlbumsFromSupabase()
+        void showAlert('Đã dọn dẹp xong! Toàn bộ thư mục con đã nằm gọn bên trong Thư Mục Tổng.')
+      } else {
+        void showAlert('Lỗi dọn dẹp: ' + error.message)
+      }
+    }
+  }
+
+  const handleToggleSelectPending = (id: string) => {
+    setSelectedPendingIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleConfirmSync = async () => {
+    setIsSyncing(true)
+    try {
+      const recordsToInsert = pendingSyncAlbums.map(f => ({ id: f.id, name: f.name, parent_url: f.driveUrl }))
+      await supabase.from('known_drive_folders').upsert(recordsToInsert, { onConflict: 'id' })
+
+      const unselectedIds = pendingSyncAlbums.filter(f => !selectedPendingIds.has(f.id)).map(f => ({ id: f.id }))
+      if (unselectedIds.length > 0) {
+        await supabase.from('hidden_items').upsert(unselectedIds, { onConflict: 'id' })
+        setHiddenItemIds(prev => {
+          const next = new Set(prev)
+          unselectedIds.forEach(h => next.add(h.id))
+          return next
+        })
+      }
+
+      const selectedIds = Array.from(selectedPendingIds)
+      if (selectedIds.length > 0) {
+        await supabase.from('hidden_items').delete().in('id', selectedIds)
+        setHiddenItemIds(prev => {
+          const next = new Set(prev)
+          selectedIds.forEach(id => next.delete(id))
+          return next
+        })
+      }
+
+      setKnownFolderIds(prev => {
+        const next = new Set(prev)
+        recordsToInsert.forEach(r => next.add(r.id))
+        return next
+      })
+
+      setIsSyncModalOpen(false)
+      void showAlert(`Đã đồng bộ thành công ${selectedPendingIds.size} thư mục vào bên trong Thư Mục Tổng!`)
+    } catch (e: any) {
+      void showAlert('Lỗi khi đồng bộ: ' + e.message)
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  const resolveSharedFolder = async (sharedCode: string) => {
+    const code = String(sharedCode || '').trim()
+    if (!code) return null
+
+    try {
+      const { data: knownRows, error: knownError } = await supabase
+        .from('known_drive_folders')
+        .select('id, name, parent_url')
+
+      if (!knownError && Array.isArray(knownRows)) {
+        const matched = knownRows.find((row: any) =>
+          row?.id && (
+            String(row.id) === code ||
+            toNumericCode(String(row.id)) === code
+          )
+        )
+        if (matched) {
+          const folderId = String(matched.id)
+          const mappedUrl = String(matched.parent_url || '')
+          const driveUrl = mappedUrl.includes('/folders/')
+            ? mappedUrl
+            : `https://drive.google.com/drive/folders/${folderId}`
+          return {
+            id: folderId,
+            driveUrl,
+            title: String(customNames[folderId] || matched.name || 'DinhThong Album'),
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Không đọc được mapping known_drive_folders:', err)
+    }
+
+    try {
+      const { data: masterRows, error: masterError } = await supabase
+        .from('master_folders')
+        .select('id, name, url')
+
+      if (masterError || !Array.isArray(masterRows)) return null
+
+      const queue: Array<{ id: string; name: string; driveUrl: string }> = masterRows
+        .filter((row: any) => row?.url)
+        .map((row: any) => {
+          const id = String(row.id || extractDriveId(row.url) || '')
+          return {
+            id,
+            name: String(row.name || id),
+            driveUrl: String(row.url),
+          }
+        })
+        .filter((row) => row.id)
+
+      const visited = new Set<string>()
+      const MAX_FOLDERS = 1000
+
+      while (queue.length > 0 && visited.size < MAX_FOLDERS) {
+        const current = queue.shift()!
+        if (!current?.id || visited.has(current.id)) continue
+        visited.add(current.id)
+
+        if (current.id === code || toNumericCode(current.id) === code) {
+          const title = String(customNames[current.id] || current.name || 'DinhThong Album')
+          try {
+            await supabase
+              .from('known_drive_folders')
+              .upsert(
+                [{ id: current.id, name: title, parent_url: current.driveUrl }],
+                { onConflict: 'id' }
+              )
+          } catch {}
+          return { id: current.id, driveUrl: current.driveUrl, title }
+        }
+
+        const res = await fetch(`/api/drive?url=${encodeURIComponent(current.driveUrl)}&_t=${Date.now()}`, {
+          cache: 'no-store',
+        })
+        if (!res.ok) continue
+        const data = await res.json()
+        const children = Array.isArray(data?.files) ? data.files : []
+
+        for (const child of children) {
+          if (!child || child.type !== 'folder' || !child.id) continue
+          const childId = String(child.id)
+          if (visited.has(childId)) continue
+          queue.push({
+            id: childId,
+            name: String(child.name || childId),
+            driveUrl: `https://drive.google.com/drive/folders/${childId}`,
+          })
+        }
+      }
+    } catch (err) {
+      console.warn('Không thể quét cây Drive để tìm link share:', err)
+    }
+
+    if (code.length > 10) {
+      return {
+        id: code,
+        driveUrl: `https://drive.google.com/drive/folders/${code}`,
+        title: customNames[code] || 'DinhThong Album',
+      }
+    }
+
+    return null
+  }
+
+  useEffect(() => {
+    const pathParts = window.location.pathname.split('/').filter(Boolean)
+    const isShortRoute = pathParts[0] === 's'
+    const params = new URLSearchParams(window.location.search)
+    const sharedId = isShortRoute ? pathParts[1] : params.get('id')
+
+    const initData = async () => {
+      try {
+        await fetchHiddenItemIds()
+        const knownSet: Set<string> = await fetchKnownFolderIds()
+        await fetchCustomNames()
+        await fetchCustomCovers()
+        await fetchComments()
+        const fSettings = await fetchFolderSettings()
+        const fAlbums = await fetchAlbumsFromSupabase()
+        const savedAdminLocation = !sharedId ? readSavedAdminLocation() : null
+
+        if (sharedId) {
+          setIsSharedGuest(true)
+          const browserGuestId = getGuestBrowserId()
+          setGuestId(browserGuestId)
+
+          let matchedAlbum = fAlbums.find(a => a.id === sharedId || extractDriveId(a.driveUrl) === sharedId)
+
+          if (!matchedAlbum) {
+            try {
+              const { data: knownRows } = await supabase
+                .from('known_drive_folders')
+                .select('id, name, parent_url')
+
+              const known = (knownRows || []).find((row: any) =>
+                row?.id && toNumericCode(String(row.id)) === sharedId
+              )
+
+              if (known) {
+                matchedAlbum = {
+                  id: String(known.id),
+                  title: String(customNames[String(known.id)] || known.name || 'DinhThong Album'),
+                  coverUrl: '',
+                  driveUrl: String(known.parent_url || `https://drive.google.com/drive/folders/${known.id}`),
+                }
+              }
+            } catch (e) {
+              console.warn('Không đọc được mapping share:', e)
+            }
+          }
+
+          if (!matchedAlbum) {
+            matchedAlbum = fAlbums.find(a => toNumericCode(a.id) === sharedId)
+          }
+
+          if (matchedAlbum) {
+            setSelectedAlbum(matchedAlbum)
+            setFolderHistory([])
+            const currentPass = fSettings[matchedAlbum.id]?.password || matchedAlbum.password
+            if (currentPass) {
+              setIsLocked(true)
+            } else {
+              const entered = await startGuestEntry(matchedAlbum.id, fSettings[matchedAlbum.id])
+              if (entered) await fetchAlbumImages(matchedAlbum.driveUrl, matchedAlbum.id, true)
+            }
+          } else {
+            const resolved = await resolveSharedFolder(sharedId)
+
+            if (!resolved) {
+              void showAlert('Link album không còn hợp lệ hoặc không tìm thấy thư mục Drive. Vui lòng tạo lại link chia sẻ từ Admin.')
+              setLoading(false)
+              return
+            }
+
+            const fallbackAlbum: Album = {
+              id: resolved.id,
+              title: resolved.title || getNotificationTitle(resolved.id),
+              coverUrl: '',
+              driveUrl: resolved.driveUrl,
+            }
+
+            setSelectedAlbum(fallbackAlbum)
+            setFolderHistory([])
+            const subPass = fSettings[resolved.id]?.password
+            if (subPass) {
+              setIsLocked(true)
+            } else {
+              const entered = await startGuestEntry(resolved.id, fSettings[resolved.id])
+              if (entered) await fetchAlbumImages(resolved.driveUrl, resolved.id, true)
+            }
+          }
+        } else {
+          const { data: sessionData } = await supabase.auth.getSession()
+          if (!sessionData.session) {
+            setLoading(false)
+            router.replace('/admin')
+            return
+          }
+
+          const loggedInEmail = sessionData.session.user.email
+          const { data: whitelist, error } = await supabase.from('allowed_emails').select('email, full_name').eq('email', loggedInEmail).single()
+
+          if (error || !whitelist) {
+            void showAlert('Tài khoản của bạn không có quyền truy cập vào hệ thống này!')
+            await supabase.auth.signOut()
+            setLoading(false)
+            router.replace('/admin')
+            return
+          }
+
+          setUser(sessionData.session.user)
+          setIsAdmin(false)
+
+          if (savedAdminLocation?.selectedAlbum) {
+            const saved = savedAdminLocation.selectedAlbum
+            const matchedAlbum = fAlbums.find(a => String(a.id) === String(saved.id))
+            const restoredAlbum: Album = matchedAlbum || {
+              id: String(saved.id),
+              title: String(saved.title || customNames[String(saved.id)] || 'DinhThong Album'),
+              coverUrl: '',
+              driveUrl: String(saved.driveUrl || `https://drive.google.com/drive/folders/${saved.id}`),
+            }
+            const restoredHistory = savedAdminLocation.folderHistory.filter((item: any) => item && item.id && item.driveUrl)
+            setSelectedAlbum(restoredAlbum)
+            setFolderHistory(restoredHistory)
+            setIsLocked(false)
+
+            const target = restoredHistory.length > 0
+              ? restoredHistory[restoredHistory.length - 1]
+              : { id: restoredAlbum.id, driveUrl: restoredAlbum.driveUrl }
+
+            const targetPass = fSettings[target.id]?.password
+            if (targetPass) {
+              setIsLocked(true)
+            } else {
+              await fetchAlbumImages(target.driveUrl, target.id, false)
+            }
+          }
+
+          const masterFolders = await fetchMasterFoldersList()
+          checkAllMasterFolders(masterFolders, false, knownSet)
+        }
+
+        if (!sharedId) {
+          const savedRatings = localStorage.getItem('dinhthong_image_ratings')
+          if (savedRatings) {
+            try { setRatings(JSON.parse(savedRatings)) } catch {}
+          }
+        }
+      } catch (e) {
+        console.error('Lỗi khởi tạo:', e)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    initData()
+  }, [])
+
+  useEffect(() => {
+    const folderId = currentActiveFolderId
+    if (!folderId || loadingImages) return
+
+    const refresh = async () => {
+      const currentMediaIds = mediaFiles.map(item => item.id)
+      await fetchSelectionsForFolder(folderId, true, currentMediaIds)
+      if (!isSharedGuest && isAdminPanelOpen) await fetchGuestSelections(folderId)
+    }
+
+    refresh()
+    const interval = window.setInterval(refresh, 8000)
+    return () => window.clearInterval(interval)
+  }, [currentActiveFolderId, isSharedGuest, isAdminPanelOpen, isAdmin, user?.email])
+
+  useEffect(() => {
+    if (!isSharedGuest || !guestId || !guestRootAlbumId) return
+
+    const setting = getFolderSettingFromState(guestRootAlbumId)
+    const requiresName = Boolean(setting.collect_customer_info ?? selectedAlbum?.collect_customer_info)
+
+    if (requiresName && (!guestCanSelect || !guestCustomerName.trim() || showGuestNameModal)) return
+
+    const heartbeat = async () => {
+      if (requiresName && (!guestCanSelect || !guestCustomerName.trim() || showGuestNameModal)) return
+      await registerGuestViewer(guestRootAlbumId, guestCustomerName)
+    }
+    heartbeat()
+    const interval = window.setInterval(heartbeat, 60000)
+    return () => window.clearInterval(interval)
+  }, [isSharedGuest, guestId, guestRootAlbumId, guestCustomerName, guestCanSelect, showGuestNameModal, folderSettingsMap])
+
+  useEffect(() => {
+    if (isSharedGuest) return
+    fetchNotifications()
+    const interval = window.setInterval(fetchNotifications, 15000)
+    return () => window.clearInterval(interval)
+  }, [isSharedGuest, albums.length, Object.keys(folderSettingsMap).length])
+
+  useEffect(() => {
+    if (previewMedia) {
+      const fileName = customNames[previewMedia.id] || previewMedia.name
+      document.title = `${fileName} - Dinh Thong Gallery`
+      setCurrentCommentInput(comments[previewMedia.id] || '')
+      setZoomScale(1)
+      setPanPosition({ x: 0, y: 0 })
+    } else if (folderHistory.length > 0) {
+      const currentFolder = folderHistory[folderHistory.length - 1]
+      document.title = (customNames[currentFolder.id] || currentFolder.title || 'DinhThong Gallery').trim()
+    } else if (selectedAlbum) {
+      document.title = (customNames[selectedAlbum.id] || selectedAlbum.title || 'DinhThong Gallery').trim()
+    } else {
+      document.title = 'Admin - DinhThong Gallery'
+    }
+  }, [previewMedia, folderHistory, selectedAlbum, customNames, comments])
+
+  useEffect(() => {
+    (albums || []).forEach(async (album) => {
+      if (album && !album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
+        try {
+          const res = await fetch(`/api/drive?url=${encodeURIComponent(album.driveUrl)}`)
+          const data = await res.json()
+          const firstImage = data.files?.find((f: MediaItem) => f.type === 'image' && !hiddenItemIds.has(f.id))
+          if (firstImage) {
+            setAlbumCovers(prev => ({ ...prev, [album.id]: firstImage.url }))
+          } else {
+            setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
+          }
+        } catch {
+          setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
+        }
+      }
+    })
+  }, [albums, hiddenItemIds])
+
+  useEffect(() => {
+    if (currentIndex === -1 || previewSourceList.length === 0) return
+
+    const indicesToPreload = [
+      (currentIndex + 1) % previewSourceList.length,
+      (currentIndex + 2) % previewSourceList.length,
+      (currentIndex + 3) % previewSourceList.length,
+      (currentIndex - 1 + previewSourceList.length) % previewSourceList.length,
+      (currentIndex - 2 + previewSourceList.length) % previewSourceList.length,
+    ]
+
+    indicesToPreload.forEach(idx => {
+      const item = previewSourceList[idx]
+      if (item && item.type === 'image') {
+        const previewUrl = `https://lh3.googleusercontent.com/d/${item.id}=w1600`
+        if (!preloadedCache.has(previewUrl)) {
+          preloadedCache.add(previewUrl)
+          const img = new window.Image()
+          img.src = previewUrl
+        }
+      }
+    })
+
+    if (thumbnailRef.current) {
+      const activeThumb = thumbnailRef.current.children[currentIndex] as HTMLElement
+      if (activeThumb) activeThumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    }
+  }, [currentIndex, previewSourceList])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!previewMedia) return
+      if (e.key === 'ArrowLeft') handlePrevImage()
+      if (e.key === 'ArrowRight') handleNextImage()
+      if (e.key === 'Escape') handleClosePreview()
+      if (e.key === '+' || e.key === '=') handleZoomIn()
+      if (e.key === '-' || e.key === '_') handleZoomOut()
+      if (e.key === '0') handleResetZoom()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [previewMedia, handlePrevImage, handleNextImage, zoomScale])
+
+  const rootSetting = getFolderSettingFromState(guestRootAlbumId)
+  const isCollectEnabled = Boolean(rootSetting.collect_customer_info ?? selectedAlbum?.collect_customer_info)
+
+  let welcomeMessage = ''
+  if (!isSharedGuest) {
+    if (displayName.trim()) welcomeMessage = `Xin chào, ${displayName.trim()} 👋`
+  } else {
+    if (isCollectEnabled && guestCustomerName.trim()) {
+      welcomeMessage = `Xin chào, ${guestCustomerName.trim()} 👋`
+    } else {
+      welcomeMessage = 'Xin chào bạn 👋'
+    }
+  }
+
+  const adminTotalGuestSelections = guestSelectionActivity.reduce((sum: number, item: any) => sum + Number(item?.count || 0), 0)
+  const adminTotalViewers = notificationItems.reduce((sum: number, item: any) => sum + Number(item?.viewers || 0), 0)
+  const featuredAdminAlbums = filteredAlbums
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#07130c] flex flex-col items-center justify-center text-white">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
+        <p className="text-xs font-light text-white/70 tracking-widest uppercase">Vui lòng đợi</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#06140f] text-white' : 'bg-[#f5f7f3] text-[#1c1d21]'}`}>
+      
+      {/* HEADER */}
+      <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#071710]/94 border-white/10' : 'bg-[#fbfdf9]/94 border-emerald-950/8'} ${selectedAlbum && !isSharedGuest ? 'lg:fixed lg:inset-x-0 lg:top-0 lg:z-[90] lg:h-[66px]' : ''}`}>
+        <div className="max-w-[1500px] mx-auto px-3 sm:px-6 h-16 sm:h-[72px] lg:h-[66px] flex items-center justify-between gap-2">
+          
+          {/* DESKTOP ADMIN ALBUM HEADER — BACK + BRAND */}
+          {selectedAlbum && !isSharedGuest && (
+            <div className="hidden lg:flex items-center gap-3 shrink-0">
+
+              <button
+                type="button"
+                onClick={handleBackToParentFolder}
+                className={`flex h-9 w-9 items-center justify-center rounded-xl border transition ${
+                  isDarkMode
+                    ? 'border-white/10 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
+                    : 'border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                }`}
+                title="Quay lại"
+                aria-label="Quay lại"
+              >
+                <BackIcon className="h-4 w-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedAlbum(null)
+                  setFolderHistory([])
+                }}
+                className="flex items-center gap-2.5 text-left"
+              >
+                <span
+                  className={`flex h-9 w-9 items-center justify-center rounded-xl border ${
+                    isDarkMode
+                      ? 'border-emerald-300/20 bg-emerald-500/10 text-emerald-300'
+                      : 'border-emerald-800/15 bg-emerald-700/8 text-emerald-800'
+                  }`}
+                >
+                  <Camera className="h-4 w-4" />
+                </span>
+
+                <span>
+                  <span className="block font-serif text-[15px] font-semibold leading-none">
+                    Dinh Thong Gallery
+                  </span>
+
+                  <span
+                    className={`mt-1 block text-[7px] font-semibold uppercase tracking-[0.2em] ${
+                      isDarkMode ? 'text-white/30' : 'text-gray-400'
+                    }`}
+                  >
+                    Admin workspace
+                  </span>
+                </span>
+              </button>
+
+            </div>
+          )}
+
+          <div className="lg:hidden flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+            {((selectedAlbum && !isSharedGuest) || (isSharedGuest && folderHistory.length > 0)) && (
+              <button 
+                onClick={handleBackToParentFolder}
+                className={`p-1.5 sm:p-2 rounded-full border transition cursor-pointer ${
+                  isDarkMode ? 'border-white/10 hover:bg-white/10 text-white' : 'border-gray-200 hover:bg-gray-100 text-gray-700'
+                }`}
+                title="Quay lại"
+              >
+                <BackIcon className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => !isSharedGuest && setSelectedAlbum(null)}
+              className={`flex min-w-0 items-center gap-2.5 text-left ${!isSharedGuest ? 'cursor-pointer' : 'cursor-default'}`}
+            >
+              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${isDarkMode ? 'border-emerald-300/25 bg-emerald-500/10 text-emerald-300' : 'border-emerald-800/15 bg-emerald-700/8 text-emerald-800'}`}>
+                <Camera className="h-4.5 w-4.5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate font-serif text-sm sm:text-lg font-semibold tracking-tight">Dinh Thong Gallery</span>
+                <span className={`hidden sm:block text-[7px] uppercase tracking-[.18em] ${isDarkMode ? 'text-white/35' : 'text-gray-400'}`}>Moments For A Lifetime</span>
+              </span>
+            </button>
+          </div>
+
+          <div className="ml-auto flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[68vw] sm:max-w-none">
+            {!selectedAlbum && !isSharedGuest && (
+              <>
+                <nav className="hidden lg:flex items-center gap-1 flex-shrink-0">
+                  <button
+                    type="button"
+                    className="px-3 py-2 text-xs font-semibold text-emerald-600 border-b-2 border-emerald-600"
+                  >
+                    Trang chủ
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      document
+                        .getElementById('all-albums')
+                        ?.scrollIntoView({ behavior: 'smooth' })
+                    }
+                    className={`px-3 py-2 text-xs font-semibold transition ${
+                      isDarkMode
+                        ? 'text-white/65 hover:text-white'
+                        : 'text-gray-500 hover:text-gray-900'
+                    }`}
+                  >
+                    Album
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fetchNotifications()
+                      setIsNotificationOpen(true)
+                    }}
+                    className={`px-3 py-2 text-xs font-semibold transition ${
+                      isDarkMode
+                        ? 'text-white/65 hover:text-white'
+                        : 'text-gray-500 hover:text-gray-900'
+                    }`}
+                  >
+                    Khách chọn
+                  </button>
+                </nav>
+
+                <div className="relative hidden sm:block sm:w-48 flex-shrink-0">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Tìm album..."
+                    className={`w-full pl-7 pr-2 py-1.5 rounded-full text-xs border outline-none transition ${
+                      isDarkMode
+                        ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500'
+                        : 'bg-white border-gray-200 text-gray-900 focus:border-emerald-500 shadow-2xs'
+                    }`}
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="flex items-center gap-1.5 pl-1.5 border-l border-gray-200 dark:border-white/10 flex-shrink-0">
+              {!isSharedGuest && (
+                <button
+                  type="button"
+                  onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }}
+                  className={`relative p-2 rounded-full border transition cursor-pointer flex-shrink-0 ${isDarkMode ? 'border-white/10 hover:bg-white/10 text-white' : 'border-gray-200 hover:bg-gray-100 text-gray-600'}`}
+                  title="Thông báo album"
+                >
+                  <Bell className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  {notificationItems.some((n) => n.full || (n.joined && n.joined.length > 0) || n.viewers > 0) && (
+                    <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                      {notificationItems.filter((n) => n.full || (n.joined && n.joined.length > 0) || n.viewers > 0).length}
+                    </span>
+                  )}
+                </button>
+              )}
+
+              <button
+                onClick={handleToggleDarkMode}
+                className={`p-2 rounded-full border transition cursor-pointer flex-shrink-0 ${
+                  isDarkMode ? 'border-white/10 hover:bg-white/10 text-emerald-400' : 'border-gray-200 hover:bg-gray-100 text-gray-600'
+                }`}
+                title="Giao diện (Tự động 6h-18h sáng / 18h-6h tối)"
+              >
+                {isDarkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+              </button>
+
+              {!isSharedGuest && (
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {user?.user_metadata?.avatar_url ? (
+                    <img 
+                      src={user.user_metadata.avatar_url} 
+                      alt="Avatar" 
+                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full object-cover border border-emerald-500/50 flex-shrink-0"
+                      title={user.email}
+                    />
+                  ) : (
+                    <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-xs font-bold flex-shrink-0">
+                      <UserIcon className="w-3.5 h-3.5" />
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleSignOut}
+                    className="p-1.5 rounded-full text-gray-400 hover:text-red-500 transition cursor-pointer flex-shrink-0"
+                    title="Đăng xuất"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Body */}
+      <main className={`max-w-[1500px] mx-auto px-3 sm:px-6 py-4 sm:py-6 w-full flex-1 ${
+        selectedAlbum && !isSharedGuest ? 'lg:pt-[90px]' : ''
+      }`}>
+        
+        {/* BANNER CẢNH BÁO ĐỊNH KỲ NGÀY 30 */}
+        {!isSharedGuest && getMonthlyCleanWarning() && (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center gap-3">
+              <Bell className="w-5 h-5 flex-shrink-0 animate-bounce text-amber-500" />
+              <p className="text-xs sm:text-sm font-semibold">
+                {getMonthlyCleanWarning()}
+              </p>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 px-2.5 py-1 rounded-full flex-shrink-0">
+              Định kỳ tháng
+            </span>
+          </div>
+        )}
+
+        {!selectedAlbum ? (
+          <div className="space-y-5 sm:space-y-6">
+            {/* ADMIN HOME — cinematic dashboard, không dùng bố cục kiểu Google Drive */}
+            <section className={`relative overflow-hidden rounded-[28px] border shadow-[0_28px_80px_rgba(0,0,0,.18)] ${isDarkMode ? 'border-emerald-200/15 bg-[#082017]' : 'border-emerald-900/10 bg-[#eff6f0]'}`}>
+              <div className="absolute inset-0">
+                <img src="/banner.jpg" alt="DinhThong Gallery" className="h-full w-full object-cover" />
+                <div className={`absolute inset-0 ${isDarkMode ? 'bg-[linear-gradient(90deg,rgba(2,25,17,.93),rgba(3,30,20,.58),rgba(4,23,16,.24))]' : 'bg-[linear-gradient(90deg,rgba(242,248,243,.94),rgba(239,247,241,.68),rgba(236,244,238,.25))]'}`} />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_72%_18%,rgba(52,211,153,.18),transparent_32%)]" />
+              </div>
+
+              <div className="relative z-10 min-h-[270px] sm:min-h-[340px] p-5 sm:p-8 lg:p-10 flex flex-col justify-between">
+                <div className="flex items-center justify-between gap-3">
+                  <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-[.18em] backdrop-blur-xl ${isDarkMode ? 'border-white/10 bg-black/20 text-emerald-100/80' : 'border-emerald-900/10 bg-white/70 text-emerald-900/70'}`}>
+                    <Camera className="h-3.5 w-3.5" /> DinhThong Gallery
+                  </div>
+                  <div className={`hidden sm:block text-[9px] uppercase tracking-[.24em] ${isDarkMode ? 'text-white/35' : 'text-emerald-950/45'}`}>
+                    Dream · Capture · Preserve · Forever
+                  </div>
+                </div>
+
+                <div className="max-w-[690px] py-7 sm:py-10">
+                  <h1 className={`font-serif text-4xl sm:text-5xl lg:text-[56px] leading-[1.02] tracking-tight ${isDarkMode ? 'text-white' : 'text-[#0c2b1d]'}`}>
+                    Hello, {displayName.trim() || 'Thông'} 👋
+                  </h1>
+                  <p className={`mt-3 max-w-xl text-xs sm:text-sm leading-6 ${isDarkMode ? 'text-white/64' : 'text-[#385747]'}`}>
+                    Mỗi bức ảnh là một câu chuyện, cảm ơn bạn đã tiếp tục hành trình cùng DinhThong Gallery.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+                  {[
+                    { label: 'Bộ sưu tập', value: masterFoldersList.length, note: 'Quản lý các bộ sưu tập ảnh', icon: FolderSync, tone: 'emerald' },
+                    { label: 'Album', value: albums.length, note: 'Tổng số album', icon: ImageIcon, tone: 'cyan' },
+                    { label: 'Ảnh khách chọn', value: adminTotalGuestSelections, note: 'Ảnh đã chấm sao', icon: Star, tone: 'rose' },
+                    { label: 'Người xem', value: adminTotalViewers, note: 'Lượt khách đã ghi nhận', icon: Eye, tone: 'slate' },
+                  ].map(({ label, value, note, icon: Icon, tone }) => (
+                    <div key={label} className={`rounded-2xl border px-3.5 py-3.5 sm:px-4 sm:py-4 backdrop-blur-xl ${isDarkMode ? 'border-white/10 bg-[#0a2218]/72' : 'border-white/70 bg-white/78 shadow-sm'}`}>
+                      <div className="flex items-center gap-3">
+                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${
+                          tone === 'rose' ? 'border-rose-300/20 bg-rose-500/15 text-rose-300' :
+                          tone === 'cyan' ? 'border-cyan-300/20 bg-cyan-500/12 text-cyan-300' :
+                          tone === 'slate' ? 'border-white/10 bg-white/8 text-white/70' :
+                          'border-emerald-300/20 bg-emerald-500/14 text-emerald-300'
+                        }`}><Icon className="h-4 w-4" /></span>
+                        <div className="min-w-0">
+                          <div className={`text-[11px] font-medium ${isDarkMode ? 'text-white/72' : 'text-gray-600'}`}>{label}</div>
+                          <div className={`mt-0.5 text-xl sm:text-2xl font-bold leading-none ${isDarkMode ? 'text-white' : 'text-[#123323]'}`}>{value}</div>
+                        </div>
+                      </div>
+                      <div className={`mt-2 text-[9px] sm:text-[10px] ${isDarkMode ? 'text-white/36' : 'text-gray-400'}`}>{note}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* BỘ SƯU TẬP — dạng cinematic horizontal cards, không có mục Album gần đây */}
+            <section id="all-albums" className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#0b1711]/72' : 'border-emerald-950/8 bg-white/80 shadow-sm'}`}>
+              <div className="mb-4 flex items-end justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Star className="h-4 w-4 text-amber-400 fill-amber-400" />
+                    <h2 className="font-serif text-xl sm:text-2xl font-semibold">Bộ sưu tập nổi bật</h2>
+                  </div>
+                  <p className={`mt-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/40' : 'text-gray-400'}`}>
+                    Mỗi album là một câu chuyện riêng — kéo ngang để xem toàn bộ.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`hidden sm:inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold ${isDarkMode ? 'bg-white/8 text-white/55' : 'bg-gray-100 text-gray-500'}`}>{filteredAlbums.length} album</span>
+                  <button type="button" onClick={() => setIsModalOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-[11px] font-bold text-white hover:bg-emerald-700">
+                    <Plus className="h-3.5 w-3.5" /> Thêm album
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative mb-3 sm:hidden">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Tìm kiếm album..."
+                  className={`h-10 w-full rounded-xl border pl-9 pr-3 text-[11px] outline-none ${isDarkMode ? 'border-white/10 bg-white/5 text-white placeholder:text-white/30' : 'border-gray-200 bg-gray-50 text-gray-900'}`}
+                />
+              </div>
+
+              {featuredAdminAlbums.length > 0 ? (
+                <div className="flex gap-3.5 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none">
+                  {featuredAdminAlbums.map((album) => {
+                    const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
+                    const isChecked = selectedAlbumIds.has(album.id)
+                    const isThisZipping = zippingFolderId === album.id
+                    return (
+                      <article key={album.id} className={`group w-[230px] sm:w-[260px] lg:w-[285px] shrink-0 snap-start overflow-hidden rounded-2xl border transition hover:-translate-y-0.5 hover:shadow-2xl ${isChecked ? 'ring-2 ring-emerald-500' : ''} ${isDarkMode ? 'border-white/10 bg-[#0e2017]' : 'border-gray-200 bg-white'}`}>
+                        <div onClick={() => handleOpenAlbum(album)} className="relative aspect-[16/10] cursor-pointer overflow-hidden">
+                          {coverImage ? (
+                            <img src={coverImage.replace(/=w\d+.*$/, '=w800-h520-p-k-no')} alt={album.title} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]" />
+                          ) : (
+                            <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-white/5' : 'bg-[#f3f6f2]'}`}><CustomFolderGraphic className="h-24 w-24" /></div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/8 to-black/10" />
+                          <button type="button" onClick={(e) => handleToggleSelectAlbum(album.id, e)} className={`absolute left-2.5 top-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-xl border backdrop-blur-md transition ${isChecked ? 'border-emerald-300/60 bg-emerald-600 text-white' : 'border-white/25 bg-black/35 text-white'}`} title={isChecked ? 'Bỏ chọn album' : 'Chọn album'}>
+                            {isChecked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                          </button>
+                          <button type="button" onClick={(e) => handleDeleteAlbum(album.id, e)} className="absolute right-2.5 top-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-xl border border-white/20 bg-black/35 text-white/70 backdrop-blur-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-300" title="Xóa album"><Trash2 className="h-4 w-4" /></button>
+                          <div className="absolute inset-x-0 bottom-0 p-3.5 text-white">
+                            <h3 className="truncate font-semibold text-sm">{customNames[album.id] || album.title}</h3>
+                            <div className="mt-1 flex items-center justify-between gap-2 text-[9px] text-white/68">
+                              <span>DinhThong Gallery</span>
+                              <button type="button" onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)} disabled={Boolean(zippingFolderId)} className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/30 px-2 py-1 text-white/85 backdrop-blur-md disabled:opacity-50">
+                                {isThisZipping ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}{isThisZipping ? 'Đợi...' : 'Tải'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </article>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className={`rounded-2xl border border-dashed px-5 py-12 text-center text-xs ${isDarkMode ? 'border-white/10 text-white/35' : 'border-gray-200 text-gray-400'}`}>
+                  Không tìm thấy album phù hợp.
+                </div>
+              )}
+            </section>
+
+            {/* SIDEBAR QUẢN TRỊ DESKTOP */}
+            <aside
+              className={`fixed left-0 top-0 z-[80] hidden h-screen w-[252px] flex-col border-r lg:flex ${
+                isDarkMode
+                  ? 'border-white/10 bg-[#07140e] text-white'
+                  : 'border-emerald-950/10 bg-[#f8faf7] text-[#153426]'
+              }`}
+            >
+              {/* BRAND */}
+              <div
+                className={`flex h-[66px] items-center border-b px-4 py-0 ${
+                  isDarkMode ? 'border-white/10' : 'border-emerald-950/10'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
+                      isDarkMode
+                        ? 'bg-emerald-400/10 text-emerald-300'
+                        : 'bg-emerald-900 text-white'
+                    }`}
+                  >
+                    <Camera className="h-4.5 w-4.5" />
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="truncate font-serif text-[15px] font-semibold">
+                      DinhThong Gallery
+                    </div>
+
+                    <div
+                      className={`mt-1 text-[8px] font-semibold uppercase tracking-[0.22em] ${
+                        isDarkMode ? 'text-white/35' : 'text-emerald-950/40'
+                      }`}
+                    >
+                      Admin workspace
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* NAV */}
+              <div className="flex-1 overflow-y-auto px-3 py-4">
+
+                {/* ĐIỀU HƯỚNG */}
+                <div className="mb-5">
+                  <div
+                    className={`mb-2 px-2 text-[8px] font-bold uppercase tracking-[0.22em] ${
+                      isDarkMode ? 'text-white/25' : 'text-emerald-950/35'
+                    }`}
+                  >
+                    Điều hướng
+                  </div>
+
+                  <div className="space-y-1">
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.scrollTo({
+                          top: 0,
+                          behavior: 'smooth',
+                        })
+                      }
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Camera className="h-4 w-4 text-emerald-400" />
+                      <span>Trang chủ</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        fetchNotifications()
+                        setIsNotificationOpen(true)
+                      }}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Bell className="h-4 w-4 text-emerald-400" />
+                      <span>Khách chọn</span>
+                    </button>
+
+                  </div>
+                </div>
+
+                {/* SẢN PHẨM KHÁCH HÀNG */}
+                <div className="mb-5">
+                  <div
+                    className={`mb-2 px-2 text-[8px] font-bold uppercase tracking-[0.22em] ${
+                      isDarkMode ? 'text-white/25' : 'text-emerald-950/35'
+                    }`}
+                  >
+                    Sản phẩm khách hàng
+                  </div>
+
+                  <div className="space-y-1">
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        router.push('/dashboardsp')
+                      }
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <ImageIcon className="h-4 w-4 text-cyan-400" />
+                      <span>Dashboard sản phẩm</span>
+                    </button>
+
+<button
+                      type="button"
+                      onClick={() =>
+                        router.push('/dashboardsp/booking')
+                      }
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <ImageIcon className="h-4 w-4 text-cyan-400" />
+                      <span>Dashboard Booking</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.open('/', '_blank')
+                      }
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Eye className="h-4 w-4 text-emerald-400" />
+                      <span>Web Publish</span>
+                    </button>
+
+                  </div>
+                </div>
+
+                {/* QUẢN LÝ ALBUM */}
+                <div className="mb-5">
+                  <div
+                    className={`mb-2 px-2 text-[8px] font-bold uppercase tracking-[0.22em] ${
+                      isDarkMode ? 'text-white/25' : 'text-emerald-950/35'
+                    }`}
+                  >
+                    Quản lý album
+                  </div>
+
+                  <div className="space-y-1">
+
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(true)}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Plus className="h-4 w-4 text-emerald-400" />
+                      <span>Thêm album</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        checkAllMasterFolders(masterFoldersList, true)
+                      }
+                      disabled={isSyncing}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      } disabled:opacity-40`}
+                    >
+                      <RefreshCw
+                        className={`h-4 w-4 text-emerald-400 ${
+                          isSyncing ? 'animate-spin' : ''
+                        }`}
+                      />
+                      <span>Quét thư mục mới</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsMasterModalOpen(true)}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <FolderSync className="h-4 w-4 text-emerald-400" />
+                      <span>Cài đặt thư mục tổng</span>
+                    </button>
+
+                  </div>
+                </div>
+
+                {/* CÔNG CỤ */}
+                <div className="mb-5">
+                  <div
+                    className={`mb-2 px-2 text-[8px] font-bold uppercase tracking-[0.22em] ${
+                      isDarkMode ? 'text-white/25' : 'text-emerald-950/35'
+                    }`}
+                  >
+                    Công cụ
+                  </div>
+
+                  <div className="space-y-1">
+
+                    <button
+                      type="button"
+                      onClick={() => router.push('/money')}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Wallet className="h-4 w-4 text-emerald-400" />
+                      <span>Thu Chi</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsKeyGenOpen(true)}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <KeyRound className="h-4 w-4 text-amber-400" />
+                      <span>Key Panel</span>
+                    </button>
+
+                  </div>
+                </div>
+
+                {/* DỮ LIỆU */}
+                <div className="mb-5">
+                  <div
+                    className={`mb-2 px-2 text-[8px] font-bold uppercase tracking-[0.22em] ${
+                      isDarkMode ? 'text-white/25' : 'text-emerald-950/35'
+                    }`}
+                  >
+                    Dữ liệu
+                  </div>
+
+                  <div className="space-y-1">
+
+                    <button
+                      type="button"
+                      onClick={handleCleanHomePage}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Trash2 className="h-4 w-4 text-amber-400" />
+                      <span>Dọn dẹp trang chủ</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleDeleteAllGuestSelectionsFromAllAlbums}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Trash2 className="h-4 w-4 text-red-400" />
+                      <span>Xóa ảnh khách chọn</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        fetchNotifications()
+                        setIsNotificationOpen(true)
+                      }}
+                      className={`dt-sidebar-item ${
+                        isDarkMode
+                          ? 'dt-sidebar-item-dark'
+                          : 'dt-sidebar-item-light'
+                      }`}
+                    >
+                      <Bell className="h-4 w-4 text-emerald-400" />
+                      <span>Thông báo khách</span>
+                    </button>
+
+                  </div>
+                </div>
+
+              </div>
+
+            </aside>
+
+            {/* MOBILE: CÔNG CỤ QUẢN TRỊ */}
+            <section
+              className={`rounded-[26px] border p-4 lg:hidden ${
+                isDarkMode
+                  ? 'border-white/10 bg-[#0b1711]/72'
+                  : 'border-emerald-950/8 bg-white/80 shadow-sm'
+              }`}
+            >
+              <div className="mb-3 flex items-center gap-2">
+                <Settings className="h-4 w-4 text-amber-400" />
+                <h2 className="font-serif text-lg font-semibold">
+                  Công cụ quản trị
+                </h2>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push('/dashboardsp')
+                  }
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <ImageIcon className="h-4 w-4 text-cyan-400" />
+                  <span>Sản phẩm khách</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push('/money')}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <Wallet className="h-4 w-4 text-emerald-400" />
+                  <span>Thu Chi</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsKeyGenOpen(true)}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <KeyRound className="h-4 w-4 text-amber-400" />
+                  <span>Key Panel</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(true)}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <Plus className="h-4 w-4 text-emerald-400" />
+                  <span>Thêm album</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    checkAllMasterFolders(masterFoldersList, true)
+                  }
+                  disabled={isSyncing}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  } disabled:opacity-50`}
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 text-emerald-400 ${
+                      isSyncing ? 'animate-spin' : ''
+                    }`}
+                  />
+                  <span>Quét thư mục</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsMasterModalOpen(true)}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <FolderSync className="h-4 w-4 text-emerald-400" />
+                  <span>Thư mục tổng</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCleanHomePage}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <Trash2 className="h-4 w-4 text-amber-400" />
+                  <span>Dọn trang chủ</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    fetchNotifications()
+                    setIsNotificationOpen(true)
+                  }}
+                  className={`admin-tool-card ${
+                    isDarkMode
+                      ? 'admin-tool-dark'
+                      : 'admin-tool-light'
+                  }`}
+                >
+                  <Bell className="h-4 w-4 text-emerald-400" />
+                  <span>Thông báo</span>
+                </button>
+
+              </div>
+            </section>
+
+            {/* Desktop sidebar chiếm 252px bên trái.
+                Shift toàn bộ giao diện quản trị sang phải. */}
+            <style jsx global>{`
+              @media (min-width: 1024px) {
+                body {
+                  padding-left: 252px;
+                  padding-top: 66px;
+                }
+
+                /* HEADER QUẢN TRỊ CỐ ĐỊNH BÊN PHẢI SIDEBAR */
+                header {
+                  position: fixed !important;
+                  height: 66px !important;
+                  min-height: 66px !important;
+                  top: 0 !important;
+                  left: 252px !important;
+                  right: 0 !important;
+                  width: auto !important;
+                  z-index: 70 !important;
+                  margin: 0 !important;
+                }
+
+                /* Header full phần bên phải */
+                header > div {
+                  height: 66px !important;
+                  min-height: 66px !important;
+                  width: 100% !important;
+                  max-width: none !important;
+                  margin-left: 0 !important;
+                  margin-right: 0 !important;
+                  padding-left: 20px !important;
+                  padding-right: 24px !important;
+
+                  /* Dồn TOÀN BỘ cụm menu + search + icon sang phải */
+                  display: flex !important;
+                  justify-content: flex-end !important;
+                  align-items: center !important;
+                }
+
+                header nav {
+                  margin-left: 0 !important;
+                  flex-shrink: 0 !important;
+                }
+
+                header nav + * {
+                  flex-shrink: 0 !important;
+                }
+              }
+
+              @media (max-width: 1023px) {
+                body {
+                  padding-left: 0;
+                  padding-top: 0;
+                }
+              }
+
+              .dt-sidebar-item {
+                display: flex;
+                width: 100%;
+                align-items: center;
+                gap: 0.7rem;
+                border-radius: 0.85rem;
+                padding: 0.65rem 0.7rem;
+                text-align: left;
+                font-size: 11px;
+                font-weight: 600;
+                transition:
+                  background-color 160ms ease,
+                  color 160ms ease,
+                  transform 160ms ease;
+              }
+
+              .dt-sidebar-item:active {
+                transform: scale(0.985);
+              }
+
+              .dt-sidebar-item-dark {
+                color: rgba(255,255,255,.62);
+              }
+
+              .dt-sidebar-item-dark:hover {
+                background: rgba(255,255,255,.06);
+                color: white;
+              }
+
+              .dt-sidebar-item-light {
+                color: rgba(21,52,38,.66);
+              }
+
+              .dt-sidebar-item-light:hover {
+                background: rgba(6,95,70,.065);
+                color: rgb(6,78,59);
+              }
+            `}</style>
+
+            {/* HOẠT ĐỘNG KHÁCH + FILE TXT CHUNG */}
+            <section className="grid lg:grid-cols-[1.2fr_.8fr] gap-4">
+              <div className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#0b1711]/72' : 'border-gray-200 bg-white shadow-sm'}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-serif text-base sm:text-lg font-semibold">Khách hàng đã chọn ảnh</h3>
+                    <p className="mt-0.5 text-[10px] text-gray-400">Thông báo dùng chung cho mọi tài khoản admin.</p>
+                  </div>
+                  <button type="button" onClick={() => { fetchNotifications(); setIsNotificationOpen(true) }} className="text-[10px] font-semibold text-emerald-500">Xem tất cả →</button>
+                </div>
+                <div className="mt-4 grid sm:grid-cols-2 gap-2.5">
+                  {guestSelectionActivity.slice(0, 4).map((activity: any) => (
+                    <button key={`${activity.albumId}-${activity.actor}`} type="button" onClick={() => openNotificationAlbum(activity)} className={`rounded-2xl border p-3 text-left transition ${isDarkMode ? 'border-white/8 bg-white/[0.035] hover:bg-white/[0.06]' : 'border-gray-100 bg-gray-50 hover:bg-gray-100'}`}>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-semibold">{activity.guestLabel || 'Khách'}</div>
+                          <div className="mt-0.5 truncate text-[10px] text-gray-400">{activity.title}</div>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-500">{activity.count} ảnh</span>
+                      </div>
+                      <div className="mt-2 text-[9px] text-gray-400">{activity.updatedAt ? new Date(activity.updatedAt).toLocaleString('vi-VN') : ''}</div>
+                    </button>
+                  ))}
+                  {guestSelectionActivity.length === 0 && <div className="sm:col-span-2 rounded-2xl border border-dashed border-gray-500/20 px-4 py-8 text-center text-[11px] text-gray-400">Chưa có lựa chọn mới từ khách.</div>}
+                </div>
+              </div>
+
+              <div className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-emerald-300/15 bg-[linear-gradient(145deg,#0d2418,#09150f)]' : 'border-emerald-900/10 bg-[linear-gradient(145deg,#eef8f1,#ffffff)] shadow-sm'}`}>
+                <div className="flex items-start gap-3">
+                  <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isDarkMode ? 'bg-emerald-400/10 text-emerald-300' : 'bg-emerald-600/10 text-emerald-700'}`}><ClipboardList className="h-5 w-5" /></span>
+                  <div>
+                    <h3 className="text-sm font-semibold">File ảnh khách chọn chung</h3>
+                    <p className="mt-1 text-[10px] leading-5 text-gray-400">Dữ liệu lấy từ Supabase nên admin nào đăng nhập cũng xem và tải cùng một file TXT.</p>
+                  </div>
+                </div>
+                <button type="button" onClick={handleDownloadSharedSelectionTxt} disabled={isDownloadingSharedTxt} className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  {isDownloadingSharedTxt ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  {isDownloadingSharedTxt ? 'Đang tạo file...' : 'Tải file .txt chung'}
+                </button>
+
+                <div className={`mt-4 rounded-2xl border px-3 py-3 ${isDarkMode ? 'border-white/8 bg-black/15' : 'border-emerald-900/8 bg-white/70'}`}>
+                  <div className="flex items-center gap-2 text-[10px] font-semibold"><Sun className="h-3.5 w-3.5 text-amber-400" /> 06:00 – 18:00 <span className="font-normal text-gray-400">Giao diện sáng</span></div>
+                  <div className="mt-2 flex items-center gap-2 text-[10px] font-semibold"><Moon className="h-3.5 w-3.5 text-indigo-300" /> 18:00 – 06:00 <span className="font-normal text-gray-400">Giao diện tối</span></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        ) : isLocked ? (
+          <div className="min-h-[60vh] flex items-center justify-center p-4">
+            <div className={`w-full max-w-sm rounded-3xl p-6 sm:p-8 text-center border shadow-2xl transition-all ${
+              isDarkMode ? 'bg-[#181a20] border-white/10' : 'bg-white border-gray-100'
+            }`}>
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4">
+                <LockIcon className="w-7 h-7" />
+              </div>
+              <h3 className="font-bold font-serif text-lg text-gray-900 dark:text-white">Thư Mục Đã Được Bảo Vệ</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 mb-6">
+                Vui lòng nhập mật khẩu do Admin cài đặt để xem thư mục &quot;{currentActiveFolderTitle}&quot;.
+              </p>
+
+              <form onSubmit={handleCheckPassword} className="space-y-4">
+                <input 
+                  type="password"
+                  value={passwordInput}
+                  onChange={(e) => { setPasswordInput(e.target.value); setPasswordError(false); }}
+                  placeholder="Nhập mật khẩu..."
+                  required
+                  autoFocus
+                  className={`w-full px-4 py-3 rounded-2xl text-center text-sm font-bold border outline-none transition ${
+                    passwordError 
+                      ? 'border-red-500 bg-red-50 dark:bg-red-950/20 text-red-500' 
+                      : isDarkMode ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' : 'bg-gray-50 border-gray-200 text-gray-900 focus:border-emerald-500'
+                  }`}
+                />
+
+                {passwordError && (
+                  <p className="text-xs text-red-500 font-semibold">Mật khẩu chưa chính xác!</p>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md transition cursor-pointer"
+                >
+                  Mở Khóa Album
+                </button>
+              </form>
+            </div>
+          </div>
+        ) : (
+          <div>
+            {/* ALBUM HERO */}
+            <section className={`relative overflow-hidden rounded-[24px] sm:rounded-[28px] border shadow-[0_24px_70px_rgba(0,0,0,.16)] ${isDarkMode ? 'border-emerald-200/12 bg-[#081811]' : 'border-emerald-950/8 bg-[#eff6f0]'}`}>
+              <div className="absolute inset-0">
+                <img src="/banner.jpg" alt="Album background" className="h-full w-full object-cover" />
+                <div className={`absolute inset-0 ${isDarkMode ? 'bg-[linear-gradient(90deg,rgba(3,22,15,.95),rgba(4,28,18,.82),rgba(4,22,15,.50))]' : 'bg-[linear-gradient(90deg,rgba(245,249,246,.96),rgba(239,247,241,.86),rgba(235,245,238,.58))]'}`} />
+              </div>
+
+              <div className="relative z-10 p-4 sm:p-6 lg:p-7">
+                <div className={`flex items-center gap-1.5 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/48' : 'text-emerald-950/50'}`}>
+                  {!isSharedGuest && (
+                    <button onClick={() => setSelectedAlbum(null)} className="hover:text-emerald-500 transition">Trang chủ</button>
+                  )}
+                  {!isSharedGuest && <ChevronPath className="h-3.5 w-3.5" />}
+                  <button onClick={() => handleNavigateBreadcrumb(-1)} className="hover:text-emerald-500 transition">Album</button>
+                  {folderHistory.map((folder, index) => (
+                    <React.Fragment key={folder.id}>
+                      <ChevronPath className="h-3.5 w-3.5" />
+                      <button onClick={() => handleNavigateBreadcrumb(index)} className={`max-w-[150px] truncate hover:text-emerald-500 transition ${index === folderHistory.length - 1 ? 'font-semibold text-emerald-500' : ''}`}>
+                        {customNames[folder.id] || folder.title}
+                      </button>
+                    </React.Fragment>
+                  ))}
+                </div>
+
+                <div className="mt-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 sm:gap-6">
+                  <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                    <div className={`relative h-20 w-20 sm:h-28 sm:w-28 shrink-0 overflow-hidden rounded-2xl border shadow-xl ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-white bg-white'}`}>
+                      {currentFolderCoverUrl ? (
+                        <img
+                          src={currentFolderCoverUrl.replace(/=w\d+.*$/, '=w480-h480-p-k-no')}
+                          alt={currentActiveFolderTitle}
+                          className="h-full w-full object-cover"
+                          loading="eager"
+                          decoding="async"
+                          onError={(e) => {
+                            // Nếu URL thumbnail lỗi, thử trực tiếp qua Google Drive theo ID ảnh hiện tại.
+                            const fallbackId = firstCurrentImage?.id
+                            if (fallbackId) {
+                              const fallback = `https://lh3.googleusercontent.com/d/${fallbackId}=w480-h480-p-k-no`
+                              if ((e.currentTarget as HTMLImageElement).src !== fallback) {
+                                ;(e.currentTarget as HTMLImageElement).src = fallback
+                              }
+                            }
+                          }}
+                        />
+                      ) : loadingImages ? (
+                        <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-white/5' : 'bg-white/70'}`}>
+                          <Loader2 className="h-6 w-6 animate-spin text-emerald-500" />
+                        </div>
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center"><CustomFolderGraphic className="h-16 w-16" /></div>
+                      )}
+                    </div>
+
+                    <div className="min-w-0">
+                      <h1 className={`truncate font-serif text-2xl sm:text-3xl lg:text-[36px] font-semibold tracking-tight ${isDarkMode ? 'text-white' : 'text-[#0e2c1e]'}`}>{currentActiveFolderTitle}</h1>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] sm:text-[10px] font-semibold ${isSharedGuest ? 'border-emerald-400/20 bg-emerald-500/12 text-emerald-400' : isDarkMode ? 'border-white/10 bg-white/6 text-white/55' : 'border-gray-200 bg-white/70 text-gray-500'}`}>
+                          {isSharedGuest ? <Share2 className="h-3 w-3" /> : <LockIcon className="h-3 w-3" />}
+                          {isSharedGuest ? 'Được chia sẻ qua link' : 'Album nội bộ'}
+                        </span>
+                        {activeSetting.max_select ? (
+                          <span className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2.5 py-1 text-[9px] sm:text-[10px] font-semibold text-amber-500">Tối đa {activeSetting.max_select} ảnh</span>
+                        ) : null}
+                      </div>
+                      <div className={`mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/48' : 'text-gray-500'}`}>
+                        <span>{mediaFiles.length} ảnh</span>
+                        {subFolders.length > 0 && <><span>•</span><span>{subFolders.length} thư mục</span></>}
+                        <span>•</span><span>Bởi DinhThong</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {welcomeMessage && (
+                    <div className={`sm:max-w-[280px] sm:text-right rounded-2xl border px-3.5 py-3 backdrop-blur-xl ${isDarkMode ? 'border-white/8 bg-black/15' : 'border-white/70 bg-white/55'}`}>
+                      <div className={`text-sm sm:text-base font-semibold ${isDarkMode ? 'text-white' : 'text-[#153326]'}`}>{welcomeMessage}</div>
+                      <div className={`mt-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/45' : 'text-gray-500'}`}>Cảm ơn bạn đã xem album này!</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            {/* MAIN ALBUM CONTROLS */}
+            <section className={`mt-3 rounded-[20px] border p-2.5 sm:p-3 ${isDarkMode ? 'border-white/10 bg-[#0a1510]/88' : 'border-gray-200 bg-white/90 shadow-sm'}`}>
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
+                <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+                  <button
+                    onClick={() => { setStarFilter('all'); setCurrentPage(1) }}
+                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'all' ? 'border-emerald-500 bg-emerald-600 text-white shadow' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                  >
+                    <ImageIcon className="h-3.5 w-3.5" /> Tất cả ảnh ({mediaFiles.length})
+                  </button>
+                  <button
+                    onClick={() => { setStarFilter('selected'); setCurrentPage(1) }}
+                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'selected' ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                  >
+                    <Star className="h-3.5 w-3.5 fill-current" /> Ảnh đã chọn ({displaySelectedImagesList.length})
+                  </button>
+                  <button
+                    onClick={() => { setStarFilter(5); setCurrentPage(1) }}
+                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 5 ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                  >
+                    <Star className="h-3.5 w-3.5 fill-current" /> Ảnh 5 sao ({mediaFiles.filter(img => (displayRatings[img.id] || 0) === 5).length})
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1 lg:w-[230px] lg:flex-none">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="Tìm kiếm ảnh..."
+                      className={`h-9 w-full rounded-xl border pl-9 pr-3 text-[11px] outline-none transition ${isDarkMode ? 'border-white/10 bg-white/5 text-white placeholder:text-white/30 focus:border-emerald-500' : 'border-gray-200 bg-gray-50 text-gray-900 focus:border-emerald-500'}`}
+                    />
+                  </div>
+                  <div className={`hidden sm:flex items-center gap-1 rounded-xl border p-1 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-50'}`}>
+                    <button type="button" onClick={() => setGridDensity('comfortable')} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${gridDensity === 'comfortable' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-emerald-500'}`} title="Ảnh lớn"><ImageIcon className="h-3.5 w-3.5" /></button>
+                    <button type="button" onClick={() => setGridDensity('compact')} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${gridDensity === 'compact' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-emerald-500'}`} title="Ảnh nhỏ"><Square className="h-3.5 w-3.5" /></button>
+                  </div>
+                  <button
+                    onClick={() => setIsAdminPanelOpen(true)}
+                    className="hidden sm:inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-[11px] font-bold text-white hover:bg-emerald-700"
+                  >
+                    <ClipboardList className="h-3.5 w-3.5" /> Ảnh chọn <span className="rounded-full bg-black/20 px-1.5 py-0.5 text-[9px]">{displaySelectedImagesList.length}</span>
+                  </button>
+                  <button
+                    onClick={(e) => handleDownloadAlbumZip(undefined, e)}
+                    disabled={Boolean(zippingFolderId)}
+                    className="hidden sm:inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 text-[11px] font-bold text-emerald-500 hover:bg-emerald-500/15 disabled:opacity-50"
+                  >
+                    {zippingFolderId === (currentActiveFolderId || 'global') ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                    Tải album
+                  </button>
+                </div>
+              </div>
+
+              {/* Bộ lọc sao chi tiết */}
+              {mediaFiles.length > 0 && (
+                <div className="mt-2.5 flex items-center gap-1.5 overflow-x-auto border-t pt-2.5 scrollbar-none border-gray-200/70 dark:border-white/8">
+                  <span className={`shrink-0 px-1 text-[10px] font-semibold ${isDarkMode ? 'text-white/35' : 'text-gray-400'}`}>Lọc:</span>
+                  <button onClick={() => { setStarFilter('all'); setCurrentPage(1) }} className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === 'all' ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>Tất cả</button>
+                  {[0,1,2,3,4,5].map((star) => (
+                    <button key={star} onClick={() => { setStarFilter(star); setCurrentPage(1) }} className={`shrink-0 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === star ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>
+                      <Star className="h-3 w-3 fill-current text-emerald-400" /> {star}
+                    </button>
+                  ))}
+                  {selectedImagesList.length > 0 && (
+                    <button onClick={handleClearAllSelections} className="ml-auto shrink-0 inline-flex items-center gap-1 rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-red-500"><Trash2 className="h-3 w-3" /> Xóa sao ({selectedImagesList.length})</button>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* ADMIN ALBUM TOOLS — compact, không chiếm không gian của khách */}
+            {!isSharedGuest && (
+              <section className="mt-3 flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+                <button onClick={handleDeleteGuestSelectionsInCurrentAlbum} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-red-500/20 bg-red-500/10 px-3 text-[10px] font-semibold text-red-500"><Trash2 className="h-3.5 w-3.5" /> Xóa ảnh khách chọn</button>
+                <button onClick={handleOpenCurrentFolderSetting} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-500"><Settings className="h-3.5 w-3.5" /> Cài đặt Album</button>
+                <button onClick={() => { fetchComments(); setIsCommentModalOpen(true) }} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 text-[10px] font-semibold text-amber-500"><MessageSquare className="h-3.5 w-3.5" /> Bình luận <span className="rounded-full bg-amber-500/15 px-1.5">{commentedImagesList.length}</span></button>
+                <button onClick={handleOpenVisibilityManager} className={`shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[10px] font-semibold ${isDarkMode ? 'border-white/10 bg-white/5 text-white/60' : 'border-gray-200 bg-gray-50 text-gray-600'}`}><Eye className="h-3.5 w-3.5" /> Ẩn / Hiện mục</button>
+              </section>
+            )}
+
+            {/* MOBILE DOWNLOAD ACTIONS — tick chỉ dùng tải ảnh; sao mới dùng TXT */}
+            {downloadableImages.length > 0 && (
+              <section className={`sm:hidden mt-3 rounded-[18px] border p-2.5 ${isDarkMode ? 'border-white/10 bg-[#0a1510]' : 'border-gray-200 bg-white shadow-sm'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <button type="button" onClick={toggleSelectAllDownloadImages} disabled={isPreparingMobileImages} className={`inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[10px] font-semibold ${areAllDownloadImagesSelected ? 'border-emerald-500/30 bg-emerald-500/12 text-emerald-500' : isDarkMode ? 'border-white/10 bg-white/5 text-white/62' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>
+                    {areAllDownloadImagesSelected ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                    {areAllDownloadImagesSelected ? 'Bỏ chọn tải' : 'Chọn tất cả để tải'}
+                  </button>
+                  <span className="text-[10px] font-bold text-emerald-500">Đã tick {selectedDownloadImages.length}</span>
+                </div>
+                {mobileDownloadProgress && <div className="mt-2 text-center text-[9px] text-gray-400">{mobileDownloadProgress}</div>}
+              </section>
+            )}
+            {loadingImages ? (
+              <div className="flex flex-col items-center justify-center py-24 text-gray-400">
+                <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
+                <p className="text-xs">Vui lòng đợi</p>
+              </div>
+            ) : visibleItems.length === 0 ? (
+              <div className="text-center py-20 text-gray-400 text-xs">
+                Thư mục này hiện đang trống hoặc tất cả các mục đã bị ẩn.
+              </div>
+            ) : (
+              <div className="space-y-10">
+                {subFolders.length > 0 && (
+                  <div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <h3 className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                        Thư mục con ({subFolders.length})
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+                      {subFolders
+                        .filter(f => f.name.toLowerCase().includes(searchTerm.toLowerCase()))
+                        .map((folder) => {
+                          const hasCover = Boolean(albumCovers[folder.id] || folder.coverUrl)
+                          const folderDriveUrl = `https://drive.google.com/drive/folders/${folder.id}`
+                          const displayName = customNames[folder.id] || folder.name
+                          const isChecked = selectedItemIds.has(folder.id)
+                          const currentCover = albumCovers[folder.id] || folder.coverUrl
+                          const isThisFolderZipping = zippingFolderId === folder.id
+
+                          return (
+                            <div
+                              key={folder.id}
+                              className={`rounded-2xl overflow-hidden border transition-all duration-300 hover:shadow-lg group flex flex-col justify-between ${
+                                isChecked ? 'ring-2 ring-emerald-500' : ''
+                              } ${
+                                isDarkMode 
+                                  ? 'bg-[#16181e] border-white/10' 
+                                  : 'bg-white border-gray-100 shadow-sm'
+                              }`}
+                            >
+                              <div 
+                                onClick={() => handleOpenSubFolder(folder)}
+                                className="h-44 sm:h-52 bg-gray-50 dark:bg-[#12141a] relative cursor-pointer overflow-hidden flex items-center justify-center"
+                              >
+                                {hasCover ? (
+                                  <img 
+                                    src={(currentCover || '').replace(/=w\d+.*$/, '=w400-h400-p-k-no')} 
+                                    alt={displayName} 
+                                    loading="lazy"
+                                    decoding="async"
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${folder.id}=w400-h400-p-k-no`
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="flex items-center justify-center w-full h-full group-hover:scale-105 transition-transform duration-300">
+                                    <CustomFolderGraphic className="w-24 h-24 sm:w-28 sm:h-28" />
+                                  </div>
+                                )}
+
+                                <div className="absolute inset-0 bg-white/0 group-hover:bg-white/10 transition-all duration-300 z-10" />
+
+                                <button
+                                  onClick={(e) => handleToggleSelectItem(folder.id, e)}
+                                  className="hidden sm:block absolute bottom-2.5 left-2.5 p-1 rounded-lg bg-black/60 backdrop-blur-md text-white z-20 cursor-pointer transition active:scale-95"
+                                  title={isChecked ? 'Bỏ chọn' : 'Chọn thư mục'}
+                                >
+                                  {isChecked ? <CheckSquare className="w-4 h-4 text-emerald-400" /> : <Square className="w-4 h-4 text-white/80" />}
+                                </button>
+
+                                {!isSharedGuest && (
+                                  <button
+                                    onClick={(e) => handlePermanentlyHideItem(folder.id, displayName, e)}
+                                    className="absolute top-2.5 right-2.5 p-2 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                    title="Ẩn thư mục này"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="p-3.5 flex items-center justify-between gap-2">
+                                <div onClick={() => handleOpenSubFolder(folder)} className="cursor-pointer truncate flex-1">
+                                  <h4 className="font-semibold text-xs sm:text-sm hover:text-emerald-600 transition-colors truncate" title={displayName}>
+                                    {displayName}
+                                  </h4>
+                                  <p className="text-[10px] text-gray-400 mt-0.5">
+                                    {hasCover ? 'Album ảnh' : 'Thư mục con'}
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  {!isSharedGuest && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleShareFolder(folder.id, e)}
+                                      className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20 transition cursor-pointer"
+                                      title="Chia sẻ thư mục này"
+                                    >
+                                      {shareCopiedId === folder.id ? (
+                                        <Check className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <Share2 className="w-3.5 h-3.5" />
+                                      )}
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleDownloadAlbumZip({ id: folder.id, title: displayName, driveUrl: folderDriveUrl }, e)}
+                                    disabled={Boolean(zippingFolderId)}
+                                    className="flex items-center gap-1 px-3 py-1.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition cursor-pointer disabled:opacity-60 flex-shrink-0"
+                                    title="Tải nén toàn bộ thư mục này"
+                                  >
+                                    {isThisFolderZipping ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>{zipProgress || 'Vui lòng đợi...'}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Download className="w-3.5 h-3.5" />
+                                        <span>Tải</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                    </div>
+                  </div>
+                )}
+
+                {mediaFiles.length > 0 && (
+                  <div>
+                    {subFolders.length > 0 && (
+                      <div className="flex items-center gap-2 mb-4">
+                        <ImageIcon className="w-4 h-4 text-emerald-500" />
+                        <h3 className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                          Hình ảnh & Video ({filteredMediaFiles.length})
+                        </h3>
+                      </div>
+                    )}
+
+                    <div className={`grid gap-2.5 sm:gap-3 ${gridDensity === 'compact' ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}`}>
+                      {paginatedImages
+                        .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
+                        .map((item) => {
+                          const currentStar = displayRatings[item.id] || 0
+                          const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`
+                          const displayName = customNames[item.id] || item.name
+                          const isDownloadChecked = downloadSelectedIds.has(item.id)
+                          const isThisDownloading = downloadingId === item.id
+
+                          return (
+                            <div 
+                              key={item.id}
+                              className={`rounded-xl overflow-hidden border transition group relative ${
+                                isDownloadChecked ? 'ring-2 ring-emerald-500' : ''
+                              } ${
+                                isDarkMode ? 'bg-[#16181e] border-white/10' : 'bg-white border-gray-100 shadow-sm'
+                              }`}
+                            >
+                              <div 
+                                onClick={() => setPreviewMedia(item)}
+                                className="aspect-[4/5] bg-gray-100 dark:bg-gray-800 relative cursor-pointer overflow-hidden flex items-center justify-center select-none"
+                              >
+                                {item.type === 'video' ? (
+                                  <div className="w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white relative">
+                                    <img 
+                                      src={`https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`}
+                                      alt={displayName}
+                                      loading="lazy"
+                                      className="w-full h-full object-cover opacity-70 group-hover:scale-105 transition-transform duration-200"
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).style.display = 'none'
+                                      }}
+                                    />
+                                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 z-10">
+                                      <div className="p-3 rounded-full bg-black/60 backdrop-blur-sm text-emerald-400">
+                                        <Film className="w-6 h-6 sm:w-8 sm:h-8" />
+                                      </div>
+                                    </div>
+                                    <span className="absolute top-2 left-2 bg-black/70 text-white font-bold text-[9px] px-2 py-0.5 rounded flex items-center gap-1 z-20">
+                                      VIDEO
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <img 
+                                      src={fastDisplayUrl} 
+                                      alt={displayName} 
+                                      loading="lazy"
+                                      decoding="async"
+                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200 pointer-events-none"
+                                      onError={(e) => {
+                                        (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}=w360`
+                                      }}
+                                    />
+
+                                    {activeSetting.enable_watermark && (
+                                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-30 select-none">
+                                        <span className="font-serif font-black text-white text-xs sm:text-sm tracking-widest uppercase -rotate-12 border border-white/50 px-2 py-0.5 rounded">
+                                          DINHTHONG GALLERY
+                                        </span>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+
+                                {item.type === 'image' && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => toggleMobileDownloadSelection(item.id, e)}
+                                    className={`absolute top-2 left-2 p-2 rounded-xl backdrop-blur-md text-white z-30 cursor-pointer transition active:scale-90 border ${
+                                      isDownloadChecked
+                                        ? 'bg-emerald-600/95 border-emerald-400/50'
+                                        : 'bg-black/65 border-white/20'
+                                    }`}
+                                    title={isDownloadChecked ? 'Bỏ chọn tải ảnh' : 'Chọn ảnh để tải'}
+                                    aria-label={isDownloadChecked ? 'Bỏ chọn tải ảnh' : 'Chọn ảnh để tải'}
+                                  >
+                                    {isDownloadChecked ? (
+                                      <CheckSquare className="w-4 h-4 text-white" />
+                                    ) : (
+                                      <Square className="w-4 h-4 text-white" />
+                                    )}
+                                  </button>
+                                )}
+
+
+                                {!isSharedGuest && (
+                                  <button
+                                    onClick={(e) => handlePermanentlyHideItem(item.id, displayName, e)}
+                                    className="absolute top-2 left-12 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white/70 hover:text-red-400 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity z-20 cursor-pointer"
+                                    title="Ẩn tệp này"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+
+                                {currentStar > 0 && (
+                                  <div className="absolute top-2 right-2 bg-emerald-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md z-20">
+                                    <Star className="w-3 h-3 fill-current" />
+                                    <span>{currentStar}</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className={`px-2 py-2 sm:px-2.5 sm:py-2.5 border-t ${isDarkMode ? 'border-white/8 bg-[#0d1712]' : 'border-gray-100 bg-white'}`}>
+                                <div className="flex items-center justify-between gap-1">
+                                  <div className="flex min-w-0 items-center gap-0 sm:gap-0.5">
+                                    {[1,2,3,4,5].map((star) => (
+                                      <button
+                                        key={star}
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleRateImage(item.id, currentStar === star ? 0 : star) }}
+                                        className="p-0.5 transition hover:scale-110"
+                                        title={`${star} sao`}
+                                      >
+                                        <Star className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${currentStar >= star ? 'fill-amber-400 text-amber-400' : isDarkMode ? 'text-white/28' : 'text-gray-300'}`} />
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-1">
+                                    {comments[item.id] && <MessageSquare className="h-3.5 w-3.5 text-amber-400" />}
+                                    <button type="button" onClick={(e) => { e.stopPropagation(); setPreviewMedia(item) }} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${isDarkMode ? 'text-white/55 hover:bg-white/8 hover:text-white' : 'text-gray-400 hover:bg-gray-100 hover:text-emerald-600'}`} title="Xem lớn"><ZoomIn className="h-3.5 w-3.5" /></button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleDownloadMedia(item, e)}
+                                      disabled={Boolean(downloadingId)}
+                                      className={`hidden sm:flex h-7 w-7 items-center justify-center rounded-lg transition disabled:opacity-50 ${isDarkMode ? 'text-white/55 hover:bg-white/8 hover:text-emerald-300' : 'text-gray-400 hover:bg-gray-100 hover:text-emerald-600'}`}
+                                      title="Tải ảnh"
+                                    >
+                                      {isThisDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className={`mt-1 truncate text-[8px] sm:text-[9px] ${isDarkMode ? 'text-white/26' : 'text-gray-400'}`} title={displayName}>{displayName}</div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                    </div>
+
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-center gap-2 mt-8 sm:mt-10">
+                        <button
+                          onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                          disabled={currentPage === 1}
+                          className="px-3.5 py-1.5 rounded-xl bg-gray-200 dark:bg-white/10 text-xs font-semibold disabled:opacity-40 cursor-pointer transition"
+                        >
+                          Trang trước
+                        </button>
+                        <span className="text-xs px-2 text-gray-500">
+                          {currentPage} / {totalPages}
+                        </span>
+                        <button
+                          onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                          disabled={currentPage === totalPages}
+                          className="px-3.5 py-1.5 rounded-xl bg-gray-200 dark:bg-white/10 text-xs font-semibold disabled:opacity-40 cursor-pointer transition"
+                        >
+                          Trang sau
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+
+      {/* MODAL LIGHTBOX */}
+      {previewMedia && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-2 sm:p-4 select-none touch-pan-y"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div className="sm:hidden grid grid-cols-[42px_1fr_42px] items-center px-1 py-2 text-white z-30">
+            <button onClick={handleClosePreview} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md" aria-label="Đóng ảnh">
+              <BackIcon className="h-5 w-5" />
+            </button>
+            <div className="text-center text-xs font-semibold">{currentIndex + 1} / {previewSourceList.length}</div>
+            <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md disabled:opacity-50" aria-label="Tải ảnh">
+              {downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            </button>
+          </div>
+
+          <div className="hidden sm:flex items-center justify-between px-3 py-2 text-white/90 z-30">
+            <div className="truncate max-w-[50vw]">
+              <h4 className="text-xs sm:text-sm font-medium truncate">
+                {customNames[previewMedia.id] || previewMedia.name}
+              </h4>
+              <span className="text-[10px] text-white/50">
+                {currentIndex + 1} / {previewSourceList.length}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {previewMedia.type !== 'video' && (
+                <div className="flex items-center gap-1 bg-white/10 backdrop-blur-md px-1.5 py-1 rounded-full border border-white/10 mr-1">
+                  <button
+                    onClick={handleZoomIn}
+                    className="p-1 text-white/80 hover:text-white transition cursor-pointer"
+                    title="Phóng to (+)"
+                  >
+                    <ZoomIn className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={handleZoomOut}
+                    className="p-1 text-white/80 hover:text-white transition cursor-pointer"
+                    title="Thu nhỏ (-)"
+                  >
+                    <ZoomOut className="w-4 h-4" />
+                  </button>
+                  {zoomScale > 1 && (
+                    <button
+                      onClick={handleResetZoom}
+                      className="p-1 text-emerald-400 hover:text-emerald-300 transition cursor-pointer"
+                      title="Trở về kích thước gốc (1:1)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <button
+                onClick={(e) => handleDownloadMedia(previewMedia, e)}
+                disabled={Boolean(downloadingId)}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                title="Tải về máy"
+              >
+                {downloadingId === previewMedia.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={handleClosePreview}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                title="Đóng (Esc)"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          <div 
+            className="relative flex-1 flex items-center justify-center p-2 overflow-hidden w-full h-full cursor-grab active:cursor-grabbing"
+            onClick={handleDoubleTap}
+          >
+            {previewMedia.type === 'video' ? (
+              <div className="relative w-full max-w-5xl aspect-video flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-2xl">
+                <iframe
+                  src={`https://drive.google.com/file/d/${previewMedia.id}/preview`}
+                  className="w-full h-full border-0 rounded-2xl"
+                  allow="autoplay; fullscreen"
+                  allowFullScreen
+                />
+              </div>
+            ) : (
+              <div 
+                className="relative max-h-full max-w-full flex items-center justify-center transition-transform duration-100 ease-out"
+                style={{
+                  transform: `scale(${zoomScale}) translate(${panPosition.x}px, ${panPosition.y}px)`
+                }}
+              >
+                <img 
+                  src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
+                  alt={previewMedia.name}
+                  className="max-h-[78vh] max-w-[95vw] object-contain rounded-lg shadow-2xl transition-all duration-150 pointer-events-none"
+                />
+
+                {activeSetting.enable_watermark && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-35 select-none">
+                    <span className="font-serif font-black text-white text-2xl sm:text-4xl tracking-widest uppercase -rotate-12 border-2 border-white/60 px-6 py-2 rounded-2xl shadow-2xl">
+                      DINHTHONG GALLERY
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {zoomScale === 1 && (
+              <>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handlePrevImage(); }}
+                  className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block z-20"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleNextImage(); }}
+                  className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block z-20"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="sm:hidden z-30 w-full px-1 pb-[max(8px,env(safe-area-inset-bottom))]">
+            <div className="rounded-2xl border border-white/12 bg-black/72 p-2.5 shadow-2xl backdrop-blur-xl">
+              {activeSetting.allow_comments && (
+                <div className="mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-white/6 px-2.5 py-2">
+                  <MessageSquare className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                  <input
+                    type="text"
+                    value={currentCommentInput}
+                    onChange={(e) => setCurrentCommentInput(e.target.value)}
+                    placeholder="Ghi chú yêu cầu sửa ảnh..."
+                    className="min-w-0 flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/35"
+                  />
+                  <button onClick={() => handleSaveComment(previewMedia.id)} disabled={isSavingComment} className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-white disabled:opacity-50">
+                    {isSavingComment ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-center justify-center gap-1 border-b border-white/10 pb-2">
+                {[1,2,3,4,5].map((star) => (
+                  <button key={star} onClick={() => handleRateImage(previewMedia.id, (ratings[previewMedia.id] || 0) === star ? 0 : star)} className="p-1.5">
+                    <Star className={`h-5 w-5 ${(ratings[previewMedia.id] || 0) >= star ? 'fill-amber-400 text-amber-400' : 'text-white/35'}`} />
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {previewMedia.type === 'image' ? (
+                  <button
+                    type="button"
+                    onClick={(e) => toggleMobileDownloadSelection(previewMedia.id, e)}
+                    className={`flex h-10 items-center justify-center gap-2 rounded-xl border text-[11px] font-semibold ${downloadSelectedIds.has(previewMedia.id) ? 'border-emerald-400/35 bg-emerald-500/16 text-emerald-300' : 'border-white/12 bg-white/6 text-white/75'}`}
+                  >
+                    {downloadSelectedIds.has(previewMedia.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                    {downloadSelectedIds.has(previewMedia.id) ? 'Đã chọn tải' : 'Chọn để tải'}
+                  </button>
+                ) : <div />}
+                <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 text-[11px] font-bold text-white disabled:opacity-50">
+                  {downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  Tải ảnh
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="hidden sm:flex flex-col items-center gap-2 pb-2 z-30 max-w-xl mx-auto w-full px-2">
+            {activeSetting.allow_comments && (
+              <div className="w-full flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl backdrop-blur-md border border-white/15 shadow-xl">
+                <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                <input 
+                  type="text"
+                  value={currentCommentInput}
+                  onChange={(e) => setCurrentCommentInput(e.target.value)}
+                  placeholder="Ghi chú yêu cầu sửa ảnh..."
+                  className="bg-transparent border-0 outline-none text-base sm:text-xs text-white placeholder:text-white/40 flex-1 px-1 min-w-0"
+                />
+                <button
+                  onClick={() => handleSaveComment(previewMedia.id)}
+                  disabled={isSavingComment}
+                  className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex-shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  <span className="hidden xs:inline">Lưu</span>
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-1.5 bg-black/60 px-4 py-2 rounded-full backdrop-blur-md border border-white/10">
+              <span className="text-[11px] text-white/70 mr-1">Đánh giá:</span>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  onClick={() => handleRateImage(previewMedia.id, (ratings[previewMedia.id] || 0) === star ? 0 : star)}
+                  className="p-1 text-white hover:scale-110 transition cursor-pointer"
+                >
+                  <Star className={`w-4 h-4 sm:w-5 sm:h-5 ${
+                    (ratings[previewMedia.id] || 0) >= star ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'
+                  }`} />
+                </button>
+              ))}
+
+              {!isSharedGuest && selectedAlbum && (
+                <>
+                  <div className="h-4 w-[1px] bg-white/20 mx-1" />
+                  <button
+                    onClick={(e) => handleSetAsCover(currentActiveFolderId, previewMedia.id, e)}
+                    className="text-[10px] sm:text-xs text-emerald-400 hover:text-emerald-300 font-medium px-2 py-0.5 rounded-full hover:bg-white/10 transition"
+                  >
+                    Đặt làm bìa
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div 
+              ref={thumbnailRef}
+              className="flex items-center gap-2 overflow-x-auto max-w-full py-1 px-4 scrollbar-none"
+            >
+              {previewSourceList.map((thumb) => (
+                <button
+                  key={thumb.id}
+                  onClick={() => setPreviewMedia(thumb)}
+                  className={`relative w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden flex-shrink-0 border-2 transition ${
+                    thumb.id === previewMedia.id ? 'border-emerald-500 scale-105' : 'border-transparent opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  <img 
+                    src={`https://lh3.googleusercontent.com/d/${thumb.id}=w120-h120-p-k-no`} 
+                    alt={thumb.name} 
+                    className="w-full h-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL XEM TẤT CẢ BÌNH LUẬN */}
+      {isCommentModalOpen && !isSharedGuest && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-amber-500" />
+                <h3 className="font-serif font-bold text-base">Bình Luận Của Khách ({commentedImagesList.length})</h3>
+              </div>
+              <button onClick={() => setIsCommentModalOpen(false)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="my-4">
+              <textarea
+                readOnly
+                value={commentTextListContent}
+                rows={8}
+                className={`w-full p-3.5 rounded-2xl text-xs font-mono border outline-none ${
+                  isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-800'
+                }`}
+                placeholder="Chưa có bình luận nào từ khách hàng..."
+              />
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-3 border-t border-gray-100 dark:border-white/10">
+              <button
+                onClick={handleDeleteAllComments}
+                disabled={commentedImagesList.length === 0}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/20 transition cursor-pointer disabled:opacity-40"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xóa tất cả bình luận</span>
+              </button>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleCopyCommentList(commentTextListContent)}
+                  disabled={commentedImagesList.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 transition cursor-pointer disabled:opacity-50"
+                >
+                  {commentCopied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{commentCopied ? 'Đã chép' : 'Sao chép'}</span>
+                </button>
+                <button
+                  onClick={handleDownloadCommentTxt}
+                  disabled={commentedImagesList.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white shadow transition cursor-pointer disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Lưu file TXT</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MOBILE: thanh tải cố định giống app ảnh — không ZIP, lưu thẳng qua Share Sheet */}
+      {selectedAlbum && !isLocked && downloadableImages.length > 0 && !previewMedia && (
+        <div className="sm:hidden fixed inset-x-0 bottom-0 z-40 px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 bg-gradient-to-t from-black/85 via-black/70 to-transparent">
+          <div className={`grid grid-cols-2 gap-2 rounded-2xl border p-2 shadow-2xl backdrop-blur-xl ${isDarkMode ? 'border-white/12 bg-[#07150f]/92' : 'border-gray-200 bg-white/94'}`}>
+            <button
+              type="button"
+              onClick={handleDownloadAllImagesToPhone}
+              disabled={isPreparingMobileImages || Boolean(pendingMobileBatchShare)}
+              className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 text-[11px] font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-45"
+            >
+              {isPreparingMobileImages ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Tải album
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadSelectedImagesToPhone}
+              disabled={selectedDownloadImages.length === 0 || isPreparingMobileImages || Boolean(pendingMobileBatchShare)}
+              className={`flex h-11 items-center justify-center gap-2 rounded-xl border text-[11px] font-bold disabled:opacity-40 ${isDarkMode ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300' : 'border-emerald-600/20 bg-emerald-50 text-emerald-700'}`}
+            >
+              <ClipboardList className="h-4 w-4" />
+              Ảnh tải <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[9px] text-white">{selectedDownloadImages.length}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* DESKTOP: 1 tick trên ảnh = chọn tải. Mobile dùng thanh lưu ảnh ở phía trên. */}
+      {selectedAlbum && selectedDownloadImages.length > 0 && (
+        <div className="hidden sm:flex fixed bottom-6 inset-x-0 z-40 justify-center px-4 animate-in slide-in-from-bottom-5 duration-200">
+          <div className="flex items-center gap-4 px-5 py-3 rounded-2xl bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white shadow-2xl border border-white/15">
+            <span className="text-xs font-medium text-emerald-400">
+              Đã tick tải: <strong className="text-white">{selectedDownloadImages.length}</strong> ảnh
+            </span>
+
+            <div className="h-4 w-[1px] bg-white/20" />
+
+            <button
+              type="button"
+              onClick={handleDownloadSelectedImagesDesktopZip}
+              disabled={Boolean(zippingFolderId)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow transition cursor-pointer disabled:opacity-50"
+            >
+              {zippingFolderId === 'download_selected_images' ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>{zipProgress || 'Đang nén...'}</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Lưu ZIP ảnh đã tick</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDownloadSelectedIds(new Set())}
+              className="p-1 rounded-full text-white/60 hover:text-white transition cursor-pointer"
+              title="Bỏ tick tải"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* THANH CÔNG CỤ NỔI KHI TICK CHỌN */}
+      {currentSelectionCount > 0 && (
+        <div className={`hidden sm:flex fixed ${selectedAlbum && selectedDownloadImages.length > 0 ? 'bottom-24' : 'bottom-6'} inset-x-0 z-40 justify-center px-4 animate-in slide-in-from-bottom-5 duration-200`}>
+          <div className="flex items-center gap-2.5 sm:gap-4 px-4 sm:px-6 py-3 rounded-2xl bg-gray-900/90 dark:bg-black/90 backdrop-blur-md text-white shadow-2xl border border-white/15">
+            <span className="text-xs font-medium text-emerald-400">
+              Đã chọn: <strong className="text-white">{currentSelectionCount}</strong>
+              {activeSetting.max_select ? ` / ${activeSetting.max_select}` : ''} mục
+            </span>
+
+            <div className="h-4 w-[1px] bg-white/20" />
+
+            <button
+              onClick={handleBatchDownload}
+              disabled={Boolean(zippingFolderId)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow transition cursor-pointer disabled:opacity-50"
+            >
+              {zippingFolderId?.startsWith('batch') ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>{zipProgress || 'Lưu ZIP...'}</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Lưu ZIP</span>
+                </>
+              )}
+            </button>
+
+            {!isSharedGuest && (
+              <button
+                onClick={handleBatchDelete}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 text-xs font-semibold transition cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Xóa</span>
+              </button>
+            )}
+
+            <button
+              onClick={() => {
+                setSelectedAlbumIds(new Set())
+                setSelectedItemIds(new Set())
+              }}
+              className="p-1 rounded-full text-white/60 hover:text-white transition cursor-pointer"
+              title="Bỏ chọn"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL YÊU CẦU NHẬP TÊN CHO KHÁCH */}
+      {pendingMobileShare && (
+        <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
+            <div className="w-12 h-1 rounded-full bg-emerald-600 mx-auto mb-5" />
+            <h3 className="font-serif font-bold text-lg">Ảnh đã sẵn sàng</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 mb-5">
+              Nhấn nút bên dưới để mở bảng hệ thống, sau đó chọn <strong>Lưu hình ảnh</strong>.
+            </p>
+            <button
+              type="button"
+              onClick={handleConfirmMobileSave}
+              className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            >
+              Lưu hình ảnh
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingMobileShare(null)}
+              className="w-full mt-2 py-2.5 rounded-2xl text-sm text-gray-500 dark:text-gray-400"
+            >
+              Hủy
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pendingMobileBatchShare && (
+        <div className="fixed inset-0 z-[75] bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
+            <div className="w-12 h-1 rounded-full bg-emerald-600 mx-auto mb-5" />
+            <h3 className="font-serif font-bold text-lg">
+              {pendingMobileBatchShare.files.length} ảnh đã sẵn sàng
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              Đợt {pendingMobileBatchShare.batchNumber}/{pendingMobileBatchShare.totalBatches} · Tổng {pendingMobileBatchShare.totalImages} ảnh
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 mb-5">
+              Nhấn bên dưới để mở bảng hệ thống, sau đó chọn <strong>Lưu hình ảnh</strong>. Nếu có nhiều ảnh, web sẽ lần lượt chuẩn bị các đợt tiếp theo để tránh đầy bộ nhớ điện thoại.
+            </p>
+            <button
+              type="button"
+              onClick={handleConfirmMobileBatchSave}
+              className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center justify-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Lưu {pendingMobileBatchShare.files.length} ảnh vào album
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPendingMobileBatchShare(null)
+                setMobileDownloadProgress('')
+              }}
+              className="w-full mt-2 py-2.5 rounded-2xl text-sm text-gray-500 dark:text-gray-400"
+            >
+              Hủy tải
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showGuestNameModal && isSharedGuest && (
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
+            <div className="w-12 h-1 rounded-full bg-emerald-600 mx-auto mb-5" />
+            <h3 className="font-serif font-bold text-lg text-center">{guestNamePurpose === 'capacity' ? 'Xác nhận khách đã xem album' : 'Xin chào bạn'}</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-2 mb-5">
+              {guestNamePurpose === 'capacity'
+                ? 'Album đã đạt giới hạn người xem. Vui lòng nhập tên của bạn để hệ thống kiểm tra bạn có phải khách đã truy cập trước đó hay không.'
+                : 'Album này có bật thu thập thông tin. Vui lòng nhập tên để tiếp tục vào album.'}
+            </p>
+            <input
+              autoFocus
+              value={guestNameInput}
+              onChange={(e) => setGuestNameInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') finalizeGuestEntry() }}
+              placeholder="Họ và tên của bạn..."
+              className={`w-full px-4 py-3 rounded-2xl border outline-none text-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:border-emerald-500' : 'bg-gray-50 border-gray-200 text-gray-900 focus:border-emerald-500'}`}
+            />
+            <button 
+              onClick={finalizeGuestEntry} 
+              className="w-full mt-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm shadow-md transition cursor-pointer"
+            >
+              {guestNamePurpose === 'capacity' ? 'Kiểm tra & tiếp tục' : 'Tiếp tục vào Album'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* MÀN HÌNH BÁO ĐẦY NGƯỜI TRUY CẬP CHO KHÁCH */}
+      {guestAccessDenied && !showGuestNameModal && isSharedGuest && (
+        <div className="fixed inset-0 z-[61] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-red-500/10 text-red-500 flex items-center justify-center mb-3">
+              <LockIcon className="w-7 h-7" />
+            </div>
+            <h3 className="font-serif font-bold text-lg">Đã Đủ Số Lượng Người Truy Cập</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              Album này đã đạt giới hạn số người xem và tên bạn vừa nhập chưa được nhận diện là khách cũ. Vui lòng kiểm tra lại tên hoặc liên hệ người gửi album.
+            </p>
+            <button
+              onClick={() => {
+                setGuestAccessDenied(false)
+                setGuestNamePurpose('capacity')
+                setShowGuestNameModal(true)
+              }}
+              className="mt-5 w-full py-2.5 rounded-2xl bg-gray-100 dark:bg-white/10 text-xs font-semibold hover:bg-gray-200 dark:hover:bg-white/20 transition cursor-pointer"
+            >
+              Nhập lại tên khác
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP XEM DANH SÁCH ẢNH ĐÃ CHỌN (TXT) */}
+      {isAdminPanelOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-lg rounded-3xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-emerald-500" />
+                <h3 className="font-serif font-bold text-base">Danh Sách Tệp Đã Đánh Dấu</h3>
+              </div>
+              <button onClick={() => setIsAdminPanelOpen(false)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="my-4 space-y-3">
+              <div className="flex items-center gap-4 text-xs flex-wrap">
+                <label className="flex items-center gap-1 cursor-pointer select-none">
+                  <input type="checkbox" checked={useComma} onChange={(e) => setUseComma(e.target.checked)} className="rounded text-emerald-600" />
+                  <span>Dấu phẩy</span>
+                </label>
+                <label className="flex items-center gap-1 cursor-pointer select-none">
+                  <input type="checkbox" checked={useSpace} onChange={(e) => setUseSpace(e.target.checked)} className="rounded text-emerald-600" />
+                  <span>Khoảng cách</span>
+                </label>
+                <label className="flex items-center gap-1 cursor-pointer select-none">
+                  <input type="checkbox" checked={useNewline} onChange={(e) => setUseNewline(e.target.checked)} className="rounded text-emerald-600" />
+                  <span>Xuống dòng</span>
+                </label>
+                <label className="flex items-center gap-1 cursor-pointer select-none">
+                  <input type="checkbox" checked={useFileExtension} onChange={(e) => setUseFileExtension(e.target.checked)} className="rounded text-emerald-600" />
+                  <span>Đuôi file</span>
+                </label>
+              </div>
+
+              <textarea
+                readOnly
+                value={textFileContent}
+                rows={8}
+                className={`w-full p-3 rounded-2xl text-xs font-mono border outline-none ${
+                  isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-800'
+                }`}
+                placeholder="Chưa có ảnh nào được đánh giá sao..."
+              />
+            </div>
+
+            {!isSharedGuest && guestSelectedImagesList.length > 0 && (
+              <p className="mb-3 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                Đã nhận {guestSelectedImagesList.length} ảnh khách chọn từ link chia sẻ{latestGuestActor && guestSelectionRows.find((r: any) => r.actor_key === latestGuestActor)?.guest_label ? ` — ${guestSelectionRows.find((r: any) => r.actor_key === latestGuestActor)?.guest_label}` : ''}.
+              </p>
+            )}
+
+            <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-white/10">
+              <span className="text-xs text-gray-400">{txtSelectedImagesList.length} tệp đã chọn</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleCopyText(textFileContent)}
+                  disabled={txtSelectedImagesList.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 transition cursor-pointer disabled:opacity-50"
+                >
+                  {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copied ? 'Đã chép' : 'Sao chép'}</span>
+                </button>
+                <button
+                  onClick={handleDownloadTxt}
+                  disabled={txtSelectedImagesList.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow transition cursor-pointer disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Lưu file TXT</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL THÔNG BÁO */}
+      {isNotificationOpen && !isSharedGuest && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setIsNotificationOpen(false)}>
+          <div className={`w-full max-w-3xl rounded-3xl p-5 sm:p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2"><Bell className="w-5 h-5 text-emerald-500" /><h3 className="font-serif font-bold text-base">Thông báo</h3></div>
+              <div className="flex items-center gap-2">
+                <button onClick={clearNotifications} className="px-3 py-2 rounded-xl bg-red-500/10 text-red-500 text-xs font-semibold hover:bg-red-500/20 transition">Xóa thông báo</button>
+                <button onClick={() => setIsNotificationOpen(false)} className="p-1 rounded-full text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+              {[
+                { id: 'selected' as const, label: 'Ảnh khách chọn' },
+                { id: 'viewers' as const, label: 'Số người xem' },
+                { id: 'full' as const, label: 'Chọn đủ ảnh' },
+                { id: 'joined' as const, label: 'Khách gia nhập' },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setNotificationTab(tab.id)}
+                  className={`py-2.5 px-2 rounded-xl text-xs font-semibold transition ${notificationTab === tab.id ? 'bg-emerald-600 text-white shadow' : isDarkMode ? 'bg-white/5 text-gray-300 hover:bg-white/10' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 max-h-[60vh] overflow-y-auto space-y-3">
+              {notificationTab === 'selected' ? (
+                guestSelectionActivity.length === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-10">Chưa có ảnh khách chọn.</p>
+                ) : guestSelectionActivity.map((activity: any) => (
+                  <button key={`selected-${activity.albumId}-${activity.actor}`} type="button" onClick={() => openNotificationAlbum(activity)} className={`w-full text-left p-4 rounded-2xl border transition ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-100 hover:bg-emerald-50'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm truncate">{activity.guestLabel || 'Khách'}</div>
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 truncate">Đã chọn ảnh trong <strong>{activity.title}</strong></div>
+                      </div>
+                      <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">{activity.count} ảnh</span>
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-2">{activity.updatedAt ? new Date(activity.updatedAt).toLocaleString('vi-VN') : ''}</div>
+                  </button>
+                ))
+              ) : notificationItems.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-10">Chưa có dữ liệu.</p>
+              ) : notificationTab === 'viewers' ? (
+                notificationItems.filter(item => item.viewers > 0).map(item => (
+                  <div key={`viewer-${item.albumId}`} className={`p-4 rounded-2xl border ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-100'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <button type="button" onClick={() => openNotificationAlbum(item)} className="min-w-0 text-left">
+                        <div className="font-semibold text-sm truncate">{item.title}</div>
+                      </button>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <span className="text-sm font-bold text-emerald-600">{item.viewers} người</span>
+                        <button type="button" onClick={() => deleteViewerRecords(item.albumId)} className="text-xs font-semibold text-red-500 hover:underline">Xóa</button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : notificationTab === 'full' ? (
+                notificationItems.filter(item => item.full).map(item => (
+                  <button key={`full-${item.albumId}`} type="button" onClick={() => openNotificationAlbum(item)} className={`w-full text-left p-4 rounded-2xl border transition ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-100 hover:bg-emerald-50'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0"><div className="font-semibold text-sm truncate">{item.title}</div><div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Khách{item.fullData?.guestLabel ? ` ${item.fullData.guestLabel}` : ''} đã chọn đủ ảnh</div></div>
+                      <span className="flex-shrink-0 px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-bold">{item.fullData?.chosen || 0}/{item.fullData?.max || 0}</span>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                notificationItems.flatMap(item => (item.joined || []).map((guest: any, idx: number) => ({ ...guest, albumId: item.albumId, title: item.title, key: `${item.albumId}-${guest.joinedAt}-${idx}` }))).map((guest: any) => (
+                  <button key={guest.key} type="button" onClick={() => openNotificationAlbum(guest)} className={`w-full text-left p-4 rounded-2xl border transition ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-gray-50 border-gray-100 hover:bg-emerald-50'}`}>
+                    <div className="font-semibold text-sm">{guest.name}</div>
+                    <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">Đã gia nhập <strong>{guest.title}</strong> · {new Date(guest.joinedAt).toLocaleString('vi-VN')}</div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100 dark:border-white/10">
+              <button type="button" onClick={() => deleteViewerRecords()} className="px-4 py-2 rounded-xl bg-red-500/10 text-red-500 text-xs font-semibold hover:bg-red-500/20">Xóa số người xem</button>
+              <span className="text-[11px] text-gray-400">Số người trùng tên trong cùng album chỉ tính 1 người.</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CÀI ĐẶT RIÊNG CHO TỪNG THƯ MỤC / ALBUM */}
+      {editingFolderSetting && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <Settings className="w-5 h-5 text-emerald-500" />
+                <div>
+                  <h3 className="font-serif font-bold text-base">Cài Đặt & Chia Sẻ Album</h3>
+                </div>
+              </div>
+              <button onClick={() => setEditingFolderSetting(null)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between gap-3">
+              <div className="truncate">
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 block">Link xem trực tiếp Album này:</span>
+                <span className="text-[10px] text-gray-400 truncate block font-mono">
+                  {typeof window !== 'undefined' ? `${window.location.origin}/s/${toNumericCode(editingFolderSetting.id)}` : ''}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleShareFolder(editingFolderSetting.id)}
+                className="flex items-center gap-1 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition flex-shrink-0 cursor-pointer"
+              >
+                {shareCopiedId === editingFolderSetting.id ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{shareCopiedId === editingFolderSetting.id ? 'Đã chép!' : 'Chép link'}</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCurrentFolderSetting} className="mt-4 space-y-3.5 text-xs">
+              <div>
+                <label className="block font-medium mb-1">Tên hiển thị album:</label>
+                <input 
+                  type="text" 
+                  value={editingFolderSetting.title} 
+                  onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, title: e.target.value })} 
+                  required
+                  placeholder="Nhập tên album..."
+                  className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-medium mb-1">Mật khẩu PIN:</label>
+                  <input 
+                    type="text" 
+                    value={editingFolderSetting.password || ''} 
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, password: e.target.value })} 
+                    placeholder="Để trống nếu không khóa" 
+                    className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Giới hạn chọn ảnh:</label>
+                  <input 
+                    type="number" 
+                    value={editingFolderSetting.max_select || 0} 
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, max_select: Number(e.target.value) })} 
+                    placeholder="0 = Vô hạn" 
+                    className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-2 pt-2">
+                  <input
+                    type="checkbox"
+                    checked={editingFolderSetting.collect_customer_info ?? false}
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, collect_customer_info: e.target.checked })}
+                    className="rounded text-emerald-600"
+                  />
+                  <span>Thu thập thông tin khách hàng</span>
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Giới hạn số người xem:</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editingFolderSetting.max_viewers || 0}
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, max_viewers: Math.max(0, Number(e.target.value)) })}
+                    placeholder="0 = Không giới hạn"
+                    className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={editingFolderSetting.enable_watermark ?? false} 
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, enable_watermark: e.target.checked })} 
+                    className="rounded text-emerald-600" 
+                  />
+                  <span>Bật Watermark</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={editingFolderSetting.allow_comments ?? true} 
+                    onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, allow_comments: e.target.checked })} 
+                    className="rounded text-emerald-600" 
+                  />
+                  <span>Cho phép bình luận</span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
+                <button type="button" onClick={() => setEditingFolderSetting(null)} className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">Hủy</button>
+                <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Lưu Cài Đặt</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL THÊM ALBUM MỚI */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <h3 className="font-serif font-bold text-base">Thêm Album Mới</h3>
+              <button onClick={() => setIsModalOpen(false)} className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleAddAlbum} className="mt-4 space-y-3.5 text-xs">
+              <div>
+                <label className="block font-medium mb-1">Tên album:</label>
+                <input type="text" name="title" required placeholder="Ví dụ: Đám cưới Hương & Tuấn" className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+              </div>
+              <div>
+                <label className="block font-medium mb-1">Link Google Drive:</label>
+                <input type="text" name="url" required placeholder="https://drive.google.com/drive/folders/..." className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+              </div>
+              <div>
+                <label className="block font-medium mb-1">Link ảnh bìa (Tùy chọn):</label>
+                <input type="text" name="cover" placeholder="Link ảnh hoặc để trống tự động lấy" className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3 pt-2">
+                <div>
+                  <label className="block font-medium mb-1">Mật khẩu bảo vệ (Tùy chọn):</label>
+                  <input type="text" name="password" placeholder="Đặt mã PIN..." className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+                </div>
+                <div>
+                  <label className="block font-medium mb-1">Giới hạn chọn ảnh:</label>
+                  <input type="number" name="max_select" placeholder="0 = Không giới hạn" className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" name="enable_watermark" className="rounded text-emerald-600" />
+                  <span>Bật Watermark bản quyền</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" name="allow_comments" defaultChecked className="rounded text-emerald-600" />
+                  <span>Cho phép bình luận</span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">Hủy</button>
+                <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Thêm Album</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL QUẢN LÝ ẨN / HIỆN */}
+      {isManageVisibilityOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className={`w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-start justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-amber-500 text-white flex-shrink-0 shadow-md">
+                  <Eye className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-serif font-bold text-base sm:text-lg">Quản Lý Ẩn / Hiện Mục Trong Album</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Tick chọn để hiển thị, bỏ tick để ẩn mục khỏi web gallery.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsManageVisibilityOpen(false)}
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="my-5">
+              <div className="flex items-center justify-between text-xs px-1 mb-3">
+                <div className="space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setTempVisibleIds(new Set(items.map(i => i.id)))}
+                    className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline cursor-pointer"
+                  >
+                    Hiện tất cả
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTempVisibleIds(new Set())}
+                    className="text-red-500 font-semibold hover:underline cursor-pointer"
+                  >
+                    Ẩn tất cả
+                  </button>
+                </div>
+                <span className="text-gray-400">Đang hiển thị: {tempVisibleIds.size}/{items.length}</span>
+              </div>
+
+              <div className="space-y-2 max-h-64 overflow-y-auto p-1">
+                {items.length === 0 ? (
+                  <p className="text-center text-xs text-gray-400 py-4">Thư mục không có tệp nào.</p>
+                ) : (
+                  items.map((item) => {
+                    const isVisible = tempVisibleIds.has(item.id)
+                    const displayName = customNames[item.id] || item.name
+                    return (
+                      <div 
+                        key={item.id}
+                        onClick={() => {
+                          setTempVisibleIds(prev => {
+                            const next = new Set(prev)
+                            if (next.has(item.id)) next.delete(item.id)
+                            else next.add(item.id)
+                            return next
+                          })
+                        }}
+                        className={`flex items-center justify-between p-3 rounded-2xl border text-xs cursor-pointer select-none transition ${
+                          isVisible 
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-gray-900 dark:text-white font-medium' 
+                            : 'bg-gray-50 dark:bg-white/5 border-gray-200 dark:border-white/10 text-gray-400 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 truncate pr-2">
+                          {isVisible ? <CheckSquare className="w-4 h-4 text-emerald-600 flex-shrink-0" /> : <Square className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                          <span className="truncate">{displayName}</span>
+                        </div>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                          isVisible ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-gray-200 dark:bg-white/10 text-gray-500'
+                        }`}>
+                          {isVisible ? 'Đang hiện' : 'Đang ẩn'}
+                        </span>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-100 dark:border-white/10">
+              <button
+                type="button"
+                onClick={() => setIsManageVisibilityOpen(false)}
+                className="px-5 py-2.5 rounded-xl text-xs font-semibold text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10 transition cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveVisibilityChanges}
+                disabled={isSavingVisibility}
+                className="flex items-center gap-1.5 px-6 py-2.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md transition cursor-pointer disabled:opacity-50"
+              >
+                {isSavingVisibility ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                <span>{isSavingVisibility ? 'Đang lưu...' : 'Lưu trạng thái hiển thị'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL THƯ MỤC TỔNG */}
+      {isMasterModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-lg rounded-2xl p-6 shadow-2xl border transition-all ${
+            isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
+          }`}>
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
+              <div className="flex items-center gap-2">
+                <Settings className="w-5 h-5 text-emerald-500" />
+                <h3 className="font-serif font-bold text-base">Quản Lý Các Thư Mục Tổng Drive</h3>
+              </div>
+              <button 
+                onClick={() => setIsMasterModalOpen(false)}
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddMasterFolder} className="mt-4 space-y-3 text-xs bg-gray-50 dark:bg-white/5 p-4 rounded-xl border border-gray-200 dark:border-white/10">
+              <h4 className="font-semibold text-emerald-600 dark:text-emerald-400">Thêm Thư Mục Tổng Mới:</h4>
+              <div>
+                <input 
+                  type="text" 
+                  value={newMasterName}
+                  onChange={(e) => setNewMasterName(e.target.value)}
+                  required
+                  placeholder="Đặt tên Thư Mục Tổng (Ví dụ: ẢNH 2026)"
+                  className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
+                  }`}
+                />
+              </div>
+              <div>
+                <input 
+                  type="text" 
+                  value={newMasterUrl}
+                  onChange={(e) => setNewMasterUrl(e.target.value)}
+                  required
+                  placeholder="Dán link Google Drive: https://drive.google.com/drive/folders/..."
+                  className={`w-full px-3.5 py-2.5 rounded-xl border outline-none transition ${
+                    isDarkMode ? 'bg-white/5 border-white/10 focus:border-emerald-500' : 'bg-gray-50 border-gray-200 focus:bg-white focus:border-emerald-500'
+                  }`}
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition cursor-pointer"
+              >
+                + Thêm Thư Mục Tổng ra Trang Chủ
+              </button>
+            </form>
+
+            <div className="mt-4">
+              <h4 className="text-xs font-semibold mb-2">Các Thư Mục Tổng đang quản lý ({masterFoldersList.length}):</h4>
+              <div className="max-h-48 overflow-y-auto space-y-2">
+                {masterFoldersList.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic py-2 text-center">Chưa có Thư Mục Tổng nào.</p>
+                ) : (
+                  masterFoldersList.map((f) => (
+                    <div key={f.id} className="flex items-center justify-between p-3 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-black/20 text-xs">
+                      <div className="truncate pr-2">
+                        <p className="font-semibold">{f.name}</p>
+                        <p className="text-[10px] text-gray-400 truncate">{f.url}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteMasterFolder(f.id)}
+                        className="p-1.5 text-gray-400 hover:text-red-500 transition cursor-pointer"
+                        title="Xóa Thư Mục Tổng này"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end pt-4 border-t border-gray-100 dark:border-white/10 mt-4">
+              <button
+                type="button"
+                onClick={() => setIsMasterModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-gray-500 hover:bg-gray-600 text-white text-xs font-semibold transition cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KEY PANEL */}
+      {isKeyGenOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4">
+          <div className="bg-white text-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl border border-gray-100 flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between px-5 sm:px-6 py-3.5 sm:py-4 border-b border-gray-100 bg-gray-50/50">
+              <div>
+                <h2 className="text-sm sm:text-base font-bold text-gray-900 tracking-tight">DINH THONG RETOUCH</h2>
+                <p className="text-[11px] sm:text-xs text-gray-500">Quản lý & Cấp mã kích hoạt bản quyền Panel</p>
+              </div>
+              <button
+                onClick={() => setIsKeyGenOpen(false)}
+                className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-all cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Tên khách hàng</label>
+                  <input
+                    type="text"
+                    placeholder="Ví dụ: Trần Đình Thông"
+                    value={customerName}
+                    onChange={(e) => setCustomerName(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 focus:bg-white transition-all text-gray-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Số Seri máy khách</label>
+                  <input
+                    type="text"
+                    placeholder="Dán DT-XXXXXX gửi từ máy khách"
+                    value={serialInput}
+                    onChange={(e) => setSerialInput(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-emerald-600 focus:bg-white transition-all text-gray-900"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5">Thời hạn kích hoạt</label>
+                <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 sm:gap-2">
+                  {durationOptions.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setDuration(opt.value)}
+                      className={`py-1.5 px-1 sm:px-2 text-[10px] sm:text-[11px] font-medium rounded-lg border transition-all cursor-pointer ${
+                        duration === opt.value
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Mã kích hoạt</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    placeholder="Bấm 'Tạo Key' để sinh mã"
+                    value={generatedKey}
+                    className="flex-1 text-xs px-3 py-2 sm:px-3.5 sm:py-2.5 bg-gray-100 text-gray-900 font-mono font-medium border border-gray-200 rounded-lg outline-none"
+                  />
+                  <button
+                    type="button"
+                    disabled={isSavingKey}
+                    onClick={handleGenerateKey}
+                    className="px-3.5 sm:px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all cursor-pointer disabled:opacity-60 flex items-center gap-1.5 flex-shrink-0"
+                  >
+                    {isSavingKey ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                    <span>Tạo Key</span>
+                  </button>
+                  {generatedKey && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(generatedKey)}
+                      className="px-3 py-2 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg border border-gray-200 transition-all cursor-pointer flex-shrink-0"
+                    >
+                      Copy
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-gray-100">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-900">Danh sách máy ({keyRecords.length})</h3>
+                    <p className="text-[10px] text-gray-400 mt-0.5">Tự động tải từ Supabase khi mở Key Panel</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void fetchLicenses()}
+                    disabled={isLoadingKeys}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white text-[10px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-60 cursor-pointer"
+                    title="Tải lại danh sách"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLoadingKeys ? 'animate-spin' : ''}`} />
+                    Làm mới
+                  </button>
+                </div>
+
+                {keyLoadError && (
+                  <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-600">
+                    {keyLoadError}
+                  </div>
+                )}
+
+                <div className="border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                  <div className="max-h-48 overflow-x-auto">
+                    <table className="w-full text-left text-xs min-w-[500px]">
+                      <thead className="bg-gray-50 text-gray-500 font-semibold sticky top-0 border-b border-gray-100">
+                        <tr>
+                          <th className="py-2 px-3">Khách hàng</th>
+                          <th className="py-2 px-3">Seri Máy</th>
+                          <th className="py-2 px-3">Gói</th>
+                          <th className="py-2 px-3">Mã Key</th>
+                          <th className="py-2 px-3 text-right">Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {isLoadingKeys ? (
+                          <tr>
+                            <td colSpan={5} className="py-7 text-center text-gray-400 text-xs">
+                              <span className="inline-flex items-center gap-2">
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                Đang tải danh sách máy...
+                              </span>
+                            </td>
+                          </tr>
+                        ) : keyRecords.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-6 text-center text-gray-400 text-xs">
+                              Chưa có máy nào được tạo key trên hệ thống.
+                            </td>
+                          </tr>
+                        ) : (
+                          keyRecords.map((r) => (
+                            <tr key={r.id} className="hover:bg-gray-50/80 transition-colors">
+                              <td className="py-2 px-3 font-medium text-gray-900">{r.customer_name}</td>
+                              <td className="py-2 px-3 font-mono text-gray-500 text-[11px]">{r.serial}</td>
+                              <td className="py-2 px-3">
+                                <span className={`inline-block px-2 py-0.5 text-[10px] font-semibold rounded-full border ${
+                                  r.status === 'revoked'
+                                    ? 'bg-red-50 text-red-600 border-red-200'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                }`}>
+                                  {r.status === 'revoked' ? 'Đã khóa' : r.duration_label}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 font-mono text-[11px] text-gray-600 truncate max-w-[120px]" title={r.license_key}>
+                                {r.license_key}
+                              </td>
+                              <td className="py-2 px-3 text-right space-x-2">
+                                <button
+                                  onClick={() => handleCopyText(r.license_key)}
+                                  className="text-[11px] text-emerald-600 hover:underline font-medium cursor-pointer"
+                                >
+                                  Copy
+                                </button>
+                                <button
+                                  onClick={() => handleToggleRevoke(r)}
+                                  className={`text-[11px] font-semibold hover:underline cursor-pointer ${
+                                    r.status === 'revoked' ? 'text-emerald-600' : 'text-amber-600'
+                                  }`}
+                                >
+                                  {r.status === 'revoked' ? 'Mở khóa' : 'Khóa'}
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteRecord(r.id)}
+                                  className="text-[11px] text-red-500 hover:underline font-medium cursor-pointer"
+                                >
+                                  Xóa
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      <AppPopupHost popup={popup} onResolve={resolvePopup} />
+
+      {/* Footer */}
+      <footer className={`border-t py-6 sm:py-8 text-xs transition-colors ${
+        isDarkMode ? 'border-white/10 text-gray-500' : 'border-gray-100 text-gray-400'
+      }`}>
+        <div className="max-w-7xl mx-auto px-6 text-center">
+          <p>© 2026 DinhThong Gallery</p>
+        </div>
+      </footer>
+
+    </div>
+  )
+}

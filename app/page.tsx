@@ -1,5 +1,5 @@
-import AdminPage from './admin/page'
+import PublicGalleryPage from './PublicGalleryPage'
 
 export default function HomePage() {
-  return <AdminPage />
+  return <PublicGalleryPage />
 }

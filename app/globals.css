@@ -101,3 +101,44 @@ textarea {
     font-size: 0.68rem;
   }
 }
+
+/* ========================================================
+   DINHTHONG GALLERY - GLOBAL MOBILE SAFETY
+   ======================================================== */
+
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+input,
+textarea,
+select,
+button {
+  max-width: 100%;
+}
+
+@media (max-width: 640px) {
+  body {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  input,
+  textarea,
+  select {
+    min-width: 0;
+  }
+
+  table {
+    font-size: 12px;
+  }
+}
