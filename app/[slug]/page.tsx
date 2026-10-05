@@ -339,7 +339,9 @@ export default function PublicAlbumPage() {
 
           <div className="flex items-center gap-2">
             <Images className="h-3.5 w-3.5" />
-            {images.length} ảnh
+            {images.length > 0
+              ? `${images.length} ảnh`
+              : 'Đang cập nhật'}
           </div>
         </div>
 
@@ -377,11 +379,11 @@ export default function PublicAlbumPage() {
               <Images className="mx-auto h-8 w-8 opacity-25" />
 
               <h2 className="mt-4 font-serif text-2xl">
-                Chưa có ảnh Public
+                Vui lòng chờ
               </h2>
 
               <p className="mt-2 text-xs opacity-45">
-                Chưa có ảnh nào trong Drive được cho phép hiển thị.
+                Album đang được cập nhật hình ảnh.
               </p>
             </div>
           </div>
