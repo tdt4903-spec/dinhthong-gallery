@@ -3806,14 +3806,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </h2>
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="flex min-w-0 gap-2.5 overflow-x-auto pb-2 overscroll-x-contain">
 
                 <button
                   type="button"
                   onClick={() =>
                     router.push('/dashboardsp')
                   }
-                  className={`admin-tool-card ${
+                  className={`admin-tool-card min-w-[155px] shrink-0 ${
                     isDarkMode
                       ? 'admin-tool-dark'
                       : 'admin-tool-light'
@@ -3826,7 +3826,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <button
                   type="button"
                   onClick={() => router.push('/money')}
-                  className={`admin-tool-card ${
+                  className={`admin-tool-card min-w-[155px] shrink-0 ${
                     isDarkMode
                       ? 'admin-tool-dark'
                       : 'admin-tool-light'
@@ -3839,7 +3839,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <button
                   type="button"
                   onClick={() => setIsKeyGenOpen(true)}
-                  className={`admin-tool-card ${
+                  className={`admin-tool-card min-w-[155px] shrink-0 ${
                     isDarkMode
                       ? 'admin-tool-dark'
                       : 'admin-tool-light'
@@ -3852,7 +3852,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(true)}
-                  className={`admin-tool-card ${
+                  className={`admin-tool-card min-w-[155px] shrink-0 ${
                     isDarkMode
                       ? 'admin-tool-dark'
                       : 'admin-tool-light'
@@ -3868,7 +3868,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     checkAllMasterFolders(masterFoldersList, true)
                   }
                   disabled={isSyncing}
-                  className={`admin-tool-card ${
+                  className={`admin-tool-card min-w-[155px] shrink-0 ${
                     isDarkMode
                       ? 'admin-tool-dark'
                       : 'admin-tool-light'
@@ -3885,7 +3885,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <button
                   type="button"
                   onClick={() => setIsMasterModalOpen(true)}
-                  className={`admin-tool-card ${
+                  className={`admin-tool-card min-w-[155px] shrink-0 ${
                     isDarkMode
                       ? 'admin-tool-dark'
                       : 'admin-tool-light'
@@ -3898,7 +3898,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <button
                   type="button"
                   onClick={handleCleanHomePage}
-                  className={`admin-tool-card ${
+                  className={`admin-tool-card min-w-[155px] shrink-0 ${
                     isDarkMode
                       ? 'admin-tool-dark'
                       : 'admin-tool-light'
@@ -3914,7 +3914,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     fetchNotifications()
                     setIsNotificationOpen(true)
                   }}
-                  className={`admin-tool-card ${
+                  className={`admin-tool-card min-w-[155px] shrink-0 ${
                     isDarkMode
                       ? 'admin-tool-dark'
                       : 'admin-tool-light'

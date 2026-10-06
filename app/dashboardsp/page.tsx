@@ -944,7 +944,82 @@ export default function CustomerProductsDashboard() {
           </header>
 
           <div className="p-4 sm:p-6">
-            <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+            <nav
+            className={`sticky top-[66px] z-30 border-b lg:hidden ${
+              isDarkMode
+                ? 'border-white/10 bg-[#071710]/95'
+                : 'border-black/[0.07] bg-[#fbfdf9]/95'
+            } backdrop-blur-xl`}
+          >
+            <div className="overflow-x-auto">
+              <div className="flex w-max min-w-full items-center gap-2 px-3 py-2 whitespace-nowrap">
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter('all')}
+                  className={`shrink-0 rounded-xl border px-3 py-2 text-[10px] font-semibold ${
+                    categoryFilter === 'all'
+                      ? isDarkMode
+                        ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+                        : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700'
+                      : 'border-current/10'
+                  }`}
+                >
+                  Tất cả album
+                </button>
+
+                {categories.map((category) => (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setCategoryFilter(category.id)}
+                    className={`shrink-0 rounded-xl border px-3 py-2 text-[10px] font-semibold ${
+                      categoryFilter === category.id
+                        ? isDarkMode
+                          ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+                          : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700'
+                        : 'border-current/10'
+                    }`}
+                  >
+                    {category.name}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => setShowCategoryForm(true)}
+                  className="shrink-0 rounded-xl border border-dashed border-current/15 px-3 py-2 text-[10px] font-semibold opacity-70"
+                >
+                  + Danh mục
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push('/dashboardadmin')}
+                  className="shrink-0 rounded-xl border border-current/10 px-3 py-2 text-[10px] font-semibold"
+                >
+                  Gallery
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push('/dashboardsp/booking')}
+                  className="shrink-0 rounded-xl border border-current/10 px-3 py-2 text-[10px] font-semibold"
+                >
+                  Booking
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => window.open('/', '_blank', 'noopener,noreferrer')}
+                  className="shrink-0 rounded-xl bg-emerald-500 px-3 py-2 text-[10px] font-bold text-white"
+                >
+                  Web Public
+                </button>
+              </div>
+            </div>
+          </nav>
+
+          <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
               <Stat
                 title="Tổng album"
                 value={albums.length}

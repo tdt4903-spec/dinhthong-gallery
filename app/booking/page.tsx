@@ -1250,6 +1250,7 @@ export default function BookingPage() {
               <InputField
                 title="Email"
                 value={form.email}
+                required
                 dark={isDarkMode}
                 setValue={value =>
                   setForm({
