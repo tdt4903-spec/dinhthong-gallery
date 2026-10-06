@@ -227,7 +227,6 @@ export async function POST(
       const adminEmail =
         String(
           settings?.admin_notification_email ||
-          process.env.GMAIL_USER ||
           ''
         ).trim()
 
@@ -257,31 +256,26 @@ export async function POST(
           `Thông báo khách hàng ${booking.full_name} đã đặt lịch`,
 
         html: `
-          <div
-            style="
-              font-family:Arial,sans-serif;
-              max-width:620px;
-              margin:0 auto;
-              padding:24px;
-              color:#202020;
-              line-height:1.7;
-            "
-          >
-            <h2>
-              Thông báo Booking mới
+          <div style="
+            font-family:Arial,sans-serif;
+            max-width:620px;
+            margin:auto;
+            line-height:1.7;
+            color:#222;
+          ">
+            <h2 style="margin-bottom:20px">
+              Booking mới
             </h2>
 
             <p>
-              Khách hàng
-              <strong>
-                ${esc(booking.full_name)}
-              </strong>
+              Thông báo khách hàng
+              <b>${esc(booking.full_name)}</b>
               đã đặt lịch.
             </p>
 
             <p>
               Vui lòng mở Dashboard Booking
-              để kiểm tra.
+              để kiểm tra và xử lý.
             </p>
 
             <p style="margin-top:28px">
@@ -289,10 +283,10 @@ export async function POST(
                 href="${site}/dashboardsp/booking"
                 style="
                   display:inline-block;
+                  background:#07865f;
+                  color:#fff;
                   padding:12px 18px;
-                  background:#08775b;
-                  color:#ffffff;
-                  border-radius:9px;
+                  border-radius:8px;
                   text-decoration:none;
                   font-weight:600;
                 "

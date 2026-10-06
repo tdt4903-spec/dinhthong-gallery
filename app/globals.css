@@ -142,3 +142,252 @@ button {
     font-size: 12px;
   }
 }
+
+/* ===== DINHTHONG MOBILE RESPONSIVE START ===== */
+
+/* ------------------------------------------------
+   BASE
+------------------------------------------------ */
+
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
+}
+
+
+/* ------------------------------------------------
+   MOBILE
+------------------------------------------------ */
+
+@media (max-width: 767px) {
+
+  html {
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
+
+  main,
+  header,
+  footer,
+  section,
+  nav {
+    max-width: 100%;
+  }
+
+  /*
+   * Ngăn nội dung dài đẩy layout ra ngoài màn hình.
+   */
+  p,
+  span,
+  div,
+  a,
+  button,
+  h1,
+  h2,
+  h3,
+  h4 {
+    overflow-wrap: anywhere;
+  }
+
+
+  /* ------------------------------------------------
+     INPUT
+     Font 16px tránh Safari iPhone tự zoom.
+  ------------------------------------------------ */
+
+  input,
+  textarea,
+  select {
+    max-width: 100%;
+    font-size: 16px !important;
+  }
+
+
+  /* ------------------------------------------------
+     MEDIA
+  ------------------------------------------------ */
+
+  img,
+  video,
+  canvas {
+    max-width: 100%;
+    height: auto;
+  }
+
+
+  /* ------------------------------------------------
+     HORIZONTAL SCROLL
+  ------------------------------------------------ */
+
+  .overflow-x-auto,
+  .overflow-x-scroll,
+  .scrollbar-none {
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin !important;
+    scrollbar-gutter: stable;
+  }
+
+
+  /*
+   * Trước đây scrollbar-none đang display:none.
+   * Trên điện thoại cho hiển thị lại.
+  ------------------------------------------------ */
+
+  .scrollbar-none {
+    -ms-overflow-style: auto !important;
+    scrollbar-width: thin !important;
+  }
+
+  .scrollbar-none::-webkit-scrollbar,
+  .overflow-x-auto::-webkit-scrollbar,
+  .overflow-x-scroll::-webkit-scrollbar {
+    display: block !important;
+    height: 5px;
+  }
+
+  .scrollbar-none::-webkit-scrollbar-track,
+  .overflow-x-auto::-webkit-scrollbar-track,
+  .overflow-x-scroll::-webkit-scrollbar-track {
+    background: rgba(128, 128, 128, 0.10);
+    border-radius: 999px;
+  }
+
+  .scrollbar-none::-webkit-scrollbar-thumb,
+  .overflow-x-auto::-webkit-scrollbar-thumb,
+  .overflow-x-scroll::-webkit-scrollbar-thumb {
+    background: rgba(128, 128, 128, 0.42);
+    border-radius: 999px;
+  }
+
+
+  /* ------------------------------------------------
+     TABLE
+     Dashboard/table không phá chiều ngang màn hình.
+  ------------------------------------------------ */
+
+  table {
+    max-width: 100%;
+  }
+
+  .mobile-table-scroll,
+  [data-mobile-scroll="true"] {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+
+  /* ------------------------------------------------
+     BUTTON
+     vùng bấm đủ lớn trên điện thoại
+  ------------------------------------------------ */
+
+  button,
+  [role="button"] {
+    min-height: 40px;
+  }
+
+
+  /* ------------------------------------------------
+     MODAL
+  ------------------------------------------------ */
+
+  [role="dialog"] {
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+
+  /* ------------------------------------------------
+     FIXED / FULLSCREEN
+     dùng dvh tốt hơn 100vh trên Safari iPhone
+  ------------------------------------------------ */
+
+  .min-h-screen {
+    min-height: 100dvh;
+  }
+
+  .h-screen {
+    height: 100dvh;
+  }
+
+
+  /* ------------------------------------------------
+     IOS SAFE AREA
+  ------------------------------------------------ */
+
+  .mobile-safe-bottom {
+    padding-bottom:
+      max(
+        12px,
+        env(safe-area-inset-bottom)
+      );
+  }
+
+  .mobile-safe-top {
+    padding-top:
+      max(
+        12px,
+        env(safe-area-inset-top)
+      );
+  }
+
+
+  /* ------------------------------------------------
+     CARD / FORM
+  ------------------------------------------------ */
+
+  .mobile-full {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .mobile-scroll-x {
+    display: flex;
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .mobile-scroll-x > * {
+    flex: 0 0 auto;
+  }
+}
+
+/* ===== DINHTHONG MOBILE RESPONSIVE END ===== */
+
