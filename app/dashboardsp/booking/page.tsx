@@ -884,6 +884,179 @@ export default function DashboardBooking() {
           : 'bg-[#f5f7f3] text-[#202520]'
       }`}
     >
+        <input
+          id="booking-mobile-sidebar"
+          type="checkbox"
+          className="peer sr-only lg:hidden"
+        />
+
+        <label
+          htmlFor="booking-mobile-sidebar"
+          aria-label="Mở menu quản trị"
+          className="fixed left-3 top-3 z-[140] inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl border border-black/10 bg-white/95 text-[#315449] shadow-lg backdrop-blur-md peer-checked:hidden lg:hidden"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          >
+            <path d="M4 6h16" />
+            <path d="M4 12h16" />
+            <path d="M4 18h16" />
+          </svg>
+        </label>
+
+        <aside
+          className={`fixed inset-y-0 left-0 z-[130] hidden w-[300px] max-w-[88vw]
+            overflow-y-auto border-r shadow-2xl peer-checked:flex lg:hidden ${
+              isDarkMode
+                ? 'border-white/10 bg-[#071710] text-white'
+                : 'border-black/[0.07] bg-[#fbfdf9] text-[#52675f]'
+            }`}
+        >
+          <div className="relative flex min-h-full w-full flex-col">
+
+            <label
+              htmlFor="booking-mobile-sidebar"
+              aria-label="Đóng menu quản trị"
+              className={`absolute right-3 top-3 z-20 inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border shadow-sm backdrop-blur-md ${
+                isDarkMode
+                  ? 'border-white/10 bg-white/5 text-white'
+                  : 'border-black/10 bg-white/90 text-[#315449]'
+              }`}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M6 6l12 12" />
+                <path d="M18 6L6 18" />
+              </svg>
+            </label>
+
+            <div className={`flex h-[66px] shrink-0 items-center border-b px-5 ${
+              isDarkMode
+                ? 'border-white/10'
+                : 'border-black/[0.07]'
+            }`}>
+              <div className="rounded-2xl bg-emerald-500 p-3 text-white">
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 8h14l1 12H4L5 8Z" />
+                  <path d="M8 8a4 4 0 0 1 8 0" />
+                </svg>
+              </div>
+
+              <div className="ml-3">
+                <div className="font-serif text-lg font-semibold">
+                  DinhThong Gallery
+                </div>
+                <div className="text-[8px] uppercase tracking-[0.28em] opacity-40">
+                  Admin Workspace
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4">
+
+              <div className="mb-3 text-[9px] font-bold uppercase tracking-[0.2em] opacity-35">
+                Điều hướng
+              </div>
+
+              <a
+                href="/dashboardadmin"
+                className="mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold"
+              >
+                <span className="text-emerald-500">⌂</span>
+                Trang chủ
+              </a>
+
+              <a
+                href="/dashboardadmin"
+                className="mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold"
+              >
+                <span className="text-emerald-500">♧</span>
+                Khách chọn
+              </a>
+
+              <div className="mb-3 mt-6 text-[9px] font-bold uppercase tracking-[0.2em] opacity-35">
+                Sản phẩm khách hàng
+              </div>
+
+              <a
+                href="/dashboardsp"
+                className={`mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold ${
+                  isDarkMode ? 'bg-white/5' : 'bg-black/[0.035]'
+                }`}
+              >
+                <span className="text-cyan-500">▣</span>
+                Dashboard sản phẩm
+              </a>
+
+              <a
+                href="/dashboardsp/booking"
+                className="mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold"
+              >
+                <span className="text-cyan-500">▣</span>
+                Dashboard Booking
+              </a>
+
+              <a
+                href="/"
+                target="_blank"
+                rel="noreferrer"
+                className="mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold"
+              >
+                <span className="text-emerald-500">◉</span>
+                Web Publish
+              </a>
+
+              <div className="mb-3 mt-6 text-[9px] font-bold uppercase tracking-[0.2em] opacity-35">
+                Công cụ
+              </div>
+
+              <a
+                href="/money"
+                className="mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold"
+              >
+                <span className="text-emerald-500">▣</span>
+                Thu Chi
+              </a>
+
+              <div className={`mt-6 rounded-2xl border p-3 text-[10px] leading-5 opacity-55 ${
+                isDarkMode
+                  ? 'border-white/10'
+                  : 'border-black/[0.07]'
+              }`}>
+                Dashboard Booking
+                <br />
+                Quản lý lịch, booking và xác nhận khách hàng.
+              </div>
+
+            </div>
+          </div>
+        </aside>
+
+        <label
+          htmlFor="booking-mobile-sidebar"
+          aria-label="Đóng menu quản trị"
+          className="fixed inset-0 z-[120] hidden bg-black/45 backdrop-blur-[1px] peer-checked:block lg:hidden"
+        />
+
 
       <header
         className={`sticky top-0 z-40 border-b ${

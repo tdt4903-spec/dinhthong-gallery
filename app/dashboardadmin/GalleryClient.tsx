@@ -3476,13 +3476,56 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             </section>
 
             {/* SIDEBAR QUẢN TRỊ DESKTOP */}
-            <aside
+            
+            <input
+              id="admin-mobile-sidebar"
+              type="checkbox"
+              className="peer sr-only lg:hidden"
+            />
+
+            <label
+              htmlFor="admin-mobile-sidebar"
+              aria-label="Mở menu quản trị"
+              className="fixed left-3 top-3 z-[140] inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl border border-black/10 bg-white/95 text-[#315449] shadow-lg backdrop-blur-md peer-checked:hidden lg:hidden"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M4 6h16" />
+                <path d="M4 12h16" />
+                <path d="M4 18h16" />
+              </svg>
+            </label>
+<aside
               className={`fixed left-0 top-0 z-[80] hidden h-screen w-[252px] flex-col border-r lg:flex ${
                 isDarkMode
                   ? 'border-white/10 bg-[#07140e] text-white'
                   : 'border-emerald-950/10 bg-[#f8faf7] text-[#153426]'
               }`}
             >
+              <label
+                htmlFor="admin-mobile-sidebar"
+                aria-label="Đóng menu quản trị"
+                className="absolute right-3 top-3 z-20 inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-black/10 bg-white/90 text-[#315449] shadow-sm backdrop-blur-md lg:hidden"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                >
+                  <path d="M6 6l12 12" />
+                  <path d="M18 6L6 18" />
+                </svg>
+              </label>
+
               {/* BRAND */}
               <div
                 className={`flex h-[66px] items-center border-b px-4 py-0 ${
@@ -3790,10 +3833,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
 
             </aside>
+            <label
+              htmlFor="admin-mobile-sidebar"
+              aria-label="Đóng menu quản trị"
+              className="fixed inset-0 z-[120] hidden bg-black/45 backdrop-blur-[1px] peer-checked:block lg:hidden"
+            />
+
 
             {/* MOBILE: CÔNG CỤ QUẢN TRỊ */}
             <section
-              className={`rounded-[26px] border p-4 lg:hidden ${
+              className={`rounded-[26px] border p-4 hidden ${
                 isDarkMode
                   ? 'border-white/10 bg-[#0b1711]/72'
                   : 'border-emerald-950/8 bg-white/80 shadow-sm'
