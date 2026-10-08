@@ -171,16 +171,22 @@ export async function GET(request: NextRequest) {
 
   try {
     const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`)
-    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,mimeType,resourceKey)&pageSize=1000&orderBy=folder,name&key=${apiKey}`
+    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=nextPageToken,files(id,name,mimeType,resourceKey)&pageSize=1000&orderBy=folder,name&key=${apiKey}`
+    const rawFiles: { id: string; name: string; mimeType: string; resourceKey?: string }[] = []
+    let pageToken = ''
 
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) {
-      const err = await res.json()
-      throw new Error(err.error?.message || 'Drive API Error')
-    }
+    do {
+      const pageUrl = pageToken ? `${url}&pageToken=${encodeURIComponent(pageToken)}` : url
+      const res = await fetch(pageUrl, { cache: 'no-store' })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error?.message || 'Drive API Error')
+      }
 
-    const data = await res.json()
-    const rawFiles = data.files || []
+      const data = await res.json()
+      rawFiles.push(...(Array.isArray(data.files) ? data.files : []))
+      pageToken = data.nextPageToken || ''
+    } while (pageToken)
 
     // Quét song song lấy ảnh đầu tiên làm cover cho các thư mục con có ảnh
     const files = await Promise.all(rawFiles.map(async (f: any) => {

@@ -1011,6 +1011,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const totalPages = Math.ceil(filteredMediaFiles.length / itemsPerPage)
   const paginatedImages = filteredMediaFiles.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+  const displayedImages = isSharedGuest ? paginatedImages : filteredMediaFiles
   const previewSourceList = filteredMediaFiles
   const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
 
@@ -3405,7 +3406,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
             </section>
 
-            {/* BỘ SƯU TẬP — dạng cinematic horizontal cards, không có mục Album gần đây */}
+            {/* BỘ SƯU TẬP */}
             <section id="all-albums" className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#0b1711]/72' : 'border-emerald-950/8 bg-white/80 shadow-sm'}`}>
               <div className="mb-4 flex items-end justify-between gap-3">
                 <div>
@@ -3414,7 +3415,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     <h2 className="font-serif text-xl sm:text-2xl font-semibold">Bộ sưu tập nổi bật</h2>
                   </div>
                   <p className={`mt-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/40' : 'text-gray-400'}`}>
-                    Mỗi album là một câu chuyện riêng — kéo ngang để xem toàn bộ.
+                    Mỗi album là một câu chuyện riêng — chọn album để xem ảnh.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -3437,34 +3438,33 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
 
               {featuredAdminAlbums.length > 0 ? (
-                <div className="flex gap-3.5 overflow-x-auto pb-2 snap-x snap-mandatory scrollbar-none">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
                   {featuredAdminAlbums.map((album) => {
                     const coverImage = album.coverUrl || (albumCovers[album.id] !== 'NO_IMAGE' ? albumCovers[album.id] : '')
                     const isChecked = selectedAlbumIds.has(album.id)
                     const isThisZipping = zippingFolderId === album.id
                     return (
-                      <article key={album.id} className={`group w-[230px] sm:w-[260px] lg:w-[285px] shrink-0 snap-start overflow-hidden rounded-2xl border transition hover:-translate-y-0.5 hover:shadow-2xl ${isChecked ? 'ring-2 ring-emerald-500' : ''} ${isDarkMode ? 'border-white/10 bg-[#0e2017]' : 'border-gray-200 bg-white'}`}>
+                      <article key={album.id} className={`group min-w-0 overflow-hidden rounded-xl border transition hover:-translate-y-0.5 hover:shadow-lg ${isChecked ? 'ring-2 ring-emerald-500' : ''} ${isDarkMode ? 'border-white/10 bg-[#0e2017]' : 'border-gray-200 bg-white'}`}>
                         <div onClick={() => handleOpenAlbum(album)} className="relative aspect-[16/10] cursor-pointer overflow-hidden">
                           {coverImage ? (
-                            <img src={coverImage.replace(/=w\d+.*$/, '=w800-h520-p-k-no')} alt={album.title} loading="lazy" className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]" />
+                            <img src={coverImage.replace(/=w\d+.*$/, '=w800-h520-p-k-no')} alt={album.title} loading="lazy" style={{ height: '100%' }} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]" />
                           ) : (
-                            <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-white/5' : 'bg-[#f3f6f2]'}`}><CustomFolderGraphic className="h-24 w-24" /></div>
+                            <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-white/5' : 'bg-[#f3f6f2]'}`}><CustomFolderGraphic className="h-12 w-12" /></div>
                           )}
                           <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/8 to-black/10" />
-                          <button type="button" onClick={(e) => handleToggleSelectAlbum(album.id, e)} className={`absolute left-2.5 top-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-xl border backdrop-blur-md transition ${isChecked ? 'border-emerald-300/60 bg-emerald-600 text-white' : 'border-white/25 bg-black/35 text-white'}`} title={isChecked ? 'Bỏ chọn album' : 'Chọn album'}>
+                          <button type="button" onClick={(e) => handleToggleSelectAlbum(album.id, e)} className={`absolute left-1.5 top-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-lg border backdrop-blur-md transition ${isChecked ? 'border-emerald-300/60 bg-emerald-600 text-white' : 'border-white/25 bg-black/35 text-white'}`} title={isChecked ? 'Bỏ chọn album' : 'Chọn album'}>
                             {isChecked ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
                           </button>
-                          <button type="button" onClick={(e) => handleDeleteAlbum(album.id, e)} className="absolute right-2.5 top-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-xl border border-white/20 bg-black/35 text-white/70 backdrop-blur-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-300" title="Xóa album"><Trash2 className="h-4 w-4" /></button>
-                          <div className="absolute inset-x-0 bottom-0 p-3.5 text-white">
-                            <h3 className="truncate font-semibold text-sm">{customNames[album.id] || album.title}</h3>
-                            <div className="mt-1 flex items-center justify-between gap-2 text-[9px] text-white/68">
-                              <span>DinhThong Gallery</span>
-                              <button type="button" onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)} disabled={Boolean(zippingFolderId)} className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/30 px-2 py-1 text-white/85 backdrop-blur-md disabled:opacity-50">
+                          <button type="button" onClick={(e) => handleDeleteAlbum(album.id, e)} className="absolute right-1.5 top-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-lg border border-white/20 bg-black/35 text-white/70 backdrop-blur-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-300" title="Xóa album"><Trash2 className="h-4 w-4" /></button>
+                        </div>
+                          <div className={`p-2 ${isDarkMode ? 'text-white' : 'text-[#153326]'}`}>
+                            <h3 onClick={() => handleOpenAlbum(album)} className="cursor-pointer truncate font-semibold text-[11px]" title={customNames[album.id] || album.title}>{customNames[album.id] || album.title}</h3>
+                            <div className="mt-1 flex justify-end text-[9px]">
+                              <button type="button" onClick={(e) => handleDownloadAlbumZip({ id: album.id, title: customNames[album.id] || album.title, driveUrl: album.driveUrl }, e)} disabled={Boolean(zippingFolderId)} className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 disabled:opacity-50 ${isDarkMode ? 'border-white/15 bg-white/5 text-white/85' : 'border-emerald-900/10 bg-emerald-50 text-emerald-700'}`}>
                                 {isThisZipping ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}{isThisZipping ? 'Đợi...' : 'Tải'}
                               </button>
                             </div>
                           </div>
-                        </div>
                       </article>
                     )
                   })}
@@ -4238,7 +4238,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     </div>
                   </div>
 
-                  {welcomeMessage && (
+                  {isSharedGuest && welcomeMessage && (
                     <div className={`sm:max-w-[280px] sm:text-right rounded-2xl border px-3.5 py-3 backdrop-blur-xl ${isDarkMode ? 'border-white/8 bg-black/15' : 'border-white/70 bg-white/55'}`}>
                       <div className={`text-sm sm:text-base font-semibold ${isDarkMode ? 'text-white' : 'text-[#153326]'}`}>{welcomeMessage}</div>
                       <div className={`mt-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/45' : 'text-gray-500'}`}>Cảm ơn bạn đã xem album này!</div>
@@ -4283,10 +4283,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       className={`h-9 w-full rounded-xl border pl-9 pr-3 text-[11px] outline-none transition ${isDarkMode ? 'border-white/10 bg-white/5 text-white placeholder:text-white/30 focus:border-emerald-500' : 'border-gray-200 bg-gray-50 text-gray-900 focus:border-emerald-500'}`}
                     />
                   </div>
-                  <div className={`hidden sm:flex items-center gap-1 rounded-xl border p-1 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-50'}`}>
+                  {isSharedGuest && <div className={`hidden sm:flex items-center gap-1 rounded-xl border p-1 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-50'}`}>
                     <button type="button" onClick={() => setGridDensity('comfortable')} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${gridDensity === 'comfortable' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-emerald-500'}`} title="Ảnh lớn"><ImageIcon className="h-3.5 w-3.5" /></button>
                     <button type="button" onClick={() => setGridDensity('compact')} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${gridDensity === 'compact' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-emerald-500'}`} title="Ảnh nhỏ"><Square className="h-3.5 w-3.5" /></button>
-                  </div>
+                  </div>}
                   <button
                     onClick={() => setIsAdminPanelOpen(true)}
                     className="hidden sm:inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-[11px] font-bold text-white hover:bg-emerald-700"
@@ -4363,7 +4363,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       </h3>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+                    <div className={`grid ${isSharedGuest ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5' : 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2'}`}>
                       {subFolders
                         .filter(f => f.name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map((folder) => {
@@ -4387,7 +4387,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                             >
                               <div 
                                 onClick={() => handleOpenSubFolder(folder)}
-                                className="h-44 sm:h-52 bg-gray-50 dark:bg-[#12141a] relative cursor-pointer overflow-hidden flex items-center justify-center"
+                                className={`${isSharedGuest ? 'h-44 sm:h-52' : 'aspect-[16/10]'} bg-gray-50 dark:bg-[#12141a] relative cursor-pointer overflow-hidden flex items-center justify-center`}
                               >
                                 {hasCover ? (
                                   <img 
@@ -4395,6 +4395,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                     alt={displayName} 
                                     loading="lazy"
                                     decoding="async"
+                                    style={!isSharedGuest ? { height: '100%' } : undefined}
                                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                     onError={(e) => {
                                       (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${folder.id}=w400-h400-p-k-no`
@@ -4402,7 +4403,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   />
                                 ) : (
                                   <div className="flex items-center justify-center w-full h-full group-hover:scale-105 transition-transform duration-300">
-                                    <CustomFolderGraphic className="w-24 h-24 sm:w-28 sm:h-28" />
+                                    <CustomFolderGraphic className={isSharedGuest ? 'w-24 h-24 sm:w-28 sm:h-28' : 'w-12 h-12'} />
                                   </div>
                                 )}
 
@@ -4427,7 +4428,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                 )}
                               </div>
 
-                              <div className="p-3.5 flex items-center justify-between gap-2">
+                              <div className={`flex gap-2 ${isSharedGuest ? 'p-3.5 items-center justify-between' : 'p-2 flex-col items-stretch'}`}>
                                 <div onClick={() => handleOpenSubFolder(folder)} className="cursor-pointer truncate flex-1">
                                   <h4 className="font-semibold text-xs sm:text-sm hover:text-emerald-600 transition-colors truncate" title={displayName}>
                                     {displayName}
@@ -4437,7 +4438,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   </p>
                                 </div>
 
-                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                <div className={`flex items-center gap-1.5 flex-shrink-0 ${!isSharedGuest ? 'flex-wrap justify-end' : ''}`}>
                                   {!isSharedGuest && (
                                     <button
                                       type="button"
@@ -4492,8 +4493,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       </div>
                     )}
 
-                    <div className={`grid gap-2.5 sm:gap-3 ${gridDensity === 'compact' ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}`}>
-                      {paginatedImages
+                    <div className={`grid gap-2.5 sm:gap-3 ${!isSharedGuest ? 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8' : gridDensity === 'compact' ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}`}>
+                      {displayedImages
                         .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map((item) => {
                           const currentStar = displayRatings[item.id] || 0
@@ -4521,6 +4522,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                       src={`https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`}
                                       alt={displayName}
                                       loading="lazy"
+                                      style={!isSharedGuest ? { height: '100%' } : undefined}
                                       className="w-full h-full object-cover opacity-70 group-hover:scale-105 transition-transform duration-200"
                                       onError={(e) => {
                                         (e.target as HTMLImageElement).style.display = 'none'
@@ -4542,6 +4544,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                       alt={displayName} 
                                       loading="lazy"
                                       decoding="async"
+                                      style={!isSharedGuest ? { height: '100%' } : undefined}
                                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200 pointer-events-none"
                                       onError={(e) => {
                                         (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}=w360`
@@ -4598,7 +4601,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                               </div>
 
                               <div className={`px-2 py-2 sm:px-2.5 sm:py-2.5 border-t ${isDarkMode ? 'border-white/8 bg-[#0d1712]' : 'border-gray-100 bg-white'}`}>
-                                <div className="flex items-center justify-between gap-1">
+                                <div className={`flex items-center justify-between gap-1 ${!isSharedGuest ? 'flex-wrap' : ''}`}>
                                   <div className="flex min-w-0 items-center gap-0 sm:gap-0.5">
                                     {[1,2,3,4,5].map((star) => (
                                       <button
@@ -4633,7 +4636,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                         })}
                     </div>
 
-                    {totalPages > 1 && (
+                    {isSharedGuest && totalPages > 1 && (
                       <div className="flex items-center justify-center gap-2 mt-8 sm:mt-10">
                         <button
                           onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
