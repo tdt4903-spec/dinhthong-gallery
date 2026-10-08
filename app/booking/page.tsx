@@ -192,7 +192,6 @@ export default function BookingPage() {
       phone: '',
       email: '',
       zalo: '',
-      customer_address: '',
 
       event_date: '',
       location: '',
@@ -531,7 +530,7 @@ export default function BookingPage() {
 
     if (!form.location.trim()) {
       setErrorText(
-        'Vui lòng nhập địa điểm.'
+        'Vui lòng nhập địa chỉ liên hệ.'
       )
       return
     }
@@ -631,10 +630,6 @@ export default function BookingPage() {
 
             zalo:
               form.zalo.trim(),
-
-            customer_address:
-              form.customer_address
-                .trim(),
 
             service_type_id:
               selectedServiceId,
@@ -1102,7 +1097,7 @@ export default function BookingPage() {
               <div>
 
                 <Label>
-                  Địa điểm
+                  Địa chỉ liên hệ
                   <Required />
                 </Label>
 
@@ -1122,7 +1117,7 @@ export default function BookingPage() {
                           e.target.value,
                       })
                     }
-                    placeholder="Ví dụ: Hà Tĩnh"
+                    placeholder="Số nhà, đường, xã/phường, quận/huyện..."
                     className={`${inputClass(
                       isDarkMode
                     )} pl-9`}
@@ -1260,26 +1255,6 @@ export default function BookingPage() {
                   })
                 }
               />
-
-
-              <div className="sm:col-span-2">
-
-                <InputField
-                  title="Địa chỉ khách hàng"
-                  value={
-                    form.customer_address
-                  }
-                  dark={isDarkMode}
-                  setValue={value =>
-                    setForm({
-                      ...form,
-                      customer_address:
-                        value,
-                    })
-                  }
-                />
-
-              </div>
 
             </div>
 
@@ -1630,7 +1605,7 @@ export default function BookingPage() {
 
 
               <Summary
-                label="Địa điểm"
+                label="Địa chỉ liên hệ"
                 value={
                   form.location ||
                   'Chưa nhập'

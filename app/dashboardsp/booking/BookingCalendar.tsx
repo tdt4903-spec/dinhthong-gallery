@@ -402,7 +402,7 @@ export default function BookingCalendar({
                         key={
                           index
                         }
-                        className={`h-[74px] border-r border-t border-black/10 last:border-r-0 dark:border-white/10 sm:h-[82px] xl:h-[88px] ${
+                        className={`h-[94px] border-r border-t border-black/10 last:border-r-0 dark:border-white/10 sm:h-[82px] xl:h-[88px] ${
                           isDarkMode
                             ? 'bg-black/10'
                             : 'bg-[#fafbf9]'
@@ -437,7 +437,7 @@ export default function BookingCalendar({
                   return (
                     <div
                       key={key}
-                      className={`relative h-[74px] overflow-hidden border-r border-t border-black/10 p-1 last:border-r-0 dark:border-white/10 sm:h-[82px] sm:p-1.5 xl:h-[88px] xl:p-2 ${
+                      className={`relative h-[94px] overflow-hidden border-r border-t border-black/10 p-1 last:border-r-0 dark:border-white/10 sm:h-[82px] sm:p-1.5 xl:h-[88px] xl:p-2 ${
                         isDarkMode
                           ? 'bg-[#0b2119]'
                           : 'bg-white'
@@ -483,6 +483,7 @@ export default function BookingCalendar({
                               >
                                 <div
                                   className="truncate text-[7px] font-bold sm:text-[9px] xl:text-[10px]"
+                                  title={booking.full_name || 'Khách hàng'}
                                 >
                                   {
                                     booking.full_name ||
@@ -491,21 +492,18 @@ export default function BookingCalendar({
                                 </div>
 
                                 <div
-                                  className="hidden truncate text-[8px] opacity-80 sm:block xl:text-[9px]"
+                                  className="truncate text-[7px] opacity-80 sm:text-[8px] xl:text-[9px]"
+                                  title={booking.service_name || 'Booking'}
                                 >
                                   {
                                     booking.service_name ||
                                     'Booking'
                                   }
-                                  {
-                                    booking.package_name
-                                      ? ` · ${booking.package_name}`
-                                      : ''
-                                  }
                                 </div>
 
                                 <div
-                                  className="hidden text-[8px] font-semibold uppercase tracking-wide opacity-75 xl:block"
+                                  className="truncate text-[7px] font-semibold uppercase tracking-wide opacity-75 sm:text-[8px]"
+                                  title={status.text}
                                 >
                                   {
                                     status.text
