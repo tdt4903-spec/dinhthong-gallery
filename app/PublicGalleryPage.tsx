@@ -253,7 +253,7 @@ export default function AlbumPublicPage() {
           />
 
           <div className="relative z-10 flex h-full items-end p-6 sm:p-12 lg:p-16">
-            <div className="max-w-[820px] text-white">
+            <div className="w-full min-w-0 max-w-[820px] text-white">
 
               <div className="text-[9px] font-bold uppercase tracking-[0.32em] text-white/60">
                 Dinh Thong Gallery
@@ -269,12 +269,12 @@ export default function AlbumPublicPage() {
                 </div>
               </div>
 
-              <div className="mt-6 max-w-[760px] text-[10px] font-medium uppercase leading-7 tracking-[0.1em] text-white/70 sm:text-[11px] lg:text-xs">
-                <div className="whitespace-nowrap">
+              <div className="mt-5 max-w-[760px] text-[10px] font-medium uppercase leading-6 tracking-[0.1em] text-white/70 sm:mt-6 sm:text-[11px] sm:leading-7 lg:text-xs">
+                <div className="whitespace-normal">
                   Những câu chuyện thật, khoảnh khắc thật và những bộ ảnh
                 </div>
 
-                <div className="whitespace-nowrap">
+                <div className="whitespace-normal">
                   được thực hiện bởi DinhThong Photos.
                 </div>
               </div>
@@ -288,11 +288,11 @@ export default function AlbumPublicPage() {
                       behavior: 'smooth',
                     })
                 }
-                className="mt-7 inline-flex items-center gap-3 rounded-full border border-white/25 bg-black/15 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.14em] text-white backdrop-blur-md transition hover:bg-white hover:text-black"
+                className="mt-6 inline-flex items-center gap-3 rounded-full border border-white/25 bg-black/15 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.14em] text-white backdrop-blur-md transition hover:bg-white hover:text-black sm:mt-7"
               >
                 Khám phá album
 
-                <ArrowRight className="h-3.5 w-3.5" />
+                <ArrowRight className="h-3.5 w-3.5 shrink-0" />
               </button>
 
             </div>
