@@ -39,7 +39,7 @@
   width: max-content;
   color: #fff;
   text-decoration: none;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Arial, Helvetica, sans-serif;
   font-size: 29px;
   line-height: 0.85;
   letter-spacing: -0.8px;
@@ -148,7 +148,7 @@
 .heroTitle {
   max-width: 750px;
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Arial, Helvetica, sans-serif;
   font-size: clamp(56px, 5.9vw, 96px);
   font-weight: 400;
   line-height: 0.95;
@@ -244,7 +244,7 @@
 
 .sectionTitle {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Arial, Helvetica, sans-serif;
   font-size: clamp(50px, 5vw, 79px);
   font-weight: 400;
   line-height: 1;
@@ -337,7 +337,7 @@
 
 .albumName {
   margin-bottom: 7px;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Arial, Helvetica, sans-serif;
   font-size: 25px;
   line-height: 1.1;
 }
@@ -386,7 +386,7 @@
 
 .storiesHeader h2 {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Arial, Helvetica, sans-serif;
   font-size: 55px;
   font-weight: 400;
   line-height: 1;
@@ -463,7 +463,7 @@
 
 .storyText h3 {
   margin: 8px 0 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Arial, Helvetica, sans-serif;
   font-size: 28px;
   font-weight: 400;
 }
@@ -481,7 +481,7 @@
 
 .aboutTitle {
   margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Arial, Helvetica, sans-serif;
   font-size: clamp(46px, 5vw, 74px);
   font-weight: 400;
   line-height: 1.05;

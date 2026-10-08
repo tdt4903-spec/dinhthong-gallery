@@ -228,13 +228,13 @@ export default function AlbumPublicPage() {
       </header>
 
       {/* HERO */}
-      <section className="px-3 pt-3 sm:px-5 sm:pt-5">
-        <div className="relative mx-auto min-h-[510px] max-w-[1500px] overflow-hidden rounded-[30px] sm:min-h-[640px]">
+      <section className="px-0 pt-0 sm:px-5 sm:pt-5">
+        <div className="relative mx-auto min-h-[560px] max-w-[1500px] overflow-hidden rounded-none sm:min-h-[640px] sm:rounded-[30px]">
 
           <img
             src="/banner.jpg"
             alt="Dinh Thong Gallery"
-            className="absolute inset-0 h-full w-full object-cover"
+            className="absolute inset-0 block h-full w-full max-w-none object-cover object-center"
           />
 
           <div
@@ -245,7 +245,7 @@ export default function AlbumPublicPage() {
             }`}
           />
 
-          <div className="relative z-10 flex min-h-[510px] items-end p-7 sm:min-h-[640px] sm:p-12 lg:p-16">
+          <div className="relative z-10 flex min-h-[560px] items-end p-6 sm:min-h-[640px] sm:p-12 lg:p-16">
             <div className="max-w-[820px] text-white">
 
               <div className="text-[9px] font-bold uppercase tracking-[0.32em] text-white/60">
