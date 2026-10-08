@@ -235,6 +235,13 @@ export default function AlbumPublicPage() {
             src="/banner.jpg"
             alt="Dinh Thong Gallery"
             className="absolute inset-0 block h-full w-full max-w-none object-cover object-center"
+            style={{
+              width: '100%',
+              height: '100%',
+              maxWidth: 'none',
+              objectFit: 'cover',
+              objectPosition: 'center',
+            }}
           />
 
           <div
