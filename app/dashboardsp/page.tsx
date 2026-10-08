@@ -38,6 +38,7 @@ import {
 } from '@/lib/customer-products'
 
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
+import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 
 type Category = {
   id: string
@@ -145,6 +146,7 @@ export default function CustomerProductsDashboard() {
     toggleTheme,
     resetAutoTheme,
   } = useGalleryTheme()
+  const { popup, showAlert, showConfirm, resolvePopup } = useAppPopup()
 
   const [categories, setCategories] = useState<Category[]>([])
   const [albums, setAlbums] = useState<Album[]>([])
@@ -523,17 +525,17 @@ export default function CustomerProductsDashboard() {
     )
 
     if (!title) {
-      alert('Vui lòng nhập tên album.')
+      void showAlert('Vui lòng nhập tên album.')
       return
     }
 
     if (!form.category_id) {
-      alert('Vui lòng chọn danh mục.')
+      void showAlert('Vui lòng chọn danh mục.')
       return
     }
 
     if (!driveUrl) {
-      alert('Vui lòng nhập link Google Drive.')
+      void showAlert('Vui lòng nhập link Google Drive.')
       return
     }
 
@@ -612,10 +614,15 @@ export default function CustomerProductsDashboard() {
       resetDriveApproval()
 
       await loadData()
+      void showAlert(
+        editingAlbum
+          ? 'Đã cập nhật album Public.'
+          : 'Đã tạo album Public.'
+      )
     } catch (error: any) {
       console.error(error)
 
-      alert(
+      void showAlert(
         'Không thể lưu album: ' +
           (error?.message ||
             'Lỗi không xác định')
@@ -626,8 +633,12 @@ export default function CustomerProductsDashboard() {
   }
 
   async function deleteAlbum(album: Album) {
-    const ok = window.confirm(
-      `Xóa album "${album.title}"?`
+    const ok = await showConfirm(
+      `Xóa album "${album.title}"?`,
+      {
+        title: 'Xóa album Public?',
+        detail: 'Album và danh sách ảnh Public của album này sẽ không còn hiển thị trên website.',
+      }
     )
 
     if (!ok) return
@@ -638,11 +649,12 @@ export default function CustomerProductsDashboard() {
       .eq('id', album.id)
 
     if (error) {
-      alert(error.message)
+      void showAlert(error.message)
       return
     }
 
     await loadData()
+    void showAlert('Đã xóa album Public.')
   }
 
   async function togglePublic(album: Album) {
@@ -699,7 +711,7 @@ export default function CustomerProductsDashboard() {
       })
 
     if (error) {
-      alert(error.message)
+      void showAlert(error.message)
       return
     }
 
@@ -707,6 +719,7 @@ export default function CustomerProductsDashboard() {
     setShowCategoryForm(false)
 
     await loadData()
+    void showAlert('Đã thêm danh mục.')
   }
 
   const totalPublicImages =
@@ -1365,23 +1378,33 @@ export default function CustomerProductsDashboard() {
       </div>
 
       {showAlbumModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-3 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#02110b]/72 p-3 backdrop-blur-[7px] sm:p-6">
+          <button
+            type="button"
+            aria-label="Đóng cửa sổ album"
+            onClick={() => setShowAlbumModal(false)}
+            className="absolute inset-0 cursor-default"
+          />
           <div
-            className={`flex max-h-[94vh] w-full max-w-[1450px] flex-col overflow-hidden rounded-[26px] border shadow-2xl ${
+            className={`relative flex max-h-[92dvh] w-full max-w-[1450px] flex-col overflow-hidden rounded-[28px] border shadow-[0_32px_100px_rgba(0,0,0,.38)] ${
               isDarkMode
                 ? 'border-white/10 bg-[#081710]'
                 : 'border-black/10 bg-[#fbfcf9]'
             }`}
           >
+            <div className="h-1.5 shrink-0 bg-emerald-500" />
             <div
-              className={`flex items-center justify-between border-b px-5 py-4 ${
+              className={`flex items-center justify-between border-b px-4 py-3 sm:px-5 sm:py-4 ${
                 isDarkMode
                   ? 'border-white/10'
                   : 'border-black/[0.07]'
               }`}
             >
               <div>
-                <h2 className="font-serif text-2xl">
+                <div className="text-[9px] font-bold uppercase tracking-[0.2em] text-emerald-700/65">
+                  Album Public
+                </div>
+                <h2 className="mt-1 font-serif text-xl sm:text-2xl">
                   {editingAlbum
                     ? 'Chỉnh sửa album'
                     : 'Tạo album Public'}
@@ -1405,7 +1428,7 @@ export default function CustomerProductsDashboard() {
 
             <div className="grid min-h-0 flex-1 lg:grid-cols-[410px_1fr]">
               <div
-                className={`overflow-y-auto border-r p-5 ${
+                className={`overflow-y-auto border-r p-4 sm:p-5 ${
                   isDarkMode
                     ? 'border-white/10'
                     : 'border-black/[0.07]'
@@ -1702,7 +1725,7 @@ export default function CustomerProductsDashboard() {
                 </div>
               </div>
 
-              <div className="flex min-h-[550px] flex-col overflow-hidden">
+              <div className="flex min-h-[420px] flex-col overflow-hidden lg:min-h-[550px]">
                 <div
                   className={`flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4 ${
                     isDarkMode
@@ -1853,7 +1876,7 @@ export default function CustomerProductsDashboard() {
             </div>
 
             <div
-              className={`flex items-center justify-between gap-3 border-t px-5 py-4 ${
+              className={`flex flex-col-reverse items-stretch justify-between gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:px-5 sm:py-4 ${
                 isDarkMode
                   ? 'border-white/10'
                   : 'border-black/[0.07]'
@@ -1865,7 +1888,7 @@ export default function CustomerProductsDashboard() {
                   : 'Nếu chưa đọc Drive, trạng thái ảnh Public cũ sẽ được giữ nguyên.'}
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex gap-2 sm:shrink-0">
                 <button
                   type="button"
                   onClick={() =>
@@ -1897,6 +1920,7 @@ export default function CustomerProductsDashboard() {
           </div>
         </div>
       )}
+      <AppPopupHost popup={popup} onResolve={resolvePopup} />
     </main>
   )
 }

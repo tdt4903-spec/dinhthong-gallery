@@ -33,6 +33,7 @@ import {
 import {
   useGalleryTheme,
 } from '@/lib/use-gallery-theme'
+import { AppPopupHost, useAppPopup } from '../../../components/ui/AppPopup'
 
 type Service = {
   id: string
@@ -120,6 +121,7 @@ export default function DashboardBooking() {
 
   const { isDarkMode } =
     useGalleryTheme()
+  const { popup, showAlert, showConfirm, resolvePopup } = useAppPopup()
 
   const [loading, setLoading] =
     useState(true)
@@ -371,7 +373,7 @@ export default function DashboardBooking() {
       serviceForm.name.trim()
 
     if (!name) {
-      alert('Nhập tên thể loại.')
+      void showAlert('Nhập tên thể loại.')
       return
     }
 
@@ -398,7 +400,7 @@ export default function DashboardBooking() {
         .eq('id', editingService.id)
 
       if (error) {
-        alert(error.message)
+        void showAlert(error.message)
         return
       }
     } else {
@@ -411,7 +413,7 @@ export default function DashboardBooking() {
         })
 
       if (error) {
-        alert(error.message)
+        void showAlert(error.message)
         return
       }
     }
@@ -419,16 +421,23 @@ export default function DashboardBooking() {
     setShowServiceModal(false)
 
     await loadData()
+    void showAlert(
+      editingService
+        ? 'Đã cập nhật thể loại chụp.'
+        : 'Đã thêm thể loại chụp.'
+    )
   }
 
   async function deleteService(
     service: Service
   ) {
-    if (
-      !confirm(
-        `Xóa thể loại "${service.name}" và toàn bộ gói chụp của nó?`
-      )
-    ) {
+    if (!await showConfirm(
+      `Xóa thể loại "${service.name}" và toàn bộ gói chụp của nó?`,
+      {
+        title: 'Xóa thể loại chụp?',
+        detail: 'Các gói chụp thuộc thể loại này cũng sẽ bị xóa.',
+      }
+    )) {
       return
     }
 
@@ -438,11 +447,12 @@ export default function DashboardBooking() {
       .eq('id', service.id)
 
     if (error) {
-      alert(error.message)
+      void showAlert(error.message)
       return
     }
 
     await loadData()
+    void showAlert('Đã xóa thể loại chụp.')
   }
 
 
@@ -497,12 +507,12 @@ export default function DashboardBooking() {
 
   async function savePackage() {
     if (!packageForm.service_type_id) {
-      alert('Chọn thể loại.')
+      void showAlert('Chọn thể loại.')
       return
     }
 
     if (!packageForm.name.trim()) {
-      alert('Nhập tên gói chụp.')
+      void showAlert('Nhập tên gói chụp.')
       return
     }
 
@@ -540,7 +550,7 @@ export default function DashboardBooking() {
         .eq('id', editingPackage.id)
 
       if (error) {
-        alert(error.message)
+        void showAlert(error.message)
         return
       }
     } else {
@@ -559,7 +569,7 @@ export default function DashboardBooking() {
         })
 
       if (error) {
-        alert(error.message)
+        void showAlert(error.message)
         return
       }
     }
@@ -567,16 +577,22 @@ export default function DashboardBooking() {
     setShowPackageModal(false)
 
     await loadData()
+    void showAlert(
+      editingPackage
+        ? 'Đã cập nhật gói chụp.'
+        : 'Đã thêm gói chụp.'
+    )
   }
 
   async function deletePackage(
     item: Package
   ) {
-    if (
-      !confirm(
-        `Xóa gói "${item.name}"?`
-      )
-    ) {
+    if (!await showConfirm(
+      `Xóa gói "${item.name}"?`,
+      {
+        title: 'Xóa gói chụp?',
+      }
+    )) {
       return
     }
 
@@ -586,11 +602,12 @@ export default function DashboardBooking() {
       .eq('id', item.id)
 
     if (error) {
-      alert(error.message)
+      void showAlert(error.message)
       return
     }
 
     await loadData()
+    void showAlert('Đã xóa gói chụp.')
   }
 
 
@@ -625,11 +642,11 @@ export default function DashboardBooking() {
       })
 
     if (error) {
-      alert(error.message)
+      void showAlert(error.message)
       return
     }
 
-    alert(
+    void showAlert(
       'Đã lưu thông tin chuyển khoản.'
     )
   }
@@ -654,7 +671,7 @@ export default function DashboardBooking() {
       .eq('id', id)
 
     if (error) {
-      alert(error.message)
+      void showAlert(error.message)
       return
     }
 
@@ -697,7 +714,7 @@ export default function DashboardBooking() {
       booking.payment_requested &&
       !booking.transferred
     ) {
-      alert(
+      void showAlert(
         'Booking này chưa được xác nhận đã chuyển khoản.'
       )
       return
@@ -724,7 +741,7 @@ export default function DashboardBooking() {
         error
       )
 
-      alert(
+      void showAlert(
         'Không thể xác nhận lịch: '
         + error.message
       )
@@ -733,7 +750,7 @@ export default function DashboardBooking() {
     }
 
     if (!data) {
-      alert(
+      void showAlert(
         'Không cập nhật được Booking. Hãy kiểm tra quyền Admin/RLS.'
       )
       return
@@ -765,7 +782,7 @@ export default function DashboardBooking() {
         ?.access_token
 
     if (!token) {
-      alert(
+      void showAlert(
         'Đã xác nhận lịch nhưng phiên Admin đã hết hạn nên chưa gửi được Email khách.'
       )
       return
@@ -810,7 +827,7 @@ export default function DashboardBooking() {
           result
         )
 
-        alert(
+        void showAlert(
           'Đã xác nhận lịch nhưng chưa gửi được Email: '
           + (
             result?.error ||
@@ -825,7 +842,7 @@ export default function DashboardBooking() {
         result?.emailSent ===
         false
       ) {
-        alert(
+        void showAlert(
           result?.warning ||
           'Đã xác nhận lịch nhưng khách chưa có Email.'
         )
@@ -833,7 +850,7 @@ export default function DashboardBooking() {
         return
       }
 
-      alert(
+      void showAlert(
         'Đã xác nhận lịch và gửi Email cho khách hàng.'
       )
 
@@ -843,7 +860,7 @@ export default function DashboardBooking() {
         emailError
       )
 
-      alert(
+      void showAlert(
         'Đã xác nhận lịch nhưng xảy ra lỗi khi gửi Email khách.'
       )
     }
@@ -853,11 +870,13 @@ export default function DashboardBooking() {
   async function deleteBooking(
     booking: Booking
   ) {
-    if (
-      !confirm(
-        `Xóa Booking của "${booking.full_name}"?`
-      )
-    ) {
+    if (!await showConfirm(
+      `Xóa Booking của "${booking.full_name}"?`,
+      {
+        title: 'Xóa booking?',
+        detail: 'Thông tin lịch và yêu cầu của khách sẽ bị xóa khỏi hệ thống.',
+      }
+    )) {
       return
     }
 
@@ -873,6 +892,9 @@ export default function DashboardBooking() {
             item.id !== booking.id
         )
       )
+      void showAlert('Đã xóa Booking.')
+    } else {
+      void showAlert(error.message)
     }
   }
 
@@ -1070,44 +1092,47 @@ export default function DashboardBooking() {
             : 'border-black/[0.07] bg-white'
         }`}
       >
-        <div className="mx-auto flex h-[68px] max-w-[1500px] items-center justify-between px-5 sm:px-8">
+        <div className="mx-auto flex h-[62px] max-w-[1280px] items-center justify-between px-3 sm:h-[68px] sm:px-6">
 
           <Link
-            href="/dashboardsp"
-            className="flex items-center gap-2 text-xs"
+            href="/dashboardadmin"
+            className="flex items-center gap-2 text-xs font-semibold"
           >
             <ArrowLeft className="h-4 w-4" />
-            Dashboard sản phẩm
+            Trang chủ
           </Link>
 
           <Link
             href="/booking"
             target="_blank"
-            className="inline-flex items-center gap-2 rounded-xl border border-current/10 px-4 py-2.5 text-xs"
+            className="inline-flex items-center gap-2 rounded-xl border border-current/10 px-3 py-2 text-[10px] font-semibold sm:px-4 sm:py-2.5 sm:text-xs"
           >
-            Xem Booking Public
+            <span className="hidden sm:inline">Xem Booking Public</span>
+            <span className="sm:hidden">Booking</span>
             <ExternalLink className="h-4 w-4" />
           </Link>
 
         </div>
       </header>
 
-      <BookingCalendar
-        bookings={bookings}
-        isDarkMode={isDarkMode}
-      />
-
-
-
-      <div className="mx-auto max-w-[1500px] px-5 py-7 sm:px-8">
+      <div className="mx-auto max-w-[1280px] px-3 py-4 sm:px-6 sm:py-6">
 
         <div className="text-[9px] font-bold uppercase tracking-[0.2em] opacity-40">
           Dinh Thong Gallery
         </div>
 
-        <h1 className="mt-2 font-serif text-4xl">
+        <h1 className="mt-1 font-serif text-2xl sm:mt-2 sm:text-3xl">
           Dashboard Booking
         </h1>
+
+        <p className="mt-1 text-xs opacity-55">
+          Quản lý lịch, gói chụp và yêu cầu của khách hàng.
+        </p>
+
+        <BookingCalendar
+          bookings={bookings}
+          isDarkMode={isDarkMode}
+        />
 
 
         {/* =========================
@@ -1133,16 +1158,16 @@ export default function DashboardBooking() {
           </SectionHead>
 
 
-          <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 p-3 sm:grid-cols-2 sm:p-4 lg:grid-cols-3">
 
             {services.map(service => (
 
               <article
                 key={service.id}
-                className="flex gap-4 rounded-[18px] border border-current/10 p-3"
+                className="flex gap-3 rounded-[18px] border border-current/10 p-3"
               >
 
-                <div className="h-24 w-28 shrink-0 overflow-hidden rounded-xl bg-black/5">
+                <div className="h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-black/5 sm:h-24 sm:w-28">
 
                   {service.cover_url && (
                     <img
@@ -1261,7 +1286,7 @@ export default function DashboardBooking() {
                 className="border-b border-current/10 last:border-0"
               >
 
-                <div className="bg-current/[0.025] px-5 py-3">
+                <div className="bg-current/[0.025] px-4 py-2.5 sm:px-5 sm:py-3">
 
                   <div className="text-xs font-bold uppercase tracking-[0.12em] opacity-50">
                     {service.name}
@@ -1272,7 +1297,7 @@ export default function DashboardBooking() {
 
                 {list.length === 0 ? (
 
-                  <div className="px-5 py-5 text-xs opacity-35">
+                  <div className="px-4 py-4 text-xs opacity-35 sm:px-5 sm:py-5">
                     Chưa có gói chụp.
                   </div>
 
@@ -1284,7 +1309,7 @@ export default function DashboardBooking() {
 
                       <div
                         key={pkg.id}
-                        className="flex items-center justify-between gap-5 px-5 py-4"
+                        className="flex items-center justify-between gap-3 px-4 py-3 sm:gap-5 sm:px-5 sm:py-4"
                       >
 
                         <div>
@@ -1306,7 +1331,7 @@ export default function DashboardBooking() {
                         </div>
 
 
-                        <div className="flex items-center gap-4">
+                        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
 
                           <div className="text-right">
                             <div className="font-serif text-xl text-emerald-600">
@@ -1378,7 +1403,7 @@ export default function DashboardBooking() {
           </SectionHead>
 
 
-          <div className="grid gap-4 p-5 md:grid-cols-2">
+          <div className="grid gap-3 p-3 sm:grid-cols-2 sm:gap-4 sm:p-4">
 
             <Field
               title="Ngân hàng"
@@ -1509,7 +1534,7 @@ export default function DashboardBooking() {
             />
 
 
-            <div className="md:col-span-2">
+            <div className="sm:col-span-2">
 
               <Field
                 title="Nội dung chuyển khoản"
@@ -1569,7 +1594,7 @@ export default function DashboardBooking() {
             </div>
 
 
-            <div className="md:col-span-2">
+            <div className="sm:col-span-2">
 
               <AdminLabel>
                 Ghi chú chuyển khoản
@@ -1630,14 +1655,14 @@ export default function DashboardBooking() {
 
                 <article
                   key={booking.id}
-                  className="p-5"
+                  className="p-3 sm:p-4"
                 >
 
-                  <div className="grid gap-6 xl:grid-cols-[1fr_270px]">
+                  <div className="grid gap-4 xl:grid-cols-[1fr_240px]">
 
                     <div>
 
-                      <h3 className="text-lg font-semibold">
+                      <h3 className="text-base font-semibold sm:text-lg">
                         {booking.full_name}
                       </h3>
 
@@ -1655,7 +1680,7 @@ export default function DashboardBooking() {
                       </div>
 
 
-                      <div className="mt-5 grid gap-4 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="mt-4 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
 
                         <Info
                           title="Điện thoại"
@@ -1704,7 +1729,7 @@ export default function DashboardBooking() {
                     </div>
 
 
-                    <div className="space-y-3">
+                    <div className="space-y-2.5">
 
                       <select
                         value={booking.status}
@@ -2117,6 +2142,8 @@ export default function DashboardBooking() {
         </Modal>
       )}
 
+      <AppPopupHost popup={popup} onResolve={resolvePopup} />
+
     </main>
   )
 }
@@ -2132,14 +2159,14 @@ function SectionHead({
   children?: ReactNode
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-current/10 p-5">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-current/10 p-3 sm:p-4">
 
       <div>
-        <h2 className="font-serif text-2xl">
+        <h2 className="font-serif text-lg sm:text-xl">
           {title}
         </h2>
 
-        <p className="mt-1 text-xs opacity-40">
+        <p className="mt-0.5 text-[11px] opacity-40 sm:mt-1 sm:text-xs">
           {description}
         </p>
       </div>
@@ -2163,33 +2190,45 @@ function Modal({
   children: ReactNode
 }) {
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6">
+      <button
+        type="button"
+        aria-label="Đóng cửa sổ"
+        onClick={close}
+        className="absolute inset-0 cursor-default bg-[#02110b]/72 backdrop-blur-[7px]"
+      />
 
       <div
-        className={`w-full max-w-lg rounded-[24px] border p-5 ${
+        className={`relative flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[28px] border shadow-[0_32px_100px_rgba(0,0,0,.38)] ${
           dark
             ? 'border-white/10 bg-[#081710]'
-            : 'border-black/10 bg-white'
+            : 'border-white/70 bg-[#fbfcf7] text-[#10261d]'
         }`}
       >
+        <div className="h-1.5 shrink-0 bg-emerald-500" />
 
-        <div className="flex items-center justify-between">
+        <div className={`flex items-start justify-between border-b px-5 py-4 ${dark ? 'border-white/10' : 'border-[#dbe6df]'}`}>
+          <div>
+            <p className={`text-[9px] font-bold uppercase tracking-[0.22em] ${dark ? 'text-emerald-300/65' : 'text-emerald-800/65'}`}>
+              Thiết lập Booking
+            </p>
 
-          <h3 className="font-serif text-2xl">
-            {title}
-          </h3>
+            <h3 className="mt-1 font-serif text-xl font-semibold sm:text-2xl">
+              {title}
+            </h3>
+          </div>
 
           <button
             type="button"
             onClick={close}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-current/10"
+            className="-mr-1 -mt-1 flex h-9 w-9 items-center justify-center rounded-full transition hover:bg-black/5"
           >
-            <X className="h-4 w-4" />
+            <X className="h-5 w-5" />
           </button>
 
         </div>
 
-        <div className="mt-5 space-y-4">
+        <div className="space-y-4 overflow-y-auto p-4 sm:p-5">
           {children}
         </div>
 
@@ -2290,7 +2329,7 @@ function Info({
 function sectionClass(
   dark: boolean
 ) {
-  return `mt-6 overflow-hidden rounded-[24px] border ${
+  return `mt-4 overflow-hidden rounded-[20px] border sm:mt-5 ${
     dark
       ? 'border-white/10 bg-white/[0.025]'
       : 'border-black/[0.07] bg-white'

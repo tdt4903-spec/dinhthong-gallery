@@ -250,21 +250,21 @@ export default function BookingCalendar({
 
   return (
     <section
-      className={`mx-auto mt-3 w-full max-w-[1500px] px-2 sm:mt-5 sm:px-4 ${
+      className={`mt-4 w-full ${
         isDarkMode
           ? 'text-white'
           : 'text-[#202520]'
       }`}
     >
       <div
-        className={`overflow-hidden rounded-2xl border ${
+        className={`overflow-hidden rounded-[20px] border ${
           isDarkMode
             ? 'border-white/10 bg-[#0b2119]'
             : 'border-black/10 bg-white'
         }`}
       >
         <div
-          className="flex flex-wrap items-center justify-between gap-2 border-b border-black/10 px-3 py-3 dark:border-white/10 sm:gap-3 sm:px-4 sm:py-4"
+            className="flex flex-wrap items-center justify-between gap-2 border-b border-black/10 px-3 py-3 dark:border-white/10 sm:gap-3 sm:px-4"
         >
           <div>
             <h2
@@ -402,7 +402,7 @@ export default function BookingCalendar({
                         key={
                           index
                         }
-                        className={`h-[72px] border-r border-t border-black/10 last:border-r-0 dark:border-white/10 sm:min-h-[150px] sm:h-auto ${
+                        className={`h-[60px] border-r border-t border-black/10 last:border-r-0 dark:border-white/10 sm:h-[96px] lg:h-[112px] ${
                           isDarkMode
                             ? 'bg-black/10'
                             : 'bg-[#fafbf9]'
@@ -437,7 +437,7 @@ export default function BookingCalendar({
                   return (
                     <div
                       key={key}
-                      className={`h-[72px] overflow-hidden border-r border-t border-black/10 p-1 last:border-r-0 dark:border-white/10 sm:min-h-[150px] sm:h-auto sm:p-2 ${
+                      className={`h-[60px] overflow-hidden border-r border-t border-black/10 p-1 last:border-r-0 dark:border-white/10 sm:h-[96px] sm:p-2 lg:h-[112px] ${
                         isDarkMode
                           ? 'bg-[#0b2119]'
                           : 'bg-white'
@@ -455,8 +455,17 @@ export default function BookingCalendar({
                         {day}
                       </div>
 
+                      {dayBookings.length > 0 && (
+                        <span
+                          className="flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[8px] font-bold text-white sm:hidden"
+                          aria-label={`${dayBookings.length} booking`}
+                        >
+                          {dayBookings.length}
+                        </span>
+                      )}
+
                       <div
-                        className="space-y-1 sm:space-y-2"
+                        className="hidden space-y-2 sm:block"
                       >
                         {dayBookings.map(
                           booking => {
@@ -470,10 +479,10 @@ export default function BookingCalendar({
                                 key={
                                   booking.id
                                 }
-                                className={`rounded-md border px-1 py-0.5 sm:rounded-lg sm:p-2 ${status.className}`}
+                                className={`rounded-lg border p-1.5 lg:p-2 ${status.className}`}
                               >
                                 <div
-                                  className="truncate text-[8px] font-bold sm:text-[11px]"
+                                  className="truncate text-[10px] font-bold lg:text-[11px]"
                                 >
                                   {
                                     booking.full_name ||
@@ -482,7 +491,7 @@ export default function BookingCalendar({
                                 </div>
 
                                 <div
-                                  className="hidden mt-0.5 truncate text-[10px] opacity-80 sm:block"
+                                  className="mt-0.5 truncate text-[9px] opacity-80 lg:text-[10px]"
                                 >
                                   {
                                     booking.service_name ||
@@ -496,7 +505,7 @@ export default function BookingCalendar({
                                 </div>
 
                                 <div
-                                  className="hidden mt-1 text-[9px] font-semibold uppercase tracking-wide opacity-75 sm:block"
+                                  className="mt-1 hidden text-[9px] font-semibold uppercase tracking-wide opacity-75 lg:block"
                                 >
                                   {
                                     status.text
