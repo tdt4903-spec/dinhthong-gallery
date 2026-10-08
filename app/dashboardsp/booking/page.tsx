@@ -111,6 +111,7 @@ function money(value?: number) {
 
 export default function DashboardBooking() {
   const router = useRouter()
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
 
   const supabase = useMemo(
     () => getCustomerProductsSupabase(),
@@ -884,16 +885,15 @@ export default function DashboardBooking() {
           : 'bg-[#f5f7f3] text-[#202520]'
       }`}
     >
-        <input
-          id="booking-mobile-sidebar"
-          type="checkbox"
-          className="peer sr-only lg:hidden"
-        />
-
-        <label
-          htmlFor="booking-mobile-sidebar"
+        <button
+          type="button"
           aria-label="Mở menu quản trị"
-          className="fixed left-3 top-3 z-[140] inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl border border-black/10 bg-white/95 text-[#315449] shadow-lg backdrop-blur-md peer-checked:hidden lg:hidden"
+          onClick={() => setMobileSidebarOpen(true)}
+          className={`fixed left-3 top-3 z-[140] inline-flex h-11 w-11 items-center justify-center rounded-xl border shadow-lg backdrop-blur-md lg:hidden ${
+            isDarkMode
+              ? 'border-white/10 bg-[#071710]/95 text-white'
+              : 'border-black/10 bg-white/95 text-[#315449]'
+          }`}
         >
           <svg
             viewBox="0 0 24 24"
@@ -907,11 +907,12 @@ export default function DashboardBooking() {
             <path d="M4 12h16" />
             <path d="M4 18h16" />
           </svg>
-        </label>
+        </button>
 
         <aside
-          className={`fixed inset-y-0 left-0 z-[130] hidden w-[300px] max-w-[88vw]
-            overflow-y-auto border-r shadow-2xl peer-checked:flex lg:hidden ${
+          className={`fixed inset-y-0 left-0 z-[130] w-[300px] max-w-[88vw]
+            overflow-y-auto border-r shadow-2xl
+            ${mobileSidebarOpen ? 'flex' : 'hidden'} lg:hidden ${
               isDarkMode
                 ? 'border-white/10 bg-[#071710] text-white'
                 : 'border-black/[0.07] bg-[#fbfdf9] text-[#52675f]'
@@ -919,10 +920,11 @@ export default function DashboardBooking() {
         >
           <div className="relative flex min-h-full w-full flex-col">
 
-            <label
-              htmlFor="booking-mobile-sidebar"
+            <button
+              type="button"
               aria-label="Đóng menu quản trị"
-              className={`absolute right-3 top-3 z-20 inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border shadow-sm backdrop-blur-md ${
+              onClick={() => setMobileSidebarOpen(false)}
+              className={`absolute right-3 top-3 z-20 inline-flex h-10 w-10 items-center justify-center rounded-xl border shadow-sm backdrop-blur-md ${
                 isDarkMode
                   ? 'border-white/10 bg-white/5 text-white'
                   : 'border-black/10 bg-white/90 text-[#315449]'
@@ -939,7 +941,7 @@ export default function DashboardBooking() {
                 <path d="M6 6l12 12" />
                 <path d="M18 6L6 18" />
               </svg>
-            </label>
+            </button>
 
             <div className={`flex h-[66px] shrink-0 items-center border-b px-5 ${
               isDarkMode
@@ -1051,11 +1053,14 @@ export default function DashboardBooking() {
           </div>
         </aside>
 
-        <label
-          htmlFor="booking-mobile-sidebar"
-          aria-label="Đóng menu quản trị"
-          className="fixed inset-0 z-[120] hidden bg-black/45 backdrop-blur-[1px] peer-checked:block lg:hidden"
-        />
+        {mobileSidebarOpen && (
+          <button
+            type="button"
+            aria-label="Đóng menu quản trị"
+            onClick={() => setMobileSidebarOpen(false)}
+            className="fixed inset-0 z-[120] bg-black/45 backdrop-blur-[1px] lg:hidden"
+          />
+        )}
 
 
       <header

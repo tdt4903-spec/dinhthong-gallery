@@ -250,7 +250,7 @@ export default function BookingCalendar({
 
   return (
     <section
-      className={`mx-auto mt-5 w-full max-w-[1500px] px-4 ${
+      className={`mx-auto mt-3 w-full max-w-[1500px] px-2 sm:mt-5 sm:px-4 ${
         isDarkMode
           ? 'text-white'
           : 'text-[#202520]'
@@ -264,17 +264,17 @@ export default function BookingCalendar({
         }`}
       >
         <div
-          className="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 px-4 py-4 dark:border-white/10"
+          className="flex flex-wrap items-center justify-between gap-2 border-b border-black/10 px-3 py-3 dark:border-white/10 sm:gap-3 sm:px-4 sm:py-4"
         >
           <div>
             <h2
-              className="text-lg font-bold"
+              className="text-base font-bold sm:text-lg"
             >
               Lịch Booking
             </h2>
 
             <p
-              className={`mt-1 text-xs ${
+              className={`mt-1 hidden text-xs sm:block ${
                 isDarkMode
                   ? 'text-white/55'
                   : 'text-black/50'
@@ -287,20 +287,20 @@ export default function BookingCalendar({
           </div>
 
           <div
-            className="flex items-center gap-2"
+            className="flex items-center gap-1 sm:gap-2"
           >
             <button
               type="button"
               onClick={
                 previousMonth
               }
-              className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+              className={`rounded-lg border px-2 py-2 text-[10px] font-semibold sm:px-3 sm:text-xs ${
                 isDarkMode
                   ? 'border-white/15 bg-white/5'
                   : 'border-black/10 bg-white'
               }`}
             >
-              ‹ Tháng trước
+              <span className="sm:hidden">‹</span><span className="hidden sm:inline">‹ Tháng trước</span>
             </button>
 
             <button
@@ -308,7 +308,7 @@ export default function BookingCalendar({
               onClick={
                 currentMonth
               }
-              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white"
+              className="rounded-lg bg-emerald-600 px-2 py-2 text-[10px] font-bold text-white sm:px-3 sm:text-xs"
             >
               Hôm nay
             </button>
@@ -318,22 +318,22 @@ export default function BookingCalendar({
               onClick={
                 nextMonth
               }
-              className={`rounded-lg border px-3 py-2 text-xs font-semibold ${
+              className={`rounded-lg border px-2 py-2 text-[10px] font-semibold sm:px-3 sm:text-xs ${
                 isDarkMode
                   ? 'border-white/15 bg-white/5'
                   : 'border-black/10 bg-white'
               }`}
             >
-              Tháng sau ›
+              <span className="hidden sm:inline">Tháng sau </span>›
             </button>
           </div>
         </div>
 
         <div
-          className="flex items-center justify-between px-4 py-3"
+            className="flex items-center justify-between px-3 py-2 sm:px-4 sm:py-3"
         >
           <div
-            className="text-base font-bold"
+            className="text-sm font-bold sm:text-base"
           >
             Tháng {month + 1}/{year}
           </div>
@@ -364,10 +364,10 @@ export default function BookingCalendar({
         </div>
 
         <div
-          className="overflow-x-auto"
+            className="overflow-hidden"
         >
           <div
-            className="min-w-[980px]"
+            className="w-full"
           >
             <div
               className="grid grid-cols-7 border-t border-black/10 dark:border-white/10"
@@ -376,7 +376,7 @@ export default function BookingCalendar({
                 day => (
                   <div
                     key={day}
-                    className={`border-r border-black/10 px-3 py-2 text-center text-xs font-bold last:border-r-0 dark:border-white/10 ${
+                    className={`border-r border-black/10 px-0 py-2 text-center text-[10px] font-bold last:border-r-0 dark:border-white/10 sm:px-3 sm:text-xs ${
                       isDarkMode
                         ? 'bg-white/5 text-white/60'
                         : 'bg-[#f5f7f3] text-black/55'
@@ -402,7 +402,7 @@ export default function BookingCalendar({
                         key={
                           index
                         }
-                        className={`min-h-[150px] border-r border-t border-black/10 last:border-r-0 dark:border-white/10 ${
+                        className={`h-[72px] border-r border-t border-black/10 last:border-r-0 dark:border-white/10 sm:min-h-[150px] sm:h-auto ${
                           isDarkMode
                             ? 'bg-black/10'
                             : 'bg-[#fafbf9]'
@@ -437,14 +437,14 @@ export default function BookingCalendar({
                   return (
                     <div
                       key={key}
-                      className={`min-h-[150px] border-r border-t border-black/10 p-2 last:border-r-0 dark:border-white/10 ${
+                      className={`h-[72px] overflow-hidden border-r border-t border-black/10 p-1 last:border-r-0 dark:border-white/10 sm:min-h-[150px] sm:h-auto sm:p-2 ${
                         isDarkMode
                           ? 'bg-[#0b2119]'
                           : 'bg-white'
                       }`}
                     >
                       <div
-                        className={`mb-2 flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
+                        className={`mb-1 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold sm:mb-2 sm:h-7 sm:w-7 sm:text-xs ${
                           isToday
                             ? 'bg-emerald-600 text-white'
                             : isDarkMode
@@ -456,7 +456,7 @@ export default function BookingCalendar({
                       </div>
 
                       <div
-                        className="space-y-2"
+                        className="space-y-1 sm:space-y-2"
                       >
                         {dayBookings.map(
                           booking => {
@@ -470,10 +470,10 @@ export default function BookingCalendar({
                                 key={
                                   booking.id
                                 }
-                                className={`rounded-lg border p-2 ${status.className}`}
+                                className={`rounded-md border px-1 py-0.5 sm:rounded-lg sm:p-2 ${status.className}`}
                               >
                                 <div
-                                  className="truncate text-[11px] font-bold"
+                                  className="truncate text-[8px] font-bold sm:text-[11px]"
                                 >
                                   {
                                     booking.full_name ||
@@ -482,7 +482,7 @@ export default function BookingCalendar({
                                 </div>
 
                                 <div
-                                  className="mt-0.5 truncate text-[10px] opacity-80"
+                                  className="hidden mt-0.5 truncate text-[10px] opacity-80 sm:block"
                                 >
                                   {
                                     booking.service_name ||
@@ -496,7 +496,7 @@ export default function BookingCalendar({
                                 </div>
 
                                 <div
-                                  className="mt-1 text-[9px] font-semibold uppercase tracking-wide opacity-75"
+                                  className="hidden mt-1 text-[9px] font-semibold uppercase tracking-wide opacity-75 sm:block"
                                 >
                                   {
                                     status.text

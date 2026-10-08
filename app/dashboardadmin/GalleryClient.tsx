@@ -202,6 +202,7 @@ interface GalleryClientProps {
 }
 
 export default function GalleryClient({ displayName = '' }: GalleryClientProps) {
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -3477,16 +3478,15 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
             {/* SIDEBAR QUẢN TRỊ DESKTOP */}
             
-            <input
-              id="admin-mobile-sidebar"
-              type="checkbox"
-              className="peer sr-only lg:hidden"
-            />
-
-            <label
-              htmlFor="admin-mobile-sidebar"
+            <button
+              type="button"
               aria-label="Mở menu quản trị"
-              className="fixed left-3 top-3 z-[140] inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl border border-black/10 bg-white/95 text-[#315449] shadow-lg backdrop-blur-md peer-checked:hidden lg:hidden"
+              onClick={() => setMobileSidebarOpen(true)}
+              className={`fixed left-3 top-3 z-[140] inline-flex h-11 w-11 items-center justify-center rounded-xl border shadow-lg backdrop-blur-md lg:hidden ${
+                isDarkMode
+                  ? 'border-white/10 bg-[#071710]/95 text-white'
+                  : 'border-black/10 bg-white/95 text-[#315449]'
+              }`}
             >
               <svg
                 viewBox="0 0 24 24"
@@ -3500,18 +3500,19 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <path d="M4 12h16" />
                 <path d="M4 18h16" />
               </svg>
-            </label>
+            </button>
 <aside
-              className={`fixed left-0 top-0 z-[80] hidden h-screen w-[252px] flex-col border-r lg:flex ${
+              className={`fixed inset-y-0 left-0 z-[130] ${mobileSidebarOpen ? 'flex' : 'hidden'} h-screen w-[300px] max-w-[88vw] flex-col border-r shadow-2xl lg:left-0 lg:top-0 lg:z-[80] lg:flex lg:h-screen lg:w-[252px] lg:max-w-none lg:shadow-none ${
                 isDarkMode
                   ? 'border-white/10 bg-[#07140e] text-white'
                   : 'border-emerald-950/10 bg-[#f8faf7] text-[#153426]'
               }`}
             >
-              <label
-                htmlFor="admin-mobile-sidebar"
+              <button
+                type="button"
                 aria-label="Đóng menu quản trị"
-                className="absolute right-3 top-3 z-20 inline-flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border border-black/10 bg-white/90 text-[#315449] shadow-sm backdrop-blur-md lg:hidden"
+                onClick={() => setMobileSidebarOpen(false)}
+                className="absolute right-3 top-3 z-20 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-black/10 bg-white/90 text-[#315449] shadow-sm backdrop-blur-md lg:hidden"
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -3524,7 +3525,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   <path d="M6 6l12 12" />
                   <path d="M18 6L6 18" />
                 </svg>
-              </label>
+              </button>
 
               {/* BRAND */}
               <div
@@ -3833,11 +3834,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
 
             </aside>
-            <label
-              htmlFor="admin-mobile-sidebar"
-              aria-label="Đóng menu quản trị"
-              className="fixed inset-0 z-[120] hidden bg-black/45 backdrop-blur-[1px] peer-checked:block lg:hidden"
-            />
+            {mobileSidebarOpen && (
+              <button
+                type="button"
+                aria-label="Đóng menu quản trị"
+                onClick={() => setMobileSidebarOpen(false)}
+                className="fixed inset-0 z-[120] bg-black/45 backdrop-blur-[1px] lg:hidden"
+              />
+            )}
 
 
             {/* MOBILE: CÔNG CỤ QUẢN TRỊ */}
