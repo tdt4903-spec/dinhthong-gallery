@@ -1,9 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import {
   ArrowRight,
-  Camera,
+  ArrowLeft,
   ImageIcon,
   Loader2,
   Moon,
@@ -18,6 +19,7 @@ import {
 
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { SITE_BANNER_URL } from '@/lib/site-assets'
+import PublicCategoryCards from '@/components/PublicCategoryCards'
 
 
 function publicWebImage(input: string) {
@@ -35,7 +37,9 @@ function publicWebImage(input: string) {
   return `https://lh3.googleusercontent.com/d/${match[1]}=s1500`
 }
 
-export default function AlbumPublicPage() {
+type PublicCategory = Pick<CustomerCategory, 'id' | 'name' | 'slug'>
+
+export default function AlbumPublicPage({ category }: { category?: PublicCategory }) {
   const supabase = useMemo(
     () => getCustomerProductsSupabase(),
     []
@@ -46,9 +50,8 @@ export default function AlbumPublicPage() {
     toggleTheme,
   } = useGalleryTheme()
 
-  const [categories, setCategories] = useState<CustomerCategory[]>([])
+  const [categories, setCategories] = useState<PublicCategory[]>([])
   const [albums, setAlbums] = useState<CustomerAlbum[]>([])
-  const [activeCategory, setActiveCategory] = useState('')
   const [loading, setLoading] = useState(true)
   const heroRef = useRef<HTMLDivElement>(null)
   const [heroVisible, setHeroVisible] = useState(true)
@@ -74,26 +77,22 @@ export default function AlbumPublicPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
 
+    let albumQuery = supabase
+      .from('customer_product_albums')
+      .select('*')
+      .eq('is_public', true)
+      .order('position', { ascending: true })
+      .order('created_at', { ascending: false })
+    if (category) albumQuery = albumQuery.eq('category_id', category.id)
+
     const [categoryResult, albumResult] = await Promise.all([
-      supabase
+      category ? Promise.resolve({ data: [category], error: null }) : supabase
         .from('customer_product_categories')
-        .select('*')
+        .select('id,name,slug')
         .eq('visible', true)
         .order('position', { ascending: true }),
 
-      supabase
-        .from('customer_product_albums')
-        .select(`
-          *,
-          customer_product_categories (
-            id,
-            name,
-            slug
-          )
-        `)
-        .eq('is_public', true)
-        .order('position', { ascending: true })
-        .order('created_at', { ascending: false }),
+      albumQuery,
     ])
 
     if (categoryResult.error) {
@@ -105,7 +104,7 @@ export default function AlbumPublicPage() {
     }
 
     const categoryData =
-      (categoryResult.data || []) as CustomerCategory[]
+      (categoryResult.data || []) as PublicCategory[]
 
     const albumData =
       (albumResult.data || []) as CustomerAlbum[]
@@ -113,35 +112,18 @@ export default function AlbumPublicPage() {
     setCategories(categoryData)
     setAlbums(albumData)
 
-    setActiveCategory((current) => {
-      if (
-        current &&
-        categoryData.some((item) => item.id === current)
-      ) {
-        return current
-      }
-
-      return categoryData[0]?.id || ''
-    })
-
     setLoading(false)
-  }, [supabase])
+  }, [supabase, category])
 
   useEffect(() => {
     void loadData()
   }, [loadData])
 
-  const filteredAlbums = useMemo(() => {
-    if (!activeCategory) return []
+  const filteredAlbums = albums
 
-    return albums.filter(
-      (album) => album.category_id === activeCategory
-    )
-  }, [albums, activeCategory])
-
-  const currentCategory = categories.find(
-    (item) => item.id === activeCategory
-  )
+  useEffect(() => {
+    document.title = category ? `${category.name} - Dinh Thong Gallery` : 'Dinh Thong Gallery'
+  }, [category])
 
   return (
     <main
@@ -161,80 +143,24 @@ export default function AlbumPublicPage() {
             : 'border-emerald-950/8 bg-[#fbfdf9]/94'
         }`}
       >
-        <div className="mx-auto flex h-[72px] max-w-[1500px] items-center gap-4 px-4 sm:px-6">
+        <div className={`mx-auto min-h-[68px] max-w-[1500px] items-center gap-3 px-4 py-2 sm:px-6 ${category ? 'grid grid-cols-[44px_minmax(0,1fr)_44px] sm:grid-cols-[120px_minmax(0,1fr)_120px]' : 'flex justify-end'}`}>
+          {category ? (
+            <>
+              <Link href="/#categories" prefetch={false} aria-label="Quay lại trang chủ" className="inline-flex min-h-11 items-center gap-2 text-xs font-semibold">
+                <ArrowLeft className="h-5 w-5 shrink-0" /><span className="hidden sm:inline">Trang chủ</span>
+              </Link>
+              <p className="min-w-0 break-words text-center text-sm font-semibold uppercase tracking-wide sm:text-lg">{category.name}</p>
+            </>
+          ) : (
+            <Link href="/booking" prefetch={false} className="inline-flex min-h-11 items-center justify-center rounded-full bg-[#075b43] px-6 text-[10px] font-bold uppercase tracking-[0.15em] text-white transition hover:bg-[#064c38]">Booking</Link>
+          )}
 
-          {/* LOGO */}
-          <div className="flex shrink-0 items-center gap-3">
-            <span
-              className={`flex h-10 w-10 items-center justify-center rounded-xl border ${
-                isDarkMode
-                  ? 'border-emerald-300/20 bg-emerald-500/10 text-emerald-300'
-                  : 'border-emerald-800/15 bg-emerald-700/8 text-emerald-800'
-              }`}
-            >
-              <Camera className="h-4.5 w-4.5" />
-            </span>
-
-            <div>
-              <div className="font-serif text-[15px] font-semibold uppercase tracking-[0.04em]">
-                Dinh Thong Gallery
-              </div>
-
-              <div
-                className={`mt-1 text-[7px] font-semibold uppercase tracking-[0.24em] ${
-                  isDarkMode
-                    ? 'text-white/35'
-                    : 'text-emerald-950/40'
-                }`}
-              >
-                Moments For A Lifetime
-              </div>
-            </div>
-          </div>
-
-          {/* CATEGORY DESKTOP */}
-          <nav className="ml-auto hidden items-center gap-1 lg:flex">
-            {categories.map((category) => {
-              const active =
-                activeCategory === category.id
-
-              return (
-                <button
-                  key={category.id}
-                  type="button"
-                  onClick={() =>
-                    setActiveCategory(category.id)
-                  }
-                  className={`rounded-full px-4 py-2 text-[10px] font-bold uppercase tracking-[0.1em] transition ${
-                    active
-                      ? isDarkMode
-                        ? 'bg-emerald-500/15 text-emerald-300'
-                        : 'bg-emerald-900 text-white'
-                      : isDarkMode
-                        ? 'text-white/45 hover:bg-white/5 hover:text-white'
-                        : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
-                  }`}
-                >
-                  {category.name}
-                </button>
-              )
-            })}
-          </nav>
-
-          {/* THEME */}
-          
-            <a
-              href="/booking"
-              className="inline-flex h-9 items-center justify-center rounded-full bg-[#075b43] px-5 text-[9px] font-bold uppercase tracking-[0.15em] text-white transition hover:bg-[#064c38]"
-            >
-              Booking
-            </a>
-
-<button
+          <button
             type="button"
             onClick={toggleTheme}
             title="Giao diện: tự động 06:00–18:00 sáng / 18:00–06:00 tối"
-            className={`ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition lg:ml-2 ${
+            aria-label="Đổi giao diện sáng tối"
+            className={`flex h-11 w-11 shrink-0 items-center justify-center justify-self-end rounded-full border transition ${
               isDarkMode
                 ? 'border-white/10 text-emerald-400 hover:bg-white/10'
                 : 'border-gray-200 text-gray-600 hover:bg-gray-100'
@@ -250,7 +176,7 @@ export default function AlbumPublicPage() {
       </header>
 
       {/* HERO */}
-      <section className="px-3 pt-3 sm:px-5 sm:pt-5">
+      {!category && <section className="px-3 pt-3 sm:px-5 sm:pt-5">
         <div ref={heroRef} data-motion-paused={!heroVisible} className="public-hero relative mx-auto h-[560px] max-w-[1500px] overflow-hidden rounded-[30px] sm:h-[640px]">
 
           <img
@@ -305,7 +231,7 @@ export default function AlbumPublicPage() {
                 type="button"
                 onClick={() =>
                   document
-                    .getElementById('albums')
+                    .getElementById('categories')
                     ?.scrollIntoView({
                       behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
                     })
@@ -326,41 +252,12 @@ export default function AlbumPublicPage() {
           </div>
 
         </div>
-      </section>
-
-      {/* CATEGORY MOBILE */}
-      <div className="mx-auto mt-5 flex max-w-[1500px] gap-2 overflow-x-auto px-4 pb-2 lg:hidden">
-        {categories.map((category) => {
-          const active =
-            activeCategory === category.id
-
-          return (
-            <button
-              key={category.id}
-              type="button"
-              onClick={() =>
-                setActiveCategory(category.id)
-              }
-              className={`whitespace-nowrap rounded-full border px-4 py-2.5 text-[9px] font-bold uppercase tracking-[0.1em] transition ${
-                active
-                  ? isDarkMode
-                    ? 'border-emerald-400/20 bg-emerald-500/15 text-emerald-300'
-                    : 'border-emerald-900 bg-emerald-900 text-white'
-                  : isDarkMode
-                    ? 'border-white/10 bg-white/5 text-white/45'
-                    : 'border-emerald-950/10 bg-white text-gray-500'
-              }`}
-            >
-              {category.name}
-            </button>
-          )
-        })}
-      </div>
+      </section>}
 
       {/* ALBUM SECTION */}
       <section
-        id="albums"
-        className="mx-auto max-w-[1500px] px-4 py-16 sm:px-6 sm:py-24"
+        id={category ? 'albums' : 'categories'}
+        className="mx-auto max-w-[1500px] scroll-mt-20 px-4 py-16 sm:px-6 sm:py-24"
       >
         <div className="text-center">
 
@@ -375,7 +272,7 @@ export default function AlbumPublicPage() {
           </div>
 
           <h2 className="mt-4 font-serif text-3xl font-medium uppercase tracking-[0.02em] sm:text-5xl">
-            {currentCategory?.name || 'Album'}
+            {category?.name || 'Thể loại ảnh'}
           </h2>
 
           <div
@@ -392,15 +289,15 @@ export default function AlbumPublicPage() {
           <div className="flex min-h-[350px] items-center justify-center">
             <Loader2 className="h-7 w-7 animate-spin text-emerald-500" />
           </div>
-        ) : filteredAlbums.length > 0 ? (
+        ) : !category && categories.length > 0 ? (
+          <PublicCategoryCards categories={categories} albums={albums} />
+        ) : category && filteredAlbums.length > 0 ? (
           <div className="mt-12 grid gap-x-5 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
 
             {filteredAlbums.map((album) => (
               <a
                 key={album.id}
                 href={`/${album.slug}`}
-                target="_blank"
-                rel="noreferrer"
                 className="group block"
               >
 
