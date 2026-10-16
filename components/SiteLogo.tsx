@@ -5,7 +5,7 @@ export default function SiteLogo({ isDarkMode }: { isDarkMode: boolean }) {
     <span
       role="img"
       aria-label="Dinh Thong Photos"
-      className="block h-[33px] w-24 shrink-0 transition-colors duration-300 sm:h-9 sm:w-[120px]"
+      className="block h-[25px] w-[72px] shrink-0 transition-colors duration-300 sm:h-[27px] sm:w-[90px]"
       style={{
         backgroundColor: isDarkMode ? '#f4fff8' : '#103b2c',
         maskImage: `url("${SITE_LOGO_URL}")`,
