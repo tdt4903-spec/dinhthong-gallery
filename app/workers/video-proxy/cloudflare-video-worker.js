@@ -1,8 +1,8 @@
 /**
- * DinhThong Gallery - Google Drive video download proxy
+ * DinhThong Gallery - Google Drive media download proxy
  *
  * Browser -> Cloudflare Worker -> Google Drive API -> Browser
- * Vercel không nằm trên đường truyền dữ liệu video.
+ * Vercel không nằm trên đường truyền dữ liệu ảnh/video và danh sách tải album.
  *
  * Cloudflare Worker cần Secret:
  * GOOGLE_DRIVE_API_KEY
@@ -13,6 +13,22 @@ const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
 
 // Cache file nguyên bản tối đa 7 ngày tại Cloudflare
 const CACHE_TTL = 60 * 60 * 24 * 7
+
+function withCors(response) {
+  const headers = new Headers(response.headers)
+  headers.set('Access-Control-Allow-Origin', '*')
+  headers.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
+  headers.set('Access-Control-Allow-Headers', 'Range')
+  headers.set(
+    'Access-Control-Expose-Headers',
+    'Content-Length, Content-Disposition, Content-Range, Accept-Ranges, Retry-After'
+  )
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
+}
 
 function sanitizeDownloadName(name, fallback = 'download') {
   const cleaned = String(name || fallback)
@@ -38,19 +54,93 @@ function validDriveId(id) {
   return /^[a-zA-Z0-9_-]{10,}$/.test(id)
 }
 
-export default {
-  async fetch(request, env) {
+async function listFolder(request, env, url) {
+  const folderId = url.searchParams.get('id') || ''
+  const pageToken = url.searchParams.get('pageToken') || ''
+  if (!validDriveId(folderId) || folderId.length > 200) {
+    return Response.json({ error: 'Invalid Google Drive folder ID' }, { status: 400 })
+  }
+  if (pageToken.length > 4096) {
+    return Response.json({ error: 'Invalid Google Drive page token' }, { status: 400 })
+  }
+  if (!env.GOOGLE_DRIVE_API_KEY) {
+    return Response.json({ error: 'Missing GOOGLE_DRIVE_API_KEY' }, { status: 500 })
+  }
+
+  const upstreamUrl = new URL(DRIVE_API_BASE)
+  upstreamUrl.searchParams.set('q', `'${folderId}' in parents and trashed = false`)
+  upstreamUrl.searchParams.set('fields', 'nextPageToken,files(id,name,mimeType,size,modifiedTime,resourceKey,capabilities(canDownload))')
+  upstreamUrl.searchParams.set('pageSize', '1000')
+  upstreamUrl.searchParams.set('orderBy', 'folder,name')
+  upstreamUrl.searchParams.set('supportsAllDrives', 'true')
+  upstreamUrl.searchParams.set('includeItemsFromAllDrives', 'true')
+  upstreamUrl.searchParams.set('key', env.GOOGLE_DRIVE_API_KEY)
+  if (pageToken) upstreamUrl.searchParams.set('pageToken', pageToken)
+
+  const upstream = await fetch(upstreamUrl.toString(), {
+    headers: { Accept: 'application/json' },
+    cf: { cacheEverything: true, cacheTtl: 60 },
+  })
+  if (!upstream.ok) {
+    const headers = new Headers({ 'Cache-Control': 'no-store' })
+    if (upstream.headers.has('retry-after')) {
+      headers.set('Retry-After', upstream.headers.get('retry-after'))
+    }
+    return Response.json(
+      { error: `Google Drive folder listing failed (HTTP ${upstream.status}).` },
+      { status: upstream.status, headers }
+    )
+  }
+
+  const data = await upstream.json()
+  const files = (Array.isArray(data.files) ? data.files : []).map((file) => {
+    const isFolder = file.mimeType === DRIVE_FOLDER_MIME
+    const type = isFolder ? 'folder' : file.mimeType?.startsWith('video/') ? 'video' : 'image'
+    const downloadUrl = isFolder ? '' : new URL(
+      `/${type}?id=${encodeURIComponent(file.id)}&name=${encodeURIComponent(file.name || file.id)}`,
+      url.origin
+    ).toString()
+    return {
+      id: file.id,
+      name: file.name,
+      type,
+      mimeType: file.mimeType,
+      size: file.size,
+      modifiedTime: file.modifiedTime,
+      canDownload: file.capabilities?.canDownload !== false,
+      url: isFolder ? '' : `https://lh3.googleusercontent.com/d/${encodeURIComponent(file.id)}=w1000`,
+      fullUrl: isFolder ? '' : `https://lh3.googleusercontent.com/d/${encodeURIComponent(file.id)}=s0`,
+      downloadUrl,
+    }
+  })
+  const headers = { 'Cache-Control': 'private, no-store' }
+  return new Response(request.method === 'HEAD' ? null : JSON.stringify({
+    files,
+    nextPageToken: typeof data.nextPageToken === 'string' ? data.nextPageToken : undefined,
+  }), { headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' } })
+}
+
+async function handleRequest(request, env) {
     const url = new URL(request.url)
 
-    // Chỉ cho phép GET và HEAD
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: { 'Access-Control-Max-Age': '86400' },
+      })
+    }
+
+    // Chỉ cho phép GET và HEAD; OPTIONS phục vụ kiểm tra CORS.
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       return new Response('Method Not Allowed', {
         status: 405,
         headers: {
-          Allow: 'GET, HEAD',
+          Allow: 'GET, HEAD, OPTIONS',
         },
       })
     }
+
+    if (url.pathname === '/folder') return listFolder(request, env, url)
 
     // Hỗ trợ cả ảnh và video
     const isVideo = url.pathname === '/video'
@@ -123,6 +213,12 @@ export default {
         `Google Drive metadata error: ${errorText || metadataRes.statusText}`,
         {
           status: metadataRes.status,
+          headers: {
+            'Cache-Control': 'no-store',
+            ...(metadataRes.headers.get('retry-after')
+              ? { 'Retry-After': metadataRes.headers.get('retry-after') }
+              : {}),
+          },
         }
       )
     }
@@ -232,6 +328,12 @@ export default {
         `Google Drive media error: ${errorText || upstream.statusText}`,
         {
           status: upstream.status,
+          headers: {
+            'Cache-Control': 'no-store',
+            ...(upstream.headers.get('retry-after')
+              ? { 'Retry-After': upstream.headers.get('retry-after') }
+              : {}),
+          },
         }
       )
     }
@@ -344,5 +446,17 @@ export default {
         headers,
       }
     )
+}
+
+export default {
+  async fetch(request, env) {
+    try {
+      return withCors(await handleRequest(request, env))
+    } catch {
+      return withCors(Response.json(
+        { error: 'Unable to fetch from Google Drive. Please retry.' },
+        { status: 502, headers: { 'Cache-Control': 'no-store' } }
+      ))
+    }
   },
 }

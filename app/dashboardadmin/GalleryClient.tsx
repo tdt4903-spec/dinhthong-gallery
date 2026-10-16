@@ -7,7 +7,8 @@ import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import FaceFilterPanel, { FaceScanIcon } from '../../components/ui/FaceFilterPanel'
 import { createBrowserClient } from '@supabase/ssr'
 import { saveAs } from 'file-saver'
-import { fetchCloudflareMediaBlob, runCloudflareArchive, type DownloadEntry } from '@/lib/cloudflare-download'
+import { fetchCloudflareMediaBlob, prepareCloudflareArchiveLocally, supportsLocalArchivePreparation, UnsupportedLocalArchiveError, runCloudflareArchive, type DownloadEntry } from '@/lib/cloudflare-download'
+import { fetchCloudflareFolderPage } from '@/lib/cloudflare-folder'
 import { 
   Search, Sun, Moon, Plus, Camera, 
   Trash2, LogOut, User as UserIcon,
@@ -315,6 +316,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [zippingFolderId, setZippingFolderId] = useState<string | null>(null)
   const [zipProgress, setZipProgress] = useState('')
   const archiveControllerRef = useRef<AbortController | null>(null)
+  const preparedArchiveRef = useRef<{ dispose: () => Promise<void> } | null>(null)
   const partResolverRef = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null)
   const [archiveProgress, setArchiveProgress] = useState<{
     title: string; completed: number; total: number; part: number
@@ -323,6 +325,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [pendingArchivePart, setPendingArchivePart] = useState<{
     blob: Blob; name: string; part: number; hasMore: boolean
   } | null>(null)
+  const [preparedArchive, setPreparedArchive] = useState<{ blob: Blob; name: string } | null>(null)
   const archiveDialogRef = useRef<HTMLDivElement | null>(null)
   const archiveDialogOpen = archiveProgress !== null
   useEffect(() => {
@@ -338,6 +341,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         event.preventDefault()
         archiveControllerRef.current?.abort()
         partResolverRef.current?.reject(new DOMException('Đã hủy tải', 'AbortError'))
+        const prepared = preparedArchiveRef.current
+        preparedArchiveRef.current = null
+        void prepared?.dispose().catch(() => {})
+        setPreparedArchive(null)
         setPendingArchivePart(null)
         setArchiveProgress(null)
       } else if (event.key === 'Tab') {
@@ -360,6 +367,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   useEffect(() => () => {
     archiveControllerRef.current?.abort()
     partResolverRef.current?.reject(new DOMException('Đã hủy tải', 'AbortError'))
+    const prepared = preparedArchiveRef.current
+    preparedArchiveRef.current = null
+    void prepared?.dispose().catch(() => {})
   }, [])
   const [pendingMobileShare, setPendingMobileShare] = useState<{ blob: Blob; fileName: string } | null>(null)
 
@@ -1533,10 +1543,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         if (!folderId || visited.has(folderId)) return
         visited.add(folderId)
         setZipProgress(`Đang đọc thư mục: ${prefix || root.title}`)
-        const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}`, { signal, cache: 'no-store' })
-        const data = await res.json()
-        if (!res.ok || !Array.isArray(data.files)) throw new Error(data.error || `Không đọc được thư mục ${root.title}`)
-        for (const item of data.files as MediaItem[]) {
+        const targetFiles: (MediaItem & { canDownload?: boolean })[] = []
+        let pageToken = ''
+        const visitedPages = new Set<string>()
+        do {
+          if (visitedPages.has(pageToken)) throw new Error(`Danh sách thư mục “${root.title}” bị lặp. Vui lòng thử lại.`)
+          visitedPages.add(pageToken)
+          const data = await fetchCloudflareFolderPage(folderId, pageToken, signal)
+          targetFiles.push(...data.files)
+          pageToken = typeof data.nextPageToken === 'string' ? data.nextPageToken : ''
+        } while (pageToken)
+        for (const item of targetFiles) {
           if (!item?.id || hiddenItemIds.has(item.id)) continue
           if (item.type === 'folder') {
             if (isSharedGuest && folderSettingsMap[item.id]?.password) {
@@ -1544,6 +1561,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             }
             await walk(`https://drive.google.com/drive/folders/${item.id}`, `${prefix}${item.name}/`)
           } else if (item.type === 'image' || item.type === 'video') {
+            if (item.canDownload === false) throw new Error(`Tệp “${item.name}” không cho phép tải xuống.`)
             entries.push(toDownloadEntry(item, prefix))
           }
         }
@@ -1559,50 +1577,61 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     if (archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare) return
     const controller = new AbortController()
     archiveControllerRef.current = controller
+    const previousArchive = preparedArchiveRef.current
+    preparedArchiveRef.current = null
+    void previousArchive?.dispose().catch(() => {})
+    setPreparedArchive(null)
     setZippingFolderId(key)
     setZipProgress('Chuẩn bị tải...')
     setArchiveProgress({ title, completed: 0, total: 0, part: 1, status: 'preparing' })
-    let writable: WritableStream<Uint8Array> | undefined
     try {
-      // Ask for a destination while the original click still has user activation.
-      const picker = (window as Window & {
-        showSaveFilePicker?: (options: unknown) => Promise<FileSystemFileHandle>
-      }).showSaveFilePicker
-      if (picker && !isMobileDevice()) {
-        try {
-          const handle = await picker.call(window, {
-            suggestedName: `${title.replace(/[\\/:*?"<>|]/g, '_')}.zip`,
-            types: [{ description: 'ZIP', accept: { 'application/zip': ['.zip'] } }],
-          })
-          writable = await handle.createWritable()
-        } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') throw error
-          // Browsers embedded in other apps may disallow the picker. Use the
-          // bounded archive parts below, each saved with a fresh user click.
-        }
-      }
       controller.signal.throwIfAborted()
       const entries = await getEntries(controller.signal)
       if (entries.length === 0) throw new Error('Album này không có tệp nào được phép tải.')
-      await runCloudflareArchive({
-        entries, title, signal: controller.signal, writable,
-        transformImage: activeSetting.enable_watermark ? applyWatermarkToImageBlob : undefined,
-        onProgress: progress => {
-          if (archiveControllerRef.current !== controller) return
-          setArchiveProgress({ title, ...progress })
-          setZipProgress(`${progress.completed}/${progress.total}`)
-        },
-        savePart: (blob, name, context) => new Promise<void>((resolve, reject) => {
-          if (controller.signal.aborted) { reject(new DOMException('Đã hủy tải', 'AbortError')); return }
-          partResolverRef.current = { resolve, reject }
-          setPendingArchivePart({ blob, name, part: context.part, hasMore: context.hasMore })
-        }),
-      })
+      let lastProgressUpdate = 0
+      let lastProgressStage = ''
+      const onProgress = (progress: { completed: number; total: number; part: number; status: string; fileName?: string }) => {
+        if (archiveControllerRef.current !== controller) return
+        const now = performance.now()
+        if (progress.status === lastProgressStage && progress.completed < progress.total && now - lastProgressUpdate < 200) return
+        lastProgressUpdate = now
+        lastProgressStage = progress.status
+        setArchiveProgress({ title, ...progress })
+        setZipProgress(`${progress.completed}/${progress.total}`)
+      }
+      let preparedLocally = false
+      if (await supportsLocalArchivePreparation()) {
+        try {
+          const prepared = await prepareCloudflareArchiveLocally({
+            entries, title, signal: controller.signal,
+            transformImage: activeSetting.enable_watermark ? applyWatermarkToImageBlob : undefined,
+            onProgress,
+          })
+          if (controller.signal.aborted) { await prepared.dispose(); controller.signal.throwIfAborted() }
+          preparedArchiveRef.current = prepared
+          setPreparedArchive({ blob: prepared.blob, name: prepared.name })
+          setArchiveProgress({ title, completed: entries.length, total: entries.length, part: 1, status: 'ready' })
+          preparedLocally = true
+        } catch (error) {
+          if (!(error instanceof UnsupportedLocalArchiveError)) throw error
+        }
+      }
+      if (!preparedLocally) {
+        await runCloudflareArchive({
+          entries, title, signal: controller.signal,
+          transformImage: activeSetting.enable_watermark ? applyWatermarkToImageBlob : undefined,
+          onProgress,
+          savePart: (blob, name, context) => new Promise<void>((resolve, reject) => {
+            if (controller.signal.aborted) { reject(new DOMException('Đã hủy tải', 'AbortError')); return }
+            partResolverRef.current = { resolve, reject }
+            setPendingArchivePart({ blob, name, part: context.part, hasMore: context.hasMore })
+          }),
+        })
+      }
       setDownloadSelectedIds(new Set())
       setSelectedAlbumIds(new Set())
       setSelectedItemIds(new Set())
     } catch (error) {
-      if (writable) await writable.abort().catch(() => {})
       if ((error instanceof Error && error.name === 'AbortError') || controller.signal.aborted) {
         setArchiveProgress(null)
       } else {
@@ -1620,10 +1649,27 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const cancelArchiveDownload = () => {
     archiveControllerRef.current?.abort()
+    const prepared = preparedArchiveRef.current
+    preparedArchiveRef.current = null
+    void prepared?.dispose().catch(() => {})
+    setPreparedArchive(null)
     partResolverRef.current?.reject(new DOMException('Đã hủy tải', 'AbortError'))
     partResolverRef.current = null
     setPendingArchivePart(null)
     setArchiveProgress(null)
+  }
+
+  const savePreparedArchive = () => {
+    if (!preparedArchive) return
+    // The ZIP is complete before this fresh user click starts the download.
+    saveAs(preparedArchive.blob, preparedArchive.name)
+    const prepared = preparedArchiveRef.current
+    preparedArchiveRef.current = null
+    // Browser download completion is not observable. Retain the disk-backed
+    // source through a long download; abandoned copies expire on the next job.
+    if (prepared) window.setTimeout(() => { void prepared.dispose().catch(() => {}) }, 24 * 60 * 60 * 1000)
+    setPreparedArchive(null)
+    setArchiveProgress(previous => previous ? { ...previous, status: 'download_started' } : null)
   }
 
   const savePendingArchivePart = () => {
@@ -6050,7 +6096,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           <div ref={archiveDialogRef} role="dialog" aria-modal="true" aria-label="Tiến trình tải album" tabIndex={-1} className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-[28px] border border-white/70 bg-[#fbfcf7] p-5 text-[#10261d] shadow-2xl outline-none sm:p-7">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-lg font-bold">{archiveProgress.status === 'error' ? 'Không thể hoàn tất tải album' : archiveProgress.status === 'complete' ? 'Đã hoàn tất tải album' : 'Đang tải album'}</h2>
+                <h2 className="text-lg font-bold">{archiveProgress.status === 'error' ? 'Không thể chuẩn bị ZIP' : archiveProgress.status === 'ready' ? 'ZIP đã sẵn sàng' : archiveProgress.status === 'download_started' || archiveProgress.status === 'complete' ? 'Đã bắt đầu tải ZIP' : 'Đang chuẩn bị ZIP'}</h2>
                 <p className="mt-1 break-words text-sm text-emerald-950/65">{archiveProgress.title}</p>
               </div>
               <button type="button" onClick={cancelArchiveDownload} aria-label="Đóng tiến trình tải" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-black/5"><X className="h-5 w-5" /></button>
@@ -6060,11 +6106,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             ) : (
               <div className="mt-5" aria-live="polite">
                 <div className="flex items-center gap-2 text-sm font-semibold">
-                  {archiveProgress.status !== 'complete' && <Loader2 className="h-4 w-4 animate-spin" />}
-                  <span>{archiveProgress.total ? `${archiveProgress.completed}/${archiveProgress.total} tệp` : (zipProgress || 'Đang chuẩn bị...')}</span>
+                  {!['ready', 'download_started', 'complete', 'saving'].includes(archiveProgress.status) && <Loader2 className="h-4 w-4 animate-spin" />}
+                  <span>{archiveProgress.status === 'archiving' ? 'Đang đóng gói ZIP: ' : archiveProgress.status === 'fetching' ? 'Đang lấy ảnh: ' : ''}{archiveProgress.total ? `${archiveProgress.completed}/${archiveProgress.total} tệp` : (zipProgress || 'Đang chuẩn bị...')}</span>
                 </div>
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100"><div className="h-full bg-emerald-600 transition-all" style={{ width: `${archiveProgress.total ? Math.min(100, archiveProgress.completed / archiveProgress.total * 100) : 0}%` }} /></div>
                 {archiveProgress.fileName && <p className="mt-2 break-all text-xs text-gray-500">{archiveProgress.fileName}</p>}
+              </div>
+            )}
+            {preparedArchive && (
+              <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                <p className="text-sm leading-6">Album đã được đóng gói đầy đủ. Nhấn bên dưới để tải về máy.</p>
+                <button type="button" onClick={savePreparedArchive} className="mt-3 min-h-11 w-full rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white">Tải ZIP</button>
               </div>
             )}
             {pendingArchivePart && (
@@ -6076,7 +6128,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </div>
             )}
             <button type="button" onClick={cancelArchiveDownload} className="mt-5 min-h-11 w-full rounded-xl border border-emerald-900/20 px-4 py-3 text-sm font-semibold">
-              {archiveProgress.status === 'complete' || archiveProgress.status === 'error' ? 'Đóng' : 'Hủy tải'}
+              {['ready', 'download_started', 'complete', 'error'].includes(archiveProgress.status) ? 'Đóng' : 'Hủy chuẩn bị'}
             </button>
           </div>
         </div>, document.body

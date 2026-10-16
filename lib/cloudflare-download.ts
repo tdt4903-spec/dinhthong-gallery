@@ -38,6 +38,20 @@ type ArchiveOptions = {
   savePart: (blob: Blob, name: string, context: ArchivePartContext) => Promise<void>
 }
 
+export type PreparedLocalArchive = {
+  blob: File
+  name: string
+  dispose: () => Promise<void>
+}
+
+type PrepareLocalArchiveOptions = {
+  entries: DownloadEntry[]
+  title: string
+  signal: AbortSignal
+  transformImage?: (blob: Blob) => Promise<Blob>
+  onProgress?: (progress: ArchiveProgress) => void
+}
+
 const WORKER_BASE = (process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || 'https://dinhthong-video-proxy.tdt4903.workers.dev').replace(/\/+$/, '')
 const REQUEST_TIMEOUT_MS = 90_000
 const MAX_ATTEMPTS = 3
@@ -298,6 +312,309 @@ function uniqueArchivePaths(entries: DownloadEntry[]): string[] {
     used.add(candidate.toLowerCase())
     return candidate
   })
+}
+
+export class UnsupportedLocalArchiveError extends Error {
+  constructor() {
+    super('Trình duyệt này chưa hỗ trợ chuẩn bị ZIP trên bộ nhớ tạm. Vui lòng dùng cách tải theo từng phần.')
+    this.name = 'UnsupportedLocalArchiveError'
+  }
+}
+
+async function localStorageRoot(): Promise<FileSystemDirectoryHandle> {
+  if (typeof navigator === 'undefined' || !navigator.storage || typeof navigator.storage.getDirectory !== 'function') {
+    throw new UnsupportedLocalArchiveError()
+  }
+  try {
+    return await navigator.storage.getDirectory()
+  } catch (error) {
+    if (error instanceof Error && error.name === 'QuotaExceededError') throw error
+    throw new UnsupportedLocalArchiveError()
+  }
+}
+
+async function removeExpiredLocalArchives(root: FileSystemDirectoryHandle): Promise<void> {
+  const iterableRoot = root as FileSystemDirectoryHandle & {
+    entries?: () => AsyncIterableIterator<[string, FileSystemHandle]>
+  }
+  if (typeof iterableRoot.entries !== 'function') return
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000
+  try {
+    for await (const [name, handle] of iterableRoot.entries()) {
+      const match = /^dinhthong-archive-(\d{13})-[a-f\d-]+$/i.exec(name)
+      if (handle.kind !== 'directory' || !match || Number(match[1]) >= cutoff) continue
+      await root.removeEntry(name, { recursive: true }).catch(() => {})
+    }
+  } catch {
+    // Abandoned-file housekeeping must not prevent a new download.
+  }
+}
+
+function bufferedPrivateFileWriter(file: FileSystemWritableFileStream): WritableStream<Uint8Array> {
+  const writer = file.getWriter()
+  const capacity = 1024 * 1024
+  let buffer = new Uint8Array(capacity)
+  let buffered = 0
+  let released = false
+  const release = () => {
+    if (released) return
+    released = true
+    writer.releaseLock()
+  }
+  const abort = async (reason: unknown) => {
+    buffered = 0
+    buffer = new Uint8Array(0)
+    if (released) return
+    try { await writer.abort(reason) } catch {} finally { release() }
+  }
+  const flush = async () => {
+    if (!buffered) return
+    await writer.write(buffer.subarray(0, buffered))
+    buffered = 0
+  }
+  return new WritableStream<Uint8Array>({
+    async write(chunk) {
+      try {
+        let offset = 0
+        while (offset < chunk.byteLength) {
+          const count = Math.min(capacity - buffered, chunk.byteLength - offset)
+          buffer.set(chunk.subarray(offset, offset + count), buffered)
+          buffered += count
+          offset += count
+          if (buffered === capacity) await flush()
+        }
+      } catch (error) {
+        await abort(error)
+        throw error
+      }
+    },
+    async close() {
+      try {
+        await flush()
+        await writer.close()
+        buffer = new Uint8Array(0)
+      } catch (error) {
+        await abort(error)
+        throw error
+      } finally {
+        release()
+      }
+    },
+    abort,
+  })
+}
+
+/** Probe writable OPFS support without opening a user-facing file picker. */
+export async function supportsLocalArchivePreparation(): Promise<boolean> {
+  let root: FileSystemDirectoryHandle | undefined
+  const probeName = `dinhthong-probe-${crypto.randomUUID()}`
+  try {
+    root = await localStorageRoot()
+    const handle = await root.getFileHandle(probeName, { create: true })
+    if (typeof handle.createWritable !== 'function') return false
+    const writable = await handle.createWritable()
+    await writable.close()
+    return true
+  } catch {
+    return false
+  } finally {
+    await root?.removeEntry(probeName).catch(() => {})
+  }
+}
+
+/**
+ * Stage originals on the browser's private disk, then finish one ZIP before
+ * exposing its File. Network downloads use Cloudflare only; no album is kept in
+ * RAM and no user download starts until the caller offers the completed File.
+ */
+export async function prepareCloudflareArchiveLocally(options: PrepareLocalArchiveOptions): Promise<PreparedLocalArchive> {
+  const { entries, title, signal, transformImage, onProgress } = options
+  throwIfAborted(signal)
+  if (!entries.length) throw new Error('Album chưa có ảnh hoặc video để tải.')
+  const root = await localStorageRoot()
+  await removeExpiredLocalArchives(root)
+  throwIfAborted(signal)
+  const directoryName = `dinhthong-archive-${Date.now()}-${crypto.randomUUID()}`
+  const directory = await root.getDirectoryHandle(directoryName, { create: true })
+  let disposed = false
+  let disposing: Promise<void> | undefined
+  const dispose = (): Promise<void> => {
+    if (disposed) return Promise.resolve()
+    if (disposing) return disposing
+    disposing = (async () => {
+      try {
+        await root.removeEntry(directoryName, { recursive: true })
+      } catch (error) {
+        if (!(error instanceof Error && error.name === 'NotFoundError')) throw error
+      }
+      disposed = true
+    })().finally(() => { disposing = undefined })
+    return disposing
+  }
+  const controller = new AbortController()
+  const localSignal = controller.signal
+  const onAbort = () => controller.abort(abortError(signal))
+  signal.addEventListener('abort', onAbort, { once: true })
+  if (signal.aborted) onAbort()
+  const names = uniqueArchivePaths(entries)
+  const stagedSizes = new Array<number>(entries.length).fill(0)
+  const handles = new Array<FileSystemFileHandle>(entries.length)
+  const zipOverhead = names.reduce((total, name) => total + 200 + new TextEncoder().encode(name).byteLength * 2, 1024)
+  let availableBytes: number | undefined
+  let completed = 0
+  let fileName = entries[0].name
+  let nextIndex = 0
+  let failure: unknown
+  let zipWritable: FileSystemWritableFileStream | undefined
+  const progress = (status: ArchiveProgress['status']) => onProgress?.({ completed, total: entries.length, fileName, part: 1, status })
+  const quotaError = () => {
+    const error = new Error('Bộ nhớ trống của trình duyệt không đủ để chuẩn bị toàn bộ ZIP. Hãy giải phóng dung lượng hoặc chọn ít ảnh hơn.')
+    error.name = 'QuotaExceededError'
+    return error
+  }
+  const checkQuota = () => {
+    const stagedBytes = stagedSizes.reduce((total, size) => total + size, 0)
+    // Originals and the completed ZIP can temporarily coexist on private disk.
+    if (availableBytes !== undefined && stagedBytes * 2 + zipOverhead > availableBytes) throw quotaError()
+  }
+
+  try {
+    try {
+      const estimate = await navigator.storage.estimate()
+      if (Number.isFinite(estimate.quota) && Number.isFinite(estimate.usage)) {
+        availableBytes = Math.max(0, estimate.quota! - estimate.usage!)
+        checkQuota()
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'QuotaExceededError') throw error
+      // Some private browsing modes do not expose an estimate. Actual OPFS
+      // writes still report quota failures and are handled below.
+    }
+    // Keep staged inputs in one directory so cleanup needs one filesystem call.
+    const sources = await directory.getDirectoryHandle('sources', { create: true })
+    // Establish writable support before downloading any originals.
+    const firstHandle = await sources.getFileHandle('source-0', { create: true })
+    if (typeof firstHandle.createWritable !== 'function') throw new UnsupportedLocalArchiveError()
+    const probe = await firstHandle.createWritable()
+    await probe.close()
+
+    async function stageEntry(index: number) {
+      const entry = entries[index]
+      const handle = index === 0 ? firstHandle : await sources.getFileHandle(`source-${index}`, { create: true })
+      handles[index] = handle
+      let writable: FileSystemWritableFileStream | undefined
+      let response: Response | undefined
+      try {
+        throwIfAborted(localSignal)
+        fileName = entry.name
+        progress('fetching')
+        response = await fetchCloudflareMedia(entry, { signal: localSignal })
+        const expectedSize = contentLength(response)
+        if (expectedSize !== undefined) {
+          stagedSizes[index] = expectedSize
+          checkQuota()
+        }
+        writable = await handle.createWritable()
+        if (transformImage && entry.type === 'image') {
+          const original = await responseToBlob(response, entry, localSignal)
+          const image = await transformImage(original)
+          throwIfAborted(localSignal)
+          if (!image.size || forbiddenMediaType(image.type)) throw new Error(`Không xử lý được ảnh “${entry.name}”.`)
+          if (image.size > BLOB_MAX_BYTES) throw new Error(`Ảnh “${entry.name}” quá lớn để xử lý an toàn.`)
+          stagedSizes[index] = image.size
+          checkQuota()
+          await image.stream().pipeTo(bufferedPrivateFileWriter(writable), { signal: localSignal })
+        } else {
+          if (!response.body) throw new Error(`Tệp “${entry.name}” không có dữ liệu.`)
+          let received = 0
+          const counter = new TransformStream<Uint8Array, Uint8Array>({
+            transform(chunk, output) {
+              received += chunk.byteLength
+              if (expectedSize === undefined) {
+                stagedSizes[index] = received
+                checkQuota()
+              }
+              output.enqueue(chunk)
+            },
+          })
+          await response.body.pipeThrough(counter).pipeTo(bufferedPrivateFileWriter(writable), { signal: localSignal })
+        }
+        writable = undefined
+        if (!stagedSizes[index]) throw new Error(`Tệp “${entry.name}” chưa tải đầy đủ.`)
+        completed++
+        fileName = entry.name
+        progress('fetching')
+      } catch (error) {
+        if (response?.body && !response.body.locked) await response.body.cancel(error).catch(() => {})
+        if (writable) await writable.abort(error).catch(() => {})
+        throw error
+      }
+    }
+
+    const workers = Array.from({ length: Math.min(transformImage ? 1 : 4, entries.length) }, async () => {
+      try {
+        while (nextIndex < entries.length) {
+          throwIfAborted(localSignal)
+          const index = nextIndex++
+          await stageEntry(index)
+        }
+      } catch (error) {
+        if (failure === undefined) failure = error
+        controller.abort(error)
+        throw error
+      }
+    })
+    await Promise.allSettled(workers)
+    if (failure !== undefined) throw failure
+    throwIfAborted(localSignal)
+
+    completed = 0
+    progress('archiving')
+    const archiveHandle = await directory.getFileHandle('archive.zip', { create: true })
+    zipWritable = await archiveHandle.createWritable()
+    const { makeZip } = await import('client-zip')
+    async function* stagedFiles() {
+      for (let index = 0; index < entries.length; index++) {
+        throwIfAborted(localSignal)
+        fileName = entries[index].name
+        progress('archiving')
+        const file = await handles[index].getFile()
+        if (!file.size || file.size !== stagedSizes[index]) throw new Error(`Tệp “${entries[index].name}” chưa tải đầy đủ.`)
+        yield { name: names[index], input: file }
+        completed++
+        progress('archiving')
+      }
+    }
+    const iterator = stagedFiles()
+    const inputs = {
+      next: () => iterator.next(),
+      async throw(reason: unknown) {
+        controller.abort(reason)
+        // client-zip does not await its iterator cancellation hook.
+        try { await iterator.throw(reason) } catch {}
+        return { done: true as const, value: undefined }
+      },
+      [Symbol.asyncIterator]() { return this },
+    }
+    await makeZip(inputs).pipeTo(bufferedPrivateFileWriter(zipWritable), { signal: localSignal })
+    zipWritable = undefined
+    await directory.removeEntry('sources', { recursive: true })
+    throwIfAborted(localSignal)
+    const blob = await archiveHandle.getFile()
+    if (!blob.size || completed !== entries.length) throw new Error('Không chuẩn bị được đầy đủ album. Vui lòng thử lại.')
+    progress('complete')
+    const name = `${sanitizeSegment(title.replace(/[\\/]/g, '_').replace(/\.zip$/i, '') || 'Album')}.zip`
+    return { blob, name, dispose }
+  } catch (error) {
+    controller.abort(error)
+    if (zipWritable) await zipWritable.abort(error).catch(() => {})
+    await dispose().catch(() => {})
+    if (signal.aborted) throw abortError(signal)
+    if (error instanceof Error && error.name === 'QuotaExceededError') throw quotaError()
+    throw error
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
 }
 
 /** ZIP64 streams to disk when supported; other browsers save bounded ZIP parts. */
