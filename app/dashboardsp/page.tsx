@@ -39,6 +39,7 @@ import {
 
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
+import ProductPreviewImage from '@/components/ui/ProductPreviewImage'
 
 type Category = {
   id: string
@@ -1242,17 +1243,11 @@ export default function CustomerProductsDashboard() {
                           >
                             <td className="px-5 py-4">
                               <div className="h-14 w-20 overflow-hidden rounded-lg bg-black/10">
-                                {album.cover_url ? (
-                                  <img
-                                    src={
-                                      album.cover_url
-                                    }
-                                    alt={
-                                      album.title
-                                    }
-                                    className="h-full w-full object-cover"
-                                  />
-                                ) : null}
+                                <ProductPreviewImage
+                                  src={album.cover_url}
+                                  alt={album.title}
+                                  className="h-full w-full object-cover"
+                                />
                               </div>
                             </td>
 
@@ -1839,14 +1834,13 @@ export default function CustomerProductsDashboard() {
                               }`}
                             >
                               <div className="relative aspect-[4/5] overflow-hidden bg-black/10">
-                                <img
+                                <ProductPreviewImage
                                   src={
-                                    image.url
+                                    image.url || image.id
                                   }
                                   alt={
                                     image.name
                                   }
-                                  loading="lazy"
                                   className="h-full w-full object-cover"
                                 />
 

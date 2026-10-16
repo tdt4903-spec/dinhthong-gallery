@@ -1,5 +1,7 @@
 'use client'
 
+import ProductPreviewImage from '@/components/ui/ProductPreviewImage'
+
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -570,10 +572,9 @@ export default function CustomerProductPhotosPage() {
                     }`}
                   >
                     <div className="relative aspect-[4/5] overflow-hidden bg-black/10">
-                      <img
-                        src={item.url}
+                      <ProductPreviewImage
+                        src={item.url || item.id}
                         alt={item.name}
-                        loading="lazy"
                         className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]"
                       />
 
