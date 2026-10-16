@@ -15,7 +15,6 @@ import {
 import { getCustomerProductsSupabase } from '@/lib/customer-products'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { getPublicCategoryPath } from '@/lib/public-gallery-paths'
-import SiteLogo from '@/components/SiteLogo'
 
 type DriveItem = {
   id: string
@@ -453,7 +452,6 @@ export default function PublicAlbumPage() {
         }`}
       >
         <div className="mx-auto flex h-[68px] max-w-[1600px] items-center justify-between gap-3 px-5 sm:px-8">
-          <Link href="/" prefetch={false} aria-label="Trang chủ" className="inline-flex shrink-0 items-center"><SiteLogo /></Link>
           <Link
             href={category?.slug ? getPublicCategoryPath(category.slug) : '/'}
             prefetch={false}

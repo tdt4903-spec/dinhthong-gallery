@@ -4,7 +4,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
-import FaceFilterPanel, { FaceScanIcon } from '../../components/ui/FaceFilterPanel'
+import dynamic from 'next/dynamic'
+import { FaceScanIcon } from '../../components/ui/FaceScanIcon'
 import AlbumVideoPreview from '../../components/ui/AlbumVideoPreview'
 import { createBrowserClient } from '@supabase/ssr'
 import { saveAs } from 'file-saver'
@@ -17,6 +18,8 @@ import {
   Trash2, LogOut, User as UserIcon,
   Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, Lock as LockIcon, ZoomIn, ZoomOut, RotateCcw, Send, Bell
 } from 'lucide-react'
+
+const FaceFilterPanel = dynamic(() => import('../../components/ui/FaceFilterPanel'), { ssr: false })
 
 interface MediaItem {
   id: string
@@ -411,6 +414,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   } | null>(null)
 
   const [isFaceFilterOpen, setIsFaceFilterOpen] = useState(false)
+  const [faceToolsRequested, setFaceToolsRequested] = useState(false)
+  useEffect(() => {
+    if (isFaceFilterOpen) setFaceToolsRequested(true)
+  }, [isFaceFilterOpen])
   const [faceMatchedIds, setFaceMatchedIds] = useState<Set<string> | null>(null)
   const [inspectFaceImageItem, setInspectFaceImageItem] = useState<MediaItem | null>(null)
   const [clearFaceFilterSignal, setClearFaceFilterSignal] = useState(0)
@@ -3011,13 +3018,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     const initData = async () => {
       try {
-        await fetchHiddenItemIds()
-        const knownSet: Set<string> = await fetchKnownFolderIds()
-        await fetchCustomNames()
-        await fetchCustomCovers()
-        await fetchComments()
-        const fSettings = await fetchFolderSettings()
-        const fAlbums = await fetchAlbumsFromSupabase()
+        const [, knownSet, , , , fSettings, fAlbums, masterFolders] = await Promise.all([
+          fetchHiddenItemIds(),
+          fetchKnownFolderIds(),
+          fetchCustomNames(),
+          fetchCustomCovers(),
+          fetchComments(),
+          fetchFolderSettings(),
+          fetchAlbumsFromSupabase(),
+          sharedId ? Promise.resolve([] as MasterFolderItem[]) : fetchMasterFoldersList(),
+        ])
         const savedAdminLocation = !sharedId ? readSavedAdminLocation() : null
 
         if (sharedId) {
@@ -3138,7 +3148,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             }
           }
 
-          const masterFolders = await fetchMasterFoldersList()
           checkAllMasterFolders(masterFolders, false, knownSet)
         }
 
@@ -3191,11 +3200,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }, [isSharedGuest, guestId, guestRootAlbumId, guestCustomerName, guestCanSelect, showGuestNameModal, folderSettingsMap])
 
   useEffect(() => {
-    if (isSharedGuest) return
+    if (isSharedGuest || loading) return
     fetchNotifications()
     const interval = window.setInterval(fetchNotifications, 15000)
     return () => window.clearInterval(interval)
-  }, [isSharedGuest, albums.length, Object.keys(folderSettingsMap).length])
+  }, [isSharedGuest, loading, albums.length, Object.keys(folderSettingsMap).length])
 
   useEffect(() => {
     if (previewMedia) {
@@ -3215,6 +3224,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }, [previewMedia, folderHistory, selectedAlbum, customNames, comments])
 
   useEffect(() => {
+    if (loading) return
     (albums || []).forEach(async (album) => {
       if (album && !album.coverUrl && album.driveUrl && !album.driveUrl.includes('...')) {
         try {
@@ -3231,7 +3241,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         }
       }
     })
-  }, [albums, hiddenItemIds])
+  }, [albums, hiddenItemIds, loading])
 
   useEffect(() => {
     if (currentIndex === -1 || previewSourceList.length === 0) return
@@ -4533,7 +4543,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             </section>
 
             {/* BẢNG NHẬN DIỆN & LỌC KHUÔN MẶT */}
-            {downloadableImages.length > 0 && (
+            {downloadableImages.length > 0 && (isFaceFilterOpen || faceToolsRequested) && (
               <FaceFilterPanel
                 folderId={currentActiveFolderId || selectedAlbum?.id || 'album'}
                 images={downloadableImages}

@@ -147,10 +147,12 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
             : 'border-emerald-950/8 bg-[#fbfdf9]/94'
         }`}
       >
-        <div className={`mx-auto min-h-[68px] max-w-[1500px] items-center gap-3 px-4 py-2 sm:px-6 ${category ? 'grid grid-cols-[auto_minmax(0,1fr)_49px] sm:grid-cols-[200px_minmax(0,1fr)_200px]' : 'flex'}`}>
+        <div className={`mx-auto min-h-[68px] max-w-[1500px] items-center gap-3 px-4 py-2 sm:px-6 ${category ? 'grid grid-cols-[49px_minmax(0,1fr)_49px] sm:grid-cols-[120px_minmax(0,1fr)_120px]' : 'flex'}`}>
           <Link href="/" prefetch={false} aria-label="Quay lại trang chủ" className={`inline-flex shrink-0 items-center gap-1 ${category ? '' : 'mr-auto'}`}>
-            {category && <ArrowLeft className="h-4 w-4 shrink-0" />}
-            <SiteLogo />
+            {category ? <>
+              <ArrowLeft className="h-4 w-4 shrink-0" />
+              <span className="hidden text-sm font-semibold sm:inline">Trang chủ</span>
+            </> : <SiteLogo isDarkMode={isDarkMode} />}
           </Link>
           {category ? (
             <p className="min-w-0 break-words text-center text-sm font-semibold uppercase tracking-wide sm:text-lg">{category.name}</p>
