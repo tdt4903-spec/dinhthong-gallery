@@ -7,8 +7,6 @@ import {
   ImageIcon,
   Loader2,
   Moon,
-  Pause,
-  Play,
   Sun,
 } from 'lucide-react'
 
@@ -53,7 +51,6 @@ export default function AlbumPublicPage() {
   const [activeCategory, setActiveCategory] = useState('')
   const [loading, setLoading] = useState(true)
   const heroRef = useRef<HTMLDivElement>(null)
-  const [heroMotionPaused, setHeroMotionPaused] = useState(false)
   const [heroVisible, setHeroVisible] = useState(true)
 
   useEffect(() => {
@@ -254,7 +251,7 @@ export default function AlbumPublicPage() {
 
       {/* HERO */}
       <section className="px-3 pt-3 sm:px-5 sm:pt-5">
-        <div ref={heroRef} data-motion-paused={heroMotionPaused || !heroVisible} className="public-hero relative mx-auto h-[560px] max-w-[1500px] overflow-hidden rounded-[30px] sm:h-[640px]">
+        <div ref={heroRef} data-motion-paused={!heroVisible} className="public-hero relative mx-auto h-[560px] max-w-[1500px] overflow-hidden rounded-[30px] sm:h-[640px]">
 
           <img
             src={SITE_BANNER_URL}
@@ -276,17 +273,6 @@ export default function AlbumPublicPage() {
                 : 'bg-[linear-gradient(90deg,rgba(7,20,14,.76),rgba(7,20,14,.34),rgba(7,20,14,.05))]'
             }`}
           />
-
-          <button
-            type="button"
-            onClick={() => setHeroMotionPaused(paused => !paused)}
-            aria-label={heroMotionPaused ? 'Tiếp tục hiệu ứng ảnh' : 'Tạm dừng hiệu ứng ảnh'}
-            title={heroMotionPaused ? 'Tiếp tục hiệu ứng ảnh' : 'Tạm dừng hiệu ứng ảnh'}
-            className="absolute right-4 top-4 z-20 inline-flex h-10 min-w-10 items-center justify-center gap-2 rounded-full border border-white/25 bg-black/25 px-3 text-[10px] font-semibold text-white backdrop-blur-md transition-colors hover:bg-black/45 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white motion-reduce:hidden sm:right-6 sm:top-6"
-          >
-            {heroMotionPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
-            <span className="hidden sm:inline">{heroMotionPaused ? 'Tiếp tục' : 'Tạm dừng'}</span>
-          </button>
 
           <div className="relative z-10 flex h-full items-end p-6 sm:p-12 lg:p-16">
             <div className="w-full min-w-0 max-w-[820px] text-white">
@@ -335,7 +321,7 @@ export default function AlbumPublicPage() {
           </div>
 
           {/* HERO FOOTNOTE — GÓC PHẢI DƯỚI */}
-          <div className="public-hero-reveal public-hero-footnote absolute bottom-8 right-8 z-20 hidden max-w-[380px] text-right text-[9px] font-medium leading-5 tracking-[0.08em] text-white/55 lg:block">
+          <div className="public-hero-reveal public-hero-footnote absolute bottom-8 right-8 z-20 hidden max-w-[380px] text-right text-[9px] font-medium uppercase leading-5 tracking-[0.08em] text-white/55 lg:block">
             Mỗi bức ảnh là một câu chuyện, cảm ơn bạn đã tiếp tục hành trình cùng DinhThong Photos.
           </div>
 
@@ -466,7 +452,7 @@ export default function AlbumPublicPage() {
 
                       {album.description && (
                         <p
-                          className={`mt-2 whitespace-pre-wrap break-words text-[10px] leading-5 tracking-[0.08em] ${
+                          className={`mt-2 whitespace-pre-wrap break-words text-[10px] uppercase leading-5 tracking-[0.08em] ${
                             isDarkMode
                               ? 'text-white/38'
                               : 'text-gray-500'
