@@ -1,8 +1,9 @@
 'use client'
 
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
+import FaceFilterPanel, { FaceScanIcon } from '../../components/ui/FaceFilterPanel'
 import { createBrowserClient } from '@supabase/ssr'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
@@ -332,6 +333,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     totalBatches: number
     totalImages: number
   } | null>(null)
+
+  const [isFaceFilterOpen, setIsFaceFilterOpen] = useState(false)
+  const [faceMatchedIds, setFaceMatchedIds] = useState<Set<string> | null>(null)
+  const [inspectFaceImageItem, setInspectFaceImageItem] = useState<MediaItem | null>(null)
+  const [clearFaceFilterSignal, setClearFaceFilterSignal] = useState(0)
+  const handleFaceFilterChange = useCallback((matchedIds: Set<string> | null) => {
+    setFaceMatchedIds(matchedIds)
+    setCurrentPage(1)
+  }, [])
+  const handleClearInspectFaceImage = useCallback(() => setInspectFaceImageItem(null), [])
 
   const [currentPage, setCurrentPage] = useState(1)
   const [gridDensity, setGridDensity] = useState<'comfortable' | 'compact'>('comfortable')
@@ -926,7 +937,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  const visibleItems = (items || []).filter(item => item && !hiddenItemIds.has(item.id))
+  const visibleItems = useMemo(() => (items || []).filter(item => item && !hiddenItemIds.has(item.id)), [items, hiddenItemIds])
   const subFolders = visibleItems.filter(item => item.type === 'folder')
   const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
 
@@ -949,7 +960,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         ''
       )
     : ''
-  const downloadableImages = mediaFiles.filter(item => item.type === 'image')
+  const downloadableImages = useMemo(() => visibleItems.filter(item => item.type === 'image'), [visibleItems])
   const selectedDownloadImages = downloadableImages.filter(item => downloadSelectedIds.has(item.id))
   const areAllDownloadImagesSelected = downloadableImages.length > 0 && selectedDownloadImages.length === downloadableImages.length
 
@@ -968,6 +979,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const displayRatings = !isSharedGuest && hasLatestGuestSelections ? latestGuestRatings : ratings
 
   const filteredMediaFiles = mediaFiles.filter(img => {
+    if (faceMatchedIds !== null) {
+      if (img.type !== 'image' || !faceMatchedIds.has(img.id)) return false
+    }
     if (starFilter === 'all') return true
     const imgStar = displayRatings[img.id] || 0
     if (starFilter === 'selected') return imgStar > 0
@@ -1380,6 +1394,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     // Xóa nội dung thư mục cũ ngay khi chuyển thư mục để header không nháy nhầm ảnh bìa.
     setItems([])
     setStarFilter('all')
+    setFaceMatchedIds(null)
+    setIsFaceFilterOpen(false)
+    setInspectFaceImageItem(null)
     setCurrentPage(1)
     setSelectedItemIds(new Set())
     setDownloadSelectedIds(new Set())
@@ -1463,9 +1480,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   // DESKTOP: dùng chính vùng tick tải ảnh ở trên để nén các ảnh đã chọn thành ZIP.
   // Không dùng selectedItemIds và không liên quan đến ratings / file TXT.
-  const handleDownloadSelectedImagesDesktopZip = async () => {
+  const handleDownloadSelectedImagesDesktopZip = async (customList?: unknown) => {
     if (zippingFolderId) return
-    if (selectedDownloadImages.length === 0) {
+    const targetImages = Array.isArray(customList) ? (customList as MediaItem[]) : selectedDownloadImages
+    if (targetImages.length === 0) {
       void showAlert('Hãy tick ít nhất 1 ảnh trước khi tải.')
       return
     }
@@ -1475,7 +1493,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     try {
       const zip = new JSZip()
-      const total = selectedDownloadImages.length
+      const total = targetImages.length
       let completedCount = 0
       const CONCURRENCY_LIMIT = 5
 
@@ -1498,7 +1516,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       }
 
       for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
-        const chunk = selectedDownloadImages.slice(i, i + CONCURRENCY_LIMIT)
+        const chunk = targetImages.slice(i, i + CONCURRENCY_LIMIT)
         await Promise.all(chunk.map(fetchImage))
       }
 
@@ -1512,6 +1530,20 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     } finally {
       setZippingFolderId(null)
       setZipProgress('')
+    }
+  }
+
+  const handleDownloadFromFaceFilter = async (targetItems: { id: string; name: string }[]) => {
+    const targetIdSet = new Set(targetItems.map(item => item.id))
+    const resolvedMediaItems = downloadableImages.filter(item => targetIdSet.has(item.id))
+    if (resolvedMediaItems.length === 0) {
+      void showAlert('Không có ảnh nào trong danh sách lọc để tải.')
+      return
+    }
+    if (isMobileDevice()) {
+      await startMobileImageDownload(resolvedMediaItems, `${currentActiveFolderTitle}_khuon_mat`)
+    } else {
+      await handleDownloadSelectedImagesDesktopZip(resolvedMediaItems)
     }
   }
 
@@ -4253,8 +4285,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
                 <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
                   <button
-                    onClick={() => { setStarFilter('all'); setCurrentPage(1) }}
-                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'all' ? 'border-emerald-500 bg-emerald-600 text-white shadow' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                    onClick={() => { setStarFilter('all'); setFaceMatchedIds(null); setClearFaceFilterSignal(prev => prev + 1); setCurrentPage(1) }}
+                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'all' && faceMatchedIds === null ? 'border-emerald-500 bg-emerald-600 text-white shadow' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
                     <ImageIcon className="h-3.5 w-3.5" /> Tất cả ảnh ({mediaFiles.length})
                   </button>
@@ -4269,6 +4301,24 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 5 ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
                     <Star className="h-3.5 w-3.5 fill-current" /> Ảnh 5 sao ({mediaFiles.filter(img => (displayRatings[img.id] || 0) === 5).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsFaceFilterOpen(prev => !prev)}
+                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition cursor-pointer ${
+                      isFaceFilterOpen || faceMatchedIds !== null
+                        ? 'border-emerald-500 bg-emerald-600 text-white shadow'
+                        : isDarkMode
+                        ? 'border-emerald-400/30 bg-emerald-500/12 text-emerald-300 hover:bg-emerald-500/20'
+                        : 'border-emerald-600/25 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                    }`}
+                  >
+                    <FaceScanIcon className="h-3.5 w-3.5" />
+                    <span>
+                      {faceMatchedIds !== null
+                        ? `Lọc khuôn mặt (${faceMatchedIds.size})`
+                        : 'Lọc khuôn mặt'}
+                    </span>
                   </button>
                 </div>
 
@@ -4314,12 +4364,46 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       <Star className="h-3 w-3 fill-current text-emerald-400" /> {star}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => setIsFaceFilterOpen(prev => !prev)}
+                    className={`shrink-0 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition cursor-pointer ${
+                      isFaceFilterOpen || faceMatchedIds !== null
+                        ? 'bg-emerald-600 text-white'
+                        : isDarkMode
+                        ? 'bg-emerald-500/15 text-emerald-300'
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-600/20'
+                    }`}
+                  >
+                    <FaceScanIcon className="h-3 w-3" />
+                    <span>{faceMatchedIds !== null ? `Khuôn mặt (${faceMatchedIds.size})` : 'Khuôn mặt'}</span>
+                  </button>
                   {selectedImagesList.length > 0 && (
                     <button onClick={handleClearAllSelections} className="ml-auto shrink-0 inline-flex items-center gap-1 rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-red-500"><Trash2 className="h-3 w-3" /> Xóa sao ({selectedImagesList.length})</button>
                   )}
                 </div>
               )}
             </section>
+
+            {/* BẢNG NHẬN DIỆN & LỌC KHUÔN MẶT */}
+            {downloadableImages.length > 0 && (
+              <FaceFilterPanel
+                folderId={currentActiveFolderId || selectedAlbum?.id || 'album'}
+                images={downloadableImages}
+                isDarkMode={isDarkMode}
+                isOpen={isFaceFilterOpen}
+                onClose={() => setIsFaceFilterOpen(false)}
+                downloadSelectedIds={downloadSelectedIds}
+                onUpdateDownloadSelectedIds={(nextIds) => setDownloadSelectedIds(nextIds)}
+                onFaceFilterChange={handleFaceFilterChange}
+                onDownloadImages={handleDownloadFromFaceFilter}
+                isDownloading={zippingFolderId === 'download_selected_images' || isPreparingMobileImages}
+                downloadProgressText={zipProgress || mobileDownloadProgress}
+                inspectImageItem={inspectFaceImageItem}
+                onClearInspectImageItem={handleClearInspectFaceImage}
+                clearSignal={clearFaceFilterSignal}
+              />
+            )}
 
             {/* ADMIN ALBUM TOOLS — compact, không chiếm không gian của khách */}
             {!isSharedGuest && (
@@ -4328,6 +4412,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <button onClick={handleOpenCurrentFolderSetting} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-500"><Settings className="h-3.5 w-3.5" /> Cài đặt Album</button>
                 <button onClick={() => { fetchComments(); setIsCommentModalOpen(true) }} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 text-[10px] font-semibold text-amber-500"><MessageSquare className="h-3.5 w-3.5" /> Bình luận <span className="rounded-full bg-amber-500/15 px-1.5">{commentedImagesList.length}</span></button>
                 <button onClick={handleOpenVisibilityManager} className={`shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[10px] font-semibold ${isDarkMode ? 'border-white/10 bg-white/5 text-white/60' : 'border-gray-200 bg-gray-50 text-gray-600'}`}><Eye className="h-3.5 w-3.5" /> Ẩn / Hiện mục</button>
+                <button onClick={() => setIsFaceFilterOpen(prev => !prev)} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"><FaceScanIcon className="h-3.5 w-3.5" /> Nhận diện khuôn mặt</button>
               </section>
             )}
 
@@ -4820,19 +4905,34 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 ))}
               </div>
 
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {previewMedia.type === 'image' ? (
+              <div className={`mt-2 grid ${previewMedia.type === 'image' ? 'grid-cols-3' : 'grid-cols-1'} gap-2`}>
+                {previewMedia.type === 'image' && (
                   <button
                     type="button"
                     onClick={(e) => toggleMobileDownloadSelection(previewMedia.id, e)}
-                    className={`flex h-10 items-center justify-center gap-2 rounded-xl border text-[11px] font-semibold ${downloadSelectedIds.has(previewMedia.id) ? 'border-emerald-400/35 bg-emerald-500/16 text-emerald-300' : 'border-white/12 bg-white/6 text-white/75'}`}
+                    className={`flex h-10 items-center justify-center gap-1.5 rounded-xl border text-[10px] font-semibold ${downloadSelectedIds.has(previewMedia.id) ? 'border-emerald-400/35 bg-emerald-500/16 text-emerald-300' : 'border-white/12 bg-white/6 text-white/75'}`}
                   >
-                    {downloadSelectedIds.has(previewMedia.id) ? <CheckSquare className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-                    {downloadSelectedIds.has(previewMedia.id) ? 'Đã chọn tải' : 'Chọn để tải'}
+                    {downloadSelectedIds.has(previewMedia.id) ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                    {downloadSelectedIds.has(previewMedia.id) ? 'Đã chọn tải' : 'Chọn tải'}
                   </button>
-                ) : <div />}
-                <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-600 text-[11px] font-bold text-white disabled:opacity-50">
-                  {downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                )}
+                {previewMedia.type === 'image' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = previewMedia
+                      setPreviewMedia(null)
+                      setIsFaceFilterOpen(true)
+                      setInspectFaceImageItem(target)
+                    }}
+                    className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-emerald-400/30 bg-emerald-500/15 text-[10px] font-semibold text-emerald-300"
+                  >
+                    <FaceScanIcon className="h-3.5 w-3.5" />
+                    <span>Tìm mặt này</span>
+                  </button>
+                )}
+                <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 text-[10px] font-bold text-white disabled:opacity-50">
+                  {downloadingId === previewMedia.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                   Tải ảnh
                 </button>
               </div>
@@ -4874,6 +4974,26 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   }`} />
                 </button>
               ))}
+
+              {previewMedia.type === 'image' && (
+                <>
+                  <div className="h-4 w-[1px] bg-white/20 mx-1" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = previewMedia
+                      setPreviewMedia(null)
+                      setIsFaceFilterOpen(true)
+                      setInspectFaceImageItem(target)
+                    }}
+                    className="inline-flex items-center gap-1 text-[10px] sm:text-xs text-emerald-400 hover:text-emerald-300 font-medium px-2 py-0.5 rounded-full hover:bg-white/10 transition cursor-pointer"
+                    title="Tìm và lọc tất cả ảnh trong album có khuôn mặt trong tấm ảnh này"
+                  >
+                    <FaceScanIcon className="w-3.5 h-3.5" />
+                    <span>Tìm mặt trong ảnh này</span>
+                  </button>
+                </>
+              )}
 
               {!isSharedGuest && selectedAlbum && (
                 <>
