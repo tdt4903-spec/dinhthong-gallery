@@ -17,6 +17,7 @@ import {
 } from '@/lib/customer-products'
 
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
+import { SITE_BANNER_URL } from '@/lib/site-assets'
 
 
 function publicWebImage(input: string) {
@@ -232,7 +233,7 @@ export default function AlbumPublicPage() {
         <div className="relative mx-auto h-[560px] max-w-[1500px] overflow-hidden rounded-[30px] sm:h-[640px]">
 
           <img
-            src="/banner.jpg"
+            src={SITE_BANNER_URL}
             alt="Dinh Thong Gallery"
             className="absolute inset-0 block h-full w-full max-w-none object-cover object-center"
             style={{

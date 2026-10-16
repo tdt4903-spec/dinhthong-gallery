@@ -54,6 +54,120 @@ function validDriveId(id) {
   return /^[a-zA-Z0-9_-]{10,}$/.test(id)
 }
 
+async function bannerAsset(request, env, url) {
+  if (!env.ASSETS) {
+    return new Response('Static asset unavailable', { status: 503, headers: { 'Cache-Control': 'no-store' } })
+  }
+  const assetUrl = new URL('/assets/banner-v1.jpg', url.origin)
+  const response = await env.ASSETS.fetch(new Request(assetUrl, request))
+  const headers = new Headers(response.headers)
+  if (response.ok || response.status === 304) {
+    headers.set('Cache-Control', url.pathname === '/assets/banner-v1.jpg'
+      ? 'public, max-age=31536000, immutable'
+      : 'public, max-age=86400, s-maxage=604800')
+    headers.set('X-Content-Type-Options', 'nosniff')
+  } else {
+    headers.set('Cache-Control', 'no-store')
+  }
+  return new Response(request.method === 'HEAD' ? null : response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
+}
+
+async function thumbnail(request, env, url) {
+  const fileId = url.searchParams.get('id') || ''
+  if (!validDriveId(fileId) || fileId.length > 200) {
+    return Response.json({ error: 'Invalid Google Drive file ID' }, { status: 400 })
+  }
+  const requestedSize = Number(url.searchParams.get('size') || 640)
+  const size = [640, 1280, 1600, 2048].includes(requestedSize) ? requestedSize : 640
+  const version = url.searchParams.get('v') || url.searchParams.get('scan') || ''
+  const resourceKey = url.searchParams.get('resourceKey') || ''
+  if (version.length > 128 || (resourceKey && !/^[a-zA-Z0-9_-]{1,200}$/.test(resourceKey))) {
+    return Response.json({ error: 'Invalid thumbnail version or resource key' }, { status: 400 })
+  }
+
+  const headers = new Headers({
+    Accept: 'image/webp,image/jpeg,image/png,image/*;q=0.8',
+    'User-Agent': 'Mozilla/5.0 (compatible; DinhThongGallery/1.0)',
+  })
+  if (resourceKey) headers.set('X-Goog-Drive-Resource-Keys', `${fileId}/${resourceKey}`)
+
+  const fetchThumbnail = async (target) => {
+    // A version change creates a separate upstream CDN cache entry too.
+    if (version) target.searchParams.set('_dtv', version)
+    const response = await fetch(target.toString(), {
+      method: request.method,
+      headers,
+      redirect: 'follow',
+      cf: { cacheEverything: true, cacheTtl: CACHE_TTL, cacheTtlByStatus: { '200-299': CACHE_TTL, '400-599': 0 } },
+    })
+    const type = response.headers.get('content-type') || ''
+    if (!response.ok || !/^image\/(?:jpeg|png|webp|avif|gif|bmp)(?:;|$)/i.test(type) || (request.method !== 'HEAD' && !response.body)) {
+      void response.body?.cancel().catch(() => {})
+      return null
+    }
+    const responseHeaders = new Headers({
+      'Content-Type': type,
+      'Cache-Control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+      'CDN-Cache-Control': 'public, s-maxage=604800, stale-while-revalidate=86400',
+      'X-Content-Type-Options': 'nosniff',
+    })
+    for (const name of ['etag', 'last-modified']) {
+      if (response.headers.has(name)) responseHeaders.set(name, response.headers.get(name))
+    }
+    if (!response.headers.has('content-encoding') && response.headers.has('content-length')) {
+      responseHeaders.set('Content-Length', response.headers.get('content-length'))
+    }
+    return new Response(request.method === 'HEAD' ? null : response.body, { headers: responseHeaders })
+  }
+
+  const directUrl = new URL(`https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}=w${size}`)
+  if (resourceKey) directUrl.searchParams.set('resourcekey', resourceKey)
+  const direct = await fetchThumbnail(directUrl)
+  if (direct) return direct
+
+  if (!env.GOOGLE_DRIVE_API_KEY) {
+    return Response.json({ error: 'Cannot load thumbnail' }, { status: 404, headers: { 'Cache-Control': 'no-store' } })
+  }
+  const metadataUrl = new URL(`${DRIVE_API_BASE}${encodeURIComponent(fileId)}`)
+  metadataUrl.searchParams.set('fields', 'thumbnailLink,resourceKey')
+  metadataUrl.searchParams.set('supportsAllDrives', 'true')
+  metadataUrl.searchParams.set('key', env.GOOGLE_DRIVE_API_KEY)
+  const metadataResponse = await fetch(metadataUrl.toString(), {
+    headers: resourceKey ? { 'X-Goog-Drive-Resource-Keys': `${fileId}/${resourceKey}` } : {},
+    cf: { cacheEverything: true, cacheTtl: 3600 },
+  })
+  if (!metadataResponse.ok) {
+    const responseHeaders = new Headers({ 'Cache-Control': 'no-store' })
+    if (metadataResponse.headers.has('retry-after')) responseHeaders.set('Retry-After', metadataResponse.headers.get('retry-after'))
+    void metadataResponse.body?.cancel().catch(() => {})
+    return Response.json({ error: 'Cannot load thumbnail' }, {
+      status: metadataResponse.status === 429 || metadataResponse.status >= 500 ? metadataResponse.status : 404,
+      headers: responseHeaders,
+    })
+  }
+  const metadata = await metadataResponse.json()
+  if (typeof metadata.thumbnailLink === 'string') {
+    let fallbackUrl
+    try { fallbackUrl = new URL(metadata.thumbnailLink) } catch { /* Invalid upstream metadata. */ }
+    // Never accept arbitrary URLs or original media from a client or metadata response.
+    if (fallbackUrl?.protocol === 'https:' && !fallbackUrl.username && !fallbackUrl.password && !fallbackUrl.port && /^lh\d+\.googleusercontent\.com$/i.test(fallbackUrl.hostname)) {
+      fallbackUrl.pathname = /=[sw]\d+.*$/.test(fallbackUrl.pathname)
+        ? fallbackUrl.pathname.replace(/=[sw]\d+.*$/, `=s${size}`)
+        : `${fallbackUrl.pathname}=s${size}`
+      if (metadata.resourceKey && /^[a-zA-Z0-9_-]{1,200}$/.test(metadata.resourceKey)) {
+        headers.set('X-Goog-Drive-Resource-Keys', `${fileId}/${metadata.resourceKey}`)
+      }
+      const fallback = await fetchThumbnail(fallbackUrl)
+      if (fallback) return fallback
+    }
+  }
+  return Response.json({ error: 'Cannot load thumbnail' }, { status: 404, headers: { 'Cache-Control': 'no-store' } })
+}
+
 async function listFolder(request, env, url) {
   const folderId = url.searchParams.get('id') || ''
   const pageToken = url.searchParams.get('pageToken') || ''
@@ -141,6 +255,8 @@ async function handleRequest(request, env) {
     }
 
     if (url.pathname === '/folder') return listFolder(request, env, url)
+    if (url.pathname === '/thumb') return thumbnail(request, env, url)
+    if (url.pathname === '/assets/banner-v1.jpg' || url.pathname === '/banner.jpg') return bannerAsset(request, env, url)
 
     // Hỗ trợ cả ảnh và video
     const isVideo = url.pathname === '/video'

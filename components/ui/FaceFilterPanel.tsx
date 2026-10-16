@@ -110,6 +110,8 @@ export default function FaceFilterPanel({
     message: '',
   })
   const [scanError, setScanError] = useState('')
+  const [hydratedCacheKey, setHydratedCacheKey] = useState('')
+  const cacheKey = useMemo(() => JSON.stringify([folderId, images.map(image => image.id)]), [folderId, images])
 
   const [threshold, setThreshold] = useState<number>(0.38)
   const [selectedClusterIds, setSelectedClusterIds] = useState<Set<string>>(new Set())
@@ -186,6 +188,7 @@ export default function FaceFilterPanel({
     setIsDetectingReference(false)
     setDetectedFaces([])
     setScannedCount(0)
+    setHydratedCacheKey('')
     setSelectedClusterIds(new Set())
     setSelectedClusterFaces(new Map())
     setConfirmedGroups(loadConfirmedFaceGroups(folderId))
@@ -215,20 +218,23 @@ export default function FaceFilterPanel({
   // Tải kết quả đã cache trong IndexedDB (nếu trước đó đã quét)
   useEffect(() => {
     let active = true
-    if (!folderId || images.length === 0) return
+    if (!isOpen || !folderId || images.length === 0) return
 
     loadCachedFolderFaces(folderId, images).then(({ faces, scannedCount: cachedCount }) => {
-      if (!active || activeScanRef.current) return
-      if (cachedCount > 0) {
+      if (!active) return
+      if (!activeScanRef.current) {
         setDetectedFaces(faces)
         setScannedCount(cachedCount)
       }
+      setHydratedCacheKey(cacheKey)
+    }).catch(() => {
+      if (active) setHydratedCacheKey(cacheKey)
     })
 
     return () => {
       active = false
     }
-  }, [folderId, images, FACE_SCAN_VERSION])
+  }, [folderId, images, isOpen, cacheKey, FACE_SCAN_VERSION])
 
   const startAlbumScan = useCallback(
     async (forceRescan = false) => {
@@ -248,15 +254,20 @@ export default function FaceFilterPanel({
         setScannedCount(0)
       }
 
+      let lastProgressUpdate = 0
+      let lastProgressStage = ''
       try {
         const finalFaces = await scanAlbumFaces({
           folderId: folderId || 'default_album',
           items: images,
           forceRescan,
-          concurrency: 3,
           shouldCancel: () => run.cancelled || activeScanRef.current !== run,
           onProgress: (info) => {
             if (run.cancelled || activeScanRef.current !== run) return
+            const now = performance.now()
+            if (info.stage === lastProgressStage && info.stage === 'scanning' && now - lastProgressUpdate < 150) return
+            lastProgressUpdate = now
+            lastProgressStage = info.stage
             setScanProgress(info)
             setScannedCount(info.completed)
             if (info.failedCount) setScanError(`${info.failedCount} ảnh chưa quét được. Bấm Quét album để thử lại các ảnh này.`)
@@ -283,13 +294,13 @@ export default function FaceFilterPanel({
 
   // Tự động quét khi người dùng mở bảng Nhận diện khuôn mặt lần đầu trong album
   useEffect(() => {
-    if (!isOpen || images.length === 0) return
-    const key = `${folderId || 'root'}_${images.length}_${FACE_SCAN_VERSION}`
+    if (!isOpen || images.length === 0 || hydratedCacheKey !== cacheKey) return
+    const key = `${cacheKey}_${FACE_SCAN_VERSION}`
     if (autoScanTriggeredForFolderRef.current !== key && scannedCount < images.length && !isScanning) {
       autoScanTriggeredForFolderRef.current = key
       void startAlbumScan(false)
     }
-  }, [isOpen, folderId, images.length, scannedCount, isScanning, startAlbumScan])
+  }, [isOpen, folderId, images.length, scannedCount, isScanning, startAlbumScan, hydratedCacheKey, cacheKey])
 
   // Xử lý khi người dùng bấm "Tìm mặt trong ảnh này" từ modal xem ảnh lớn
   useEffect(() => {

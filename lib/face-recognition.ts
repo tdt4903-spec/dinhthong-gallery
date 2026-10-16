@@ -55,6 +55,7 @@ const DB_VERSION = 1
 const STORE_NAME = 'image_faces'
 export const FACE_SCAN_VERSION = 'multiview-aligned-v4'
 const FACE_IMAGE_SIZE = 1600
+const FACE_MEDIA_WORKER_BASE = (process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || 'https://dinhthong-video-proxy.tdt4903.workers.dev').replace(/\/+$/, '')
 
 let modelsLoadPromise: Promise<any> | null = null
 let cacheDbPromise: Promise<IDBDatabase | null> | null = null
@@ -141,6 +142,10 @@ export async function ensureFaceModelsLoaded(): Promise<any> {
       throw lastError || new Error('Không thể khởi tạo thư viện nhận diện khuôn mặt.')
     }
 
+    // Let TensorFlow select and initialize the supported device backend before
+    // loading weights. Keep its precision and model settings unchanged.
+    if (typeof faceapi.tf?.ready === 'function') await faceapi.tf.ready()
+
     for (const modelBaseUrl of FACE_API_MODEL_URLS) {
       try {
         await Promise.all([
@@ -162,7 +167,10 @@ export async function ensureFaceModelsLoaded(): Promise<any> {
 
     modelsLoadPromise = null
     throw lastError || new Error('Không thể tải mô hình AI nhận diện khuôn mặt.')
-  })()
+  })().catch(error => {
+    modelsLoadPromise = null
+    throw error
+  })
 
   return modelsLoadPromise
 }
@@ -222,6 +230,62 @@ async function getCachedFacesForImage(
       req.onerror = () => resolve(null)
     } catch {
       resolve(null)
+    }
+  })
+}
+
+async function getCachedFolderFacesByImage(
+  folderId: string,
+  items: ScannableMediaItem[]
+): Promise<Map<string, DetectedFaceRecord[]>> {
+  const empty = new Map<string, DetectedFaceRecord[]>()
+  if (!folderId || items.length === 0) return empty
+  const db = await openFaceCacheDb()
+  if (!db) return empty
+  const requestedIds = new Set(items.map(item => item.id))
+  return new Promise(resolve => {
+    try {
+      // One folder read replaces hundreds of separately opened transactions.
+      const tx = db.transaction(STORE_NAME, 'readonly')
+      const request = tx.objectStore(STORE_NAME).index('folderId').getAll(folderId)
+      request.onsuccess = () => {
+        const cached = new Map<string, DetectedFaceRecord[]>()
+        for (const row of request.result || []) {
+          if (!requestedIds.has(row?.imageId) || row.scanVersion !== FACE_SCAN_VERSION || !Array.isArray(row.faces)) continue
+          if (row.faces.every((face: unknown) => isValidFaceRecord(face) && face.imageId === row.imageId && face.descriptor.length === 128)) {
+            cached.set(row.imageId, row.faces)
+          }
+        }
+        resolve(cached)
+      }
+      request.onerror = () => resolve(empty)
+      tx.onabort = () => resolve(empty)
+    } catch {
+      resolve(empty)
+    }
+  })
+}
+
+async function setCachedImageBatch(
+  folderId: string,
+  images: { imageId: string; faces: DetectedFaceRecord[] }[]
+): Promise<void> {
+  if (!folderId || images.length === 0) return
+  const db = await openFaceCacheDb()
+  if (!db) return
+  return new Promise(resolve => {
+    try {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      const store = tx.objectStore(STORE_NAME)
+      const scannedAt = Date.now()
+      for (const { imageId, faces } of images) {
+        store.put({ key: `${folderId}::${imageId}`, folderId, imageId, scannedAt, scanVersion: FACE_SCAN_VERSION, faces })
+      }
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => resolve()
+      tx.onabort = () => resolve()
+    } catch {
+      resolve()
     }
   })
 }
@@ -289,22 +353,8 @@ export async function loadCachedFolderFaces(
     return { faces: [], scannedCount: 0 }
   }
 
-  const allFaces: DetectedFaceRecord[] = []
-  let scannedCount = 0
-
-  await Promise.all(
-    items.map(async (item) => {
-      const cached = await getCachedFacesForImage(folderId, item.id)
-      if (cached !== null) {
-        scannedCount++
-        if (cached.length > 0) {
-          allFaces.push(...cached)
-        }
-      }
-    })
-  )
-
-  return { faces: allFaces, scannedCount }
+  const cached = await getCachedFolderFacesByImage(folderId, items)
+  return { faces: items.flatMap(item => cached.get(item.id) || []), scannedCount: items.filter(item => cached.has(item.id)).length }
 }
 
 function loadCorsSafeImage(url: string): Promise<HTMLImageElement> {
@@ -319,7 +369,13 @@ function loadCorsSafeImage(url: string): Promise<HTMLImageElement> {
 
     img.onload = () => {
       window.clearTimeout(timer)
-      resolve(img)
+      // Finish decode in the prefetch window instead of making the first
+      // inference drawImage pay the decode cost on the main thread.
+      if (typeof img.decode === 'function') {
+        void img.decode().then(() => resolve(img), () => resolve(img))
+      } else {
+        resolve(img)
+      }
     }
     img.onerror = () => {
       window.clearTimeout(timer)
@@ -331,10 +387,9 @@ function loadCorsSafeImage(url: string): Promise<HTMLImageElement> {
 
 async function loadDriveThumbnailForCanvas(item: ScannableMediaItem): Promise<HTMLImageElement> {
   const candidateUrls = [
-    `/api/drive?action=thumb&id=${encodeURIComponent(item.id)}&size=${FACE_IMAGE_SIZE}&scan=${FACE_SCAN_VERSION}`,
+    `${FACE_MEDIA_WORKER_BASE}/thumb?id=${encodeURIComponent(item.id)}&size=${FACE_IMAGE_SIZE}&scan=${FACE_SCAN_VERSION}`,
     `https://lh3.googleusercontent.com/d/${encodeURIComponent(item.id)}=w${FACE_IMAGE_SIZE}`,
   ]
-  if (item.url) candidateUrls.push(item.url)
 
   let lastErr: unknown = null
   for (const url of candidateUrls) {
@@ -688,7 +743,7 @@ export async function scanAlbumFaces(options: {
     folderId,
     items,
     forceRescan = false,
-    concurrency = 3,
+    concurrency,
     shouldCancel,
     onProgress,
   } = options
@@ -702,37 +757,54 @@ export async function scanAlbumFaces(options: {
     return []
   }
 
-  onProgress?.(
-    {
-      completed: 0,
-      total,
-      stage: 'loading_models',
-      message: 'Đang khởi tạo AI nhận diện khuôn mặt...',
-    },
-    []
-  )
-
-  await ensureFaceModelsLoaded()
-  if (shouldCancel?.()) return []
-
   if (forceRescan && folderId) {
     await clearFolderFaceCache(folderId)
   }
-
+  const cachedByImage = forceRescan ? new Map<string, DetectedFaceRecord[]>() : await getCachedFolderFacesByImage(folderId, items)
   const allFaces: DetectedFaceRecord[] = []
   let completed = 0
   let attempted = 0
   let failedCount = 0
+  const pendingItems: ScannableMediaItem[] = []
+  for (const item of items) {
+    const cached = cachedByImage.get(item.id)
+    if (cached !== undefined) {
+      allFaces.push(...cached)
+      completed++
+      attempted++
+    } else {
+      pendingItems.push(item)
+    }
+  }
+  if (shouldCancel?.()) return allFaces
+  if (pendingItems.length === 0) {
+    onProgress?.({ completed, total, stage: 'done', message: `Đã tải kết quả đã lưu: ${completed}/${total} ảnh.` }, allFaces)
+    return allFaces
+  }
+  onProgress?.({
+    completed,
+    total,
+    stage: 'loading_models',
+    message: completed > 0
+      ? `Đã có ${completed}/${total} ảnh. Đang chuẩn bị nhận diện các ảnh còn lại...`
+      : 'Đang khởi tạo AI nhận diện khuôn mặt...',
+  }, allFaces)
 
-  type PreparedImage = { cached: DetectedFaceRecord[] } | { image: HTMLImageElement } | { error: unknown } | null
+  let cacheBatch: { imageId: string; faces: DetectedFaceRecord[] }[] = []
+  let cacheWriteQueue = Promise.resolve()
+  const flushCacheBatch = () => {
+    if (!folderId || cacheBatch.length === 0) return
+    const batch = cacheBatch
+    cacheBatch = []
+    // Disk commits run alongside the next inference instead of stalling every
+    // image. Small batches also preserve completed work during a long scan.
+    cacheWriteQueue = cacheWriteQueue.then(() => setCachedImageBatch(folderId, batch)).catch(() => {})
+  }
+
+  type PreparedImage = { image: HTMLImageElement } | { error: unknown } | null
   const prepareImage = async (item: ScannableMediaItem): Promise<PreparedImage> => {
     if (shouldCancel?.()) return null
     try {
-      if (!forceRescan && folderId) {
-        const cached = await getCachedFacesForImage(folderId, item.id)
-        if (cached !== null) return { cached }
-      }
-      if (shouldCancel?.()) return null
       return { image: await loadDriveThumbnailForCanvas(item) }
     } catch (error) {
       // Prefetch promises always resolve, including when cancellation leaves
@@ -745,16 +817,12 @@ export async function scanAlbumFaces(options: {
     try {
       if (!prepared || shouldCancel?.()) return
       if ('error' in prepared) throw prepared.error
-      if ('cached' in prepared) {
-        allFaces.push(...prepared.cached)
-        completed++
-        return
-      }
       if (shouldCancel?.()) return
       const detected = await detectFacesFromImageElement(prepared.image, item.id, item.name, FACE_IMAGE_SIZE, shouldCancel)
       if (shouldCancel?.()) return
       if (folderId) {
-        await setCachedFacesForImage(folderId, item.id, detected)
+        cacheBatch.push({ imageId: item.id, faces: detected })
+        if (cacheBatch.length >= 6) flushCacheBatch()
       }
       if (detected.length > 0) {
         allFaces.push(...detected)
@@ -786,13 +854,20 @@ export async function scanAlbumFaces(options: {
   // Network/decode stays ahead of inference; only one image uses the shared
   // GPU at once. A sliding window avoids the old slowest-image batch barrier
   // and bounds decoded image memory on phones.
-  const prefetchCount = Math.min(4, Math.max(1, Number.isFinite(concurrency) ? Math.floor(concurrency) : 3))
+  const device = typeof navigator === 'undefined' ? undefined : navigator as Navigator & { deviceMemory?: number }
+  const mobile = Boolean(device && (/Android|iPhone|iPad|iPod/i.test(device.userAgent) || (device.platform === 'MacIntel' && device.maxTouchPoints > 1)))
+  const lowMemory = Boolean(device && ((device.deviceMemory !== undefined && device.deviceMemory <= 4) || (mobile && device.hardwareConcurrency > 0 && device.hardwareConcurrency <= 4)))
+  const deviceLimit = lowMemory ? 2 : mobile ? 3 : 4
+  const requestedConcurrency = concurrency !== undefined && Number.isFinite(concurrency) ? Math.floor(concurrency) : deviceLimit
+  const prefetchCount = Math.min(deviceLimit, Math.max(1, requestedConcurrency))
   const preparedImages = new Map<number, Promise<PreparedImage>>()
-  for (let index = 0; index < Math.min(prefetchCount, total); index++) {
-    preparedImages.set(index, prepareImage(items[index]))
+  for (let index = 0; index < Math.min(prefetchCount, pendingItems.length); index++) {
+    preparedImages.set(index, prepareImage(pendingItems[index]))
   }
-  let nextIndex = Math.min(prefetchCount, total)
+  let nextIndex = Math.min(prefetchCount, pendingItems.length)
   try {
+    // Thumbnail loading/decode and model initialization overlap on a cold scan.
+    await ensureFaceModelsLoaded()
     while (preparedImages.size > 0) {
       if (shouldCancel?.()) break
       // Process the next decoded image, even if an earlier Drive request is
@@ -801,11 +876,11 @@ export async function scanAlbumFaces(options: {
         [...preparedImages].map(([index, pending]) => pending.then(prepared => ({ index, prepared })))
       )
       preparedImages.delete(index)
-      if (nextIndex < total && !shouldCancel?.()) {
-        preparedImages.set(nextIndex, prepareImage(items[nextIndex]))
+      if (nextIndex < pendingItems.length && !shouldCancel?.()) {
+        preparedImages.set(nextIndex, prepareImage(pendingItems[nextIndex]))
         nextIndex++
       }
-      await processOne(items[index], prepared)
+      await processOne(pendingItems[index], prepared)
     }
   } finally {
     // Requests already in flight may finish after the user closes a scan.
@@ -814,6 +889,8 @@ export async function scanAlbumFaces(options: {
         if (prepared && 'image' in prepared) prepared.image.src = ''
       })
     }
+    flushCacheBatch()
+    await cacheWriteQueue
   }
 
   return allFaces

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { Camera, Loader2, LockKeyhole } from 'lucide-react'
+import { SITE_BANNER_URL } from '@/lib/site-assets'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -64,7 +65,7 @@ export default function LoginPage() {
       <div className="relative min-h-screen grid lg:grid-cols-[1.15fr_0.85fr]">
         <div className="absolute inset-0 lg:hidden">
           <img
-            src="/banner.jpg"
+            src={SITE_BANNER_URL}
             alt="DinhThong Gallery"
             className="absolute inset-0 block"
             style={{
@@ -79,7 +80,7 @@ export default function LoginPage() {
 
         <section className="relative hidden lg:flex min-h-screen overflow-hidden">
           <img
-            src="/banner.jpg"
+            src={SITE_BANNER_URL}
             alt="DinhThong Gallery"
             className="absolute inset-0 block"
             style={{

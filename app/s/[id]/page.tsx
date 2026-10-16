@@ -1,6 +1,7 @@
 import { Metadata } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import GalleryClient from '@/app/gallery/GalleryClient'
+import { SITE_BANNER_URL } from '@/lib/site-assets'
 
 interface Props {
   params: Promise<{ id: string }> | { id: string }
@@ -87,7 +88,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 
   // Chuẩn hóa định dạng ảnh để Zalo/Facebook/Messenger đọc được
-  let ogImageUrl = '/banner.jpg'
+  let ogImageUrl = SITE_BANNER_URL
   if (coverUrl) {
     const driveId = extractDriveId(coverUrl)
     if (driveId) {

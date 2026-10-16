@@ -31,64 +31,30 @@ const encodeContentDispositionFilename = (fileName: string) => {
 }
 
 export async function GET(request: NextRequest) {
-  const apiKey = process.env.GOOGLE_DRIVE_API_KEY
-
-  if (!apiKey) {
-    return NextResponse.json({ error: 'Missing GOOGLE_DRIVE_API_KEY' }, { status: 500 })
-  }
-
   const action = request.nextUrl.searchParams.get('action')
   const fileIdParam = request.nextUrl.searchParams.get('id')
 
-  // CORS-safe thumbnail proxy. Face scans use more detail for distant faces.
-  if (action === 'thumb' && fileIdParam) {
-    const fileId = getDriveFileId(fileIdParam)
-    if (!fileId) {
+  // Old browser bundles may still call this URL. Redirect before any upstream
+  // fetch so thumbnail bytes are served by Cloudflare, never by Vercel.
+  if (action === 'thumb') {
+    const fileId = getDriveFileId(fileIdParam || '')
+    if (!fileId || fileId.length > 200) {
       return NextResponse.json({ error: 'Invalid Google Drive file ID' }, { status: 400 })
     }
     const requestedSize = Number(request.nextUrl.searchParams.get('size') || 640)
     const thumbnailSize = [640, 1280, 1600, 2048].includes(requestedSize) ? requestedSize : 640
-
-    try {
-      const thumbUrl = `https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}=w${thumbnailSize}`
-      const thumbRes = await fetch(thumbUrl, {
-        headers: {
-          Accept: 'image/webp,image/jpeg,image/png,image/*,*/*;q=0.8',
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        },
-        redirect: 'follow',
-        next: { revalidate: 86400 },
-      })
-
-      if (thumbRes.ok && thumbRes.body) {
-        const headers = new Headers()
-        headers.set('Content-Type', thumbRes.headers.get('content-type') || 'image/jpeg')
-        headers.set('Cache-Control', 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400')
-        headers.set('Access-Control-Allow-Origin', '*')
-        return new NextResponse(thumbRes.body, { status: 200, headers })
-      }
-
-      const metaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=thumbnailLink&supportsAllDrives=true&key=${apiKey}`
-      const metaRes = await fetch(metaUrl, { next: { revalidate: 3600 } })
-      if (metaRes.ok) {
-        const meta = await metaRes.json()
-        if (meta?.thumbnailLink) {
-          const highResThumb = String(meta.thumbnailLink).replace(/=[sw]\d+.*$/, `=s${thumbnailSize}`)
-          const fallbackRes = await fetch(highResThumb, { redirect: 'follow' })
-          if (fallbackRes.ok && fallbackRes.body) {
-            const headers = new Headers()
-            headers.set('Content-Type', fallbackRes.headers.get('content-type') || 'image/jpeg')
-            headers.set('Cache-Control', 'public, max-age=86400, s-maxage=604800')
-            headers.set('Access-Control-Allow-Origin', '*')
-            return new NextResponse(fallbackRes.body, { status: 200, headers })
-          }
-        }
-      }
-
-      return NextResponse.json({ error: 'Cannot load thumbnail' }, { status: 404 })
-    } catch (err: any) {
-      return NextResponse.json({ error: err?.message || 'Thumbnail proxy error' }, { status: 500 })
+    const workerBase = (process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || 'https://dinhthong-video-proxy.tdt4903.workers.dev').replace(/\/+$/, '')
+    const destination = new URL(`${workerBase}/thumb`)
+    destination.searchParams.set('id', fileId)
+    destination.searchParams.set('size', String(thumbnailSize))
+    for (const key of ['v', 'scan', 'resourceKey']) {
+      const value = request.nextUrl.searchParams.get(key)
+      if (value) destination.searchParams.set(key, value)
     }
+    const response = NextResponse.redirect(destination, 307)
+    response.headers.set('Cache-Control', 'public, max-age=86400, s-maxage=604800')
+    response.headers.set('Access-Control-Allow-Origin', '*')
+    return response
   }
 
   // DOWNLOAD FILE QUA VERCEL ĐÃ BỊ VÔ HIỆU HÓA.
@@ -105,6 +71,12 @@ export async function GET(request: NextRequest) {
         }
       }
     )
+  }
+
+  const apiKey = process.env.GOOGLE_DRIVE_API_KEY
+
+  if (!apiKey) {
+    return NextResponse.json({ error: 'Missing GOOGLE_DRIVE_API_KEY' }, { status: 500 })
   }
 
   // ============================================================

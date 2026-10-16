@@ -9,6 +9,7 @@ import { createBrowserClient } from '@supabase/ssr'
 import { saveAs } from 'file-saver'
 import { fetchCloudflareMediaBlob, prepareCloudflareArchiveLocally, supportsLocalArchivePreparation, UnsupportedLocalArchiveError, runCloudflareArchive, type DownloadEntry } from '@/lib/cloudflare-download'
 import { fetchCloudflareFolderPage } from '@/lib/cloudflare-folder'
+import { SITE_BANNER_URL } from '@/lib/site-assets'
 import { 
   Search, Sun, Moon, Plus, Camera, 
   Trash2, LogOut, User as UserIcon,
@@ -3425,7 +3426,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             {/* ADMIN HOME — cinematic dashboard, không dùng bố cục kiểu Google Drive */}
             <section className={`relative overflow-hidden rounded-[28px] border shadow-[0_28px_80px_rgba(0,0,0,.18)] ${isDarkMode ? 'border-emerald-200/15 bg-[#082017]' : 'border-emerald-900/10 bg-[#eff6f0]'}`}>
               <div className="absolute inset-0">
-                <img src="/banner.jpg" alt="DinhThong Gallery" className="h-full w-full object-cover" />
+                <img src={SITE_BANNER_URL} alt="DinhThong Gallery" className="h-full w-full object-cover" />
                 <div className={`absolute inset-0 ${isDarkMode ? 'bg-[linear-gradient(90deg,rgba(2,25,17,.93),rgba(3,30,20,.58),rgba(4,23,16,.24))]' : 'bg-[linear-gradient(90deg,rgba(242,248,243,.94),rgba(239,247,241,.68),rgba(236,244,238,.25))]'}`} />
                 <div className="absolute inset-0 bg-[radial-gradient(circle_at_72%_18%,rgba(52,211,153,.18),transparent_32%)]" />
               </div>
@@ -4238,7 +4239,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             {/* ALBUM HERO */}
             <section className={`relative overflow-hidden rounded-[24px] sm:rounded-[28px] border shadow-[0_24px_70px_rgba(0,0,0,.16)] ${isDarkMode ? 'border-emerald-200/12 bg-[#081811]' : 'border-emerald-950/8 bg-[#eff6f0]'}`}>
               <div className="absolute inset-0">
-                <img src="/banner.jpg" alt="Album background" className="h-full w-full object-cover" />
+                <img src={SITE_BANNER_URL} alt="Album background" className="h-full w-full object-cover" />
                 <div className={`absolute inset-0 ${isDarkMode ? 'bg-[linear-gradient(90deg,rgba(3,22,15,.95),rgba(4,28,18,.82),rgba(4,22,15,.50))]' : 'bg-[linear-gradient(90deg,rgba(245,249,246,.96),rgba(239,247,241,.86),rgba(235,245,238,.58))]'}`} />
               </div>
 

@@ -1,8 +1,14 @@
 import type { NextConfig } from "next";
+import { SITE_BANNER_URL } from "./lib/site-assets";
 
 const nextConfig: NextConfig = {
   async redirects() {
     return [
+      {
+        source: "/banner.jpg",
+        destination: SITE_BANNER_URL,
+        permanent: false,
+      },
       {
         // Keep service endpoints and framework assets on their requested host.
         source: "/:path((?!api(?:/|$)|_next(?:/|$)).*)",
