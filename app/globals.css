@@ -26,10 +26,52 @@ html {
 body {
   min-height: 100vh;
   background: var(--background);
+  isolation: isolate;
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+.site-background {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.site-background::before,
+.site-background::after {
+  content: '';
+  position: absolute;
+}
+
+.site-background::before {
+  inset: -10px;
+  background-image: var(--site-background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(6px);
+  opacity: 0.78;
+}
+
+.site-background::after {
+  inset: 0;
+  background: linear-gradient(180deg, rgb(247 250 246 / 76%), rgb(244 248 242 / 66%));
+}
+
+body:has(.site-page-surface[data-site-theme='dark']) .site-background::after,
+html:is(.dark, [data-theme='dark']) body:not(:has(.site-page-surface[data-site-theme='light'])) .site-background::after {
+  background: linear-gradient(180deg, rgb(3 17 12 / 87%), rgb(3 16 11 / 83%));
+}
+
+/* Page canvases reveal the photograph; cards and dialogs keep their surfaces. */
+.site-page-surface {
+  background-color: transparent !important;
+  background-image: none !important;
 }
 
 /* Keep existing sizes, weights, and tracking while matching the brand subtitle font. */

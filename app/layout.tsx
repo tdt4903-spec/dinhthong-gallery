@@ -1,7 +1,8 @@
 import React from 'react'
 import type { Metadata } from 'next'
 import './globals.css'
-import { SITE_BANNER_URL } from '@/lib/site-assets'
+import { SITE_BANNER_URL, SITE_BACKGROUND_URL } from '@/lib/site-assets'
+import SiteBackground from '@/components/SiteBackground'
 
 export const metadata: Metadata = {
   title: 'Dinh Thong Gallery',
@@ -20,7 +21,10 @@ export default function RootLayout({
         <link rel="preconnect" href="https://lh3.googleusercontent.com" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://lh3.googleusercontent.com" />
       </head>
-      <body>{children}</body>
+      <body style={{ '--site-background-image': `url("${SITE_BACKGROUND_URL}")` } as React.CSSProperties}>
+        <SiteBackground />
+        {children}
+      </body>
     </html>
   )
 }

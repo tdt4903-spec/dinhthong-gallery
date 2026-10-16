@@ -779,7 +779,8 @@ export default function BookingPage() {
 
   return (
     <main
-      className={`min-h-screen ${
+      data-site-theme={isDarkMode ? 'dark' : 'light'}
+      className={`site-page-surface min-h-screen ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-white text-[#202520]'
@@ -1728,7 +1729,8 @@ function ResultPage({
 
   return (
     <main
-      className={`min-h-screen ${
+      data-site-theme={dark ? 'dark' : 'light'}
+      className={`site-page-surface min-h-screen ${
         dark
           ? 'bg-[#06140f] text-white'
           : 'bg-white text-[#202520]'

@@ -374,7 +374,8 @@ export default function PublicAlbumPage() {
   if (loading) {
     return (
       <main
-        className={`min-h-screen flex items-center justify-center ${
+        data-site-theme={isDarkMode ? 'dark' : 'light'}
+        className={`site-page-surface min-h-screen flex items-center justify-center ${
           isDarkMode
             ? 'bg-[#06140f] text-white'
             : 'bg-[#f5f7f3] text-[#1c1d21]'
@@ -396,7 +397,8 @@ export default function PublicAlbumPage() {
   if (errorText || !album) {
     return (
       <main
-        className={`min-h-screen flex items-center justify-center px-5 ${
+        data-site-theme={isDarkMode ? 'dark' : 'light'}
+        className={`site-page-surface min-h-screen flex items-center justify-center px-5 ${
           isDarkMode
             ? 'bg-[#06140f] text-white'
             : 'bg-[#f5f7f3] text-[#1c1d21]'
@@ -433,7 +435,8 @@ export default function PublicAlbumPage() {
   return (
     <main
       onContextMenu={(event) => event.preventDefault()}
-      className={`min-h-screen select-none transition-colors ${
+      data-site-theme={isDarkMode ? 'dark' : 'light'}
+      className={`site-page-surface min-h-screen select-none transition-colors ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'

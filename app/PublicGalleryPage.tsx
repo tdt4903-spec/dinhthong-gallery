@@ -125,7 +125,8 @@ export default function AlbumPublicPage() {
 
   return (
     <main
-      className={`min-h-screen transition-colors duration-300 ${
+      data-site-theme={isDarkMode ? 'dark' : 'light'}
+      className={`site-page-surface min-h-screen transition-colors duration-300 ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'

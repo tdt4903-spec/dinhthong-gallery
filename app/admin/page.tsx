@@ -53,7 +53,7 @@ export default function LoginPage() {
 
   if (checking) {
     return (
-      <div className="min-h-screen bg-[#06130d] flex flex-col items-center justify-center text-white">
+      <div data-site-theme="dark" className="site-page-surface min-h-screen bg-[#06130d] flex flex-col items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
         <p className="text-[11px] tracking-[0.2em] uppercase text-white/55">Đang kiểm tra phiên đăng nhập</p>
       </div>
@@ -61,13 +61,13 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#07140e] text-white overflow-hidden">
+    <main data-site-theme="dark" className="site-page-surface min-h-screen bg-[#07140e] text-white overflow-hidden">
       <div className="relative min-h-screen grid lg:grid-cols-[1.15fr_0.85fr]">
         <div className="absolute inset-0 lg:hidden">
           <img
             src={SITE_BANNER_URL}
             alt="DinhThong Gallery"
-            className="absolute inset-0 block"
+            className="absolute inset-0 block opacity-20"
             style={{
               width: '100%',
               height: '100%',
@@ -82,7 +82,7 @@ export default function LoginPage() {
           <img
             src={SITE_BANNER_URL}
             alt="DinhThong Gallery"
-            className="absolute inset-0 block"
+            className="absolute inset-0 block opacity-20"
             style={{
               width: '100%',
               height: '100%',
@@ -120,7 +120,7 @@ export default function LoginPage() {
           </div>
         </section>
 
-        <section className="relative z-10 flex min-h-screen items-center justify-center px-5 py-10 sm:px-8 lg:bg-[#08150f]">
+        <section className="relative z-10 flex min-h-screen items-center justify-center px-5 py-10 sm:px-8 lg:bg-[#08150f]/65">
           <div className="w-full max-w-md">
             <div className="mb-7 flex items-center justify-center gap-3 lg:hidden">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/15 bg-black/25 backdrop-blur-xl">

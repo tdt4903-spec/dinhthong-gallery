@@ -44,6 +44,11 @@ export type PreparedLocalArchive = {
   dispose: () => Promise<void>
 }
 
+export type PreparedAlbumShare = {
+  files: File[]
+  dispose: () => Promise<void>
+}
+
 type PrepareLocalArchiveOptions = {
   entries: DownloadEntry[]
   title: string
@@ -333,20 +338,219 @@ async function localStorageRoot(): Promise<FileSystemDirectoryHandle> {
   }
 }
 
-async function removeExpiredLocalArchives(root: FileSystemDirectoryHandle): Promise<void> {
+async function removeExpiredLocalArchives(root: FileSystemDirectoryHandle, prefix: 'dinhthong-archive' | 'dinhthong-share' = 'dinhthong-archive'): Promise<void> {
   const iterableRoot = root as FileSystemDirectoryHandle & {
     entries?: () => AsyncIterableIterator<[string, FileSystemHandle]>
   }
   if (typeof iterableRoot.entries !== 'function') return
   const cutoff = Date.now() - 24 * 60 * 60 * 1000
+  const ownDirectory = new RegExp(`^${prefix}-(\\d{13})-[a-f\\d-]+$`, 'i')
   try {
     for await (const [name, handle] of iterableRoot.entries()) {
-      const match = /^dinhthong-archive-(\d{13})-[a-f\d-]+$/i.exec(name)
+      const match = ownDirectory.exec(name)
       if (handle.kind !== 'directory' || !match || Number(match[1]) >= cutoff) continue
       await root.removeEntry(name, { recursive: true }).catch(() => {})
     }
   } catch {
     // Abandoned-file housekeeping must not prevent a new download.
+  }
+}
+
+function albumShareMime(entry: DownloadEntry, contentType: string): string {
+  const type = contentType.split(';', 1)[0].trim().toLowerCase()
+  if (type.startsWith('image/') || type.startsWith('video/')) return type
+  const extension = entry.name.split('.').pop()?.toLowerCase() || ''
+  const known: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', jfif: 'image/jpeg', png: 'image/png',
+    gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', heic: 'image/heic',
+    heif: 'image/heif', tif: 'image/tiff', tiff: 'image/tiff', bmp: 'image/bmp',
+    mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
+    mpg: 'video/mpeg', mpeg: 'video/mpeg', ogv: 'video/ogg',
+  }
+  // Unknown originals (for example camera RAW) must never be relabelled JPEG
+  // without converting their bytes. Native sharing can reject unsupported types.
+  return known[extension] || type || 'application/octet-stream'
+}
+
+function albumShareName(entry: DownloadEntry, mime: string): string {
+  const original = (entry.name || entry.id).replace(/\\/g, '/').split('/').pop() || entry.id
+  const extension = original.includes('.') ? original.split('.').pop()!.toLowerCase() : ''
+  const preferred: Record<string, string[]> = {
+    'image/jpeg': ['jpg', 'jpeg', 'jfif'], 'image/png': ['png'], 'image/gif': ['gif'],
+    'image/webp': ['webp'], 'image/avif': ['avif'], 'image/heic': ['heic'],
+    'image/heif': ['heif'], 'image/tiff': ['tif', 'tiff'], 'image/bmp': ['bmp'],
+    'video/mp4': ['mp4', 'm4v'], 'video/quicktime': ['mov'], 'video/webm': ['webm'],
+    'video/mpeg': ['mpg', 'mpeg'], 'video/ogg': ['ogv'],
+  }
+  const allowed = preferred[mime]
+  if (!allowed || allowed.includes(extension)) return sanitizeSegment(original)
+  const stem = extension ? original.slice(0, -(extension.length + 1)) : original
+  return sanitizeSegment(`${stem || entry.id}.${allowed[0]}`)
+}
+
+/**
+ * Prepare all album originals for one native file share. Files stay on private
+ * browser disk when supported; the memory fallback has one total size ceiling.
+ * This function neither shares files nor creates ZIPs or smaller batches.
+ */
+export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOptions): Promise<PreparedAlbumShare> {
+  const { entries, signal, transformImage, onProgress } = options
+  throwIfAborted(signal)
+  if (!entries.length) throw new Error('Album chưa có ảnh hoặc video để tải.')
+  let root: FileSystemDirectoryHandle | undefined
+  let directory: FileSystemDirectoryHandle | undefined
+  let directoryName = ''
+  const files: File[] = []
+  let disposed = false
+  let disposing: Promise<void> | undefined
+  const dispose = (): Promise<void> => {
+    if (disposed) return Promise.resolve()
+    if (disposing) return disposing
+    disposing = (async () => {
+      if (root && directoryName) {
+        try { await root.removeEntry(directoryName, { recursive: true }) } catch (error) {
+          if (!(error instanceof Error && error.name === 'NotFoundError')) throw error
+        }
+      }
+      files.length = 0
+      disposed = true
+    })().finally(() => { disposing = undefined })
+    return disposing
+  }
+  const controller = new AbortController()
+  const localSignal = controller.signal
+  const onAbort = () => controller.abort(abortError(signal))
+  signal.addEventListener('abort', onAbort, { once: true })
+  if (signal.aborted) onAbort()
+  const sizes = new Array<number>(entries.length).fill(0)
+  const prepared = new Array<{ blob: Blob; mime: string }>(entries.length)
+  let availableBytes: number | undefined
+  let completed = 0
+  let fileName = entries[0].name
+  let nextIndex = 0
+  let failure: unknown
+  const progress = (status: ArchiveProgress['status']) => onProgress?.({ completed, total: entries.length, fileName, part: 1, status })
+  const sizeError = () => {
+    const error = new Error(directory
+      ? 'Bộ nhớ trống của trình duyệt không đủ để chuẩn bị toàn bộ ảnh/video. Hãy giải phóng dung lượng rồi thử lại.'
+      : 'Album vượt quá dung lượng có thể chuẩn bị an toàn cho một lần lưu trên trình duyệt này. Hãy dùng Safari/Chrome mới nhất có hỗ trợ bộ nhớ tạm, hoặc chọn ít ảnh/video hơn.')
+    error.name = directory ? 'QuotaExceededError' : 'AlbumShareTooLargeError'
+    return error
+  }
+  const checkSize = () => {
+    const bytes = sizes.reduce((sum, size) => sum + size, 0)
+    const limit = directory ? availableBytes : BLOB_MAX_BYTES
+    if (limit !== undefined && bytes > limit) throw sizeError()
+  }
+
+  try {
+    if (await supportsLocalArchivePreparation()) {
+      root = await localStorageRoot()
+      await removeExpiredLocalArchives(root, 'dinhthong-share')
+      throwIfAborted(localSignal)
+      directoryName = `dinhthong-share-${Date.now()}-${crypto.randomUUID()}`
+      directory = await root.getDirectoryHandle(directoryName, { create: true })
+      try {
+        const estimate = await navigator.storage.estimate()
+        if (Number.isFinite(estimate.quota) && Number.isFinite(estimate.usage)) availableBytes = Math.max(0, estimate.quota! - estimate.usage!)
+      } catch {}
+    }
+
+    async function prepareEntry(index: number) {
+      const entry = entries[index]
+      let writable: FileSystemWritableFileStream | undefined
+      let response: Response | undefined
+      try {
+        throwIfAborted(localSignal)
+        fileName = entry.name
+        progress('fetching')
+        response = await fetchCloudflareMedia(entry, { signal: localSignal })
+        let mime = albumShareMime(entry, response.headers.get('content-type') || '')
+        const expectedSize = contentLength(response)
+        if (expectedSize !== undefined) {
+          sizes[index] = expectedSize
+          checkSize()
+        }
+        if (!response.body) throw new Error(`Tệp “${entry.name}” không có dữ liệu.`)
+        let received = 0
+        const counter = new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, output) {
+            received += chunk.byteLength
+            if (expectedSize === undefined) {
+              sizes[index] = received
+              checkSize()
+            }
+            output.enqueue(chunk)
+          },
+        })
+        const body = response.body.pipeThrough(counter)
+        let blob: Blob | undefined
+        if (transformImage && entry.type === 'image') {
+          const original = await responseToBlob(new Response(body, { headers: response.headers }), entry, localSignal)
+          blob = await transformImage(original)
+          throwIfAborted(localSignal)
+          if (!blob.size || forbiddenMediaType(blob.type)) throw new Error(`Không xử lý được ảnh “${entry.name}”.`)
+          if (blob.size > BLOB_MAX_BYTES) throw new Error(`Ảnh “${entry.name}” quá lớn để xử lý an toàn.`)
+          mime = albumShareMime(entry, blob.type)
+          sizes[index] = blob.size
+          checkSize()
+        }
+        if (directory) {
+          const handle = await directory.getFileHandle(`source-${index}`, { create: true })
+          writable = await handle.createWritable()
+          await (blob ? blob.stream() : body).pipeTo(bufferedPrivateFileWriter(writable), { signal: localSignal })
+          writable = undefined
+          blob = await handle.getFile()
+        } else if (!blob) {
+          blob = await responseToBlob(new Response(body, { headers: response.headers }), entry, localSignal)
+        }
+        if (!blob?.size || blob.size !== sizes[index]) throw new Error(`Tệp “${entry.name}” chưa tải đầy đủ.`)
+        prepared[index] = { blob, mime }
+        completed++
+        fileName = entry.name
+        progress('fetching')
+      } catch (error) {
+        if (response?.body && !response.body.locked) await response.body.cancel(error).catch(() => {})
+        if (writable) await writable.abort(error).catch(() => {})
+        throw error
+      }
+    }
+
+    const concurrency = transformImage ? 1 : directory ? 4 : 2
+    const workers = Array.from({ length: Math.min(concurrency, entries.length) }, async () => {
+      try {
+        while (nextIndex < entries.length) {
+          throwIfAborted(localSignal)
+          await prepareEntry(nextIndex++)
+        }
+      } catch (error) {
+        if (failure === undefined) failure = error
+        controller.abort(error)
+      }
+    })
+    await Promise.allSettled(workers)
+    if (failure !== undefined) throw failure
+    throwIfAborted(localSignal)
+    if (completed !== entries.length) throw new Error('Chưa chuẩn bị được đầy đủ album. Vui lòng thử lại.')
+    // Native sharing flattens folders. Resolve collisions across the whole album,
+    // including changed extensions when an image watermark produced JPEG bytes.
+    const names = uniqueArchivePaths(entries.map((entry, index) => ({ ...entry, archivePath: undefined, name: albumShareName(entry, prepared[index].mime) })))
+    for (let index = 0; index < entries.length; index++) {
+      const { blob, mime } = prepared[index]
+      files.push(new File([blob], names[index], { type: mime, lastModified: blob instanceof File ? blob.lastModified : Date.now() }))
+    }
+    prepared.length = 0
+    progress('complete')
+    return { files, dispose }
+  } catch (error) {
+    controller.abort(error)
+    prepared.length = 0
+    await dispose().catch(() => {})
+    if (signal.aborted) throw abortError(signal)
+    if (error instanceof Error && error.name === 'QuotaExceededError') throw sizeError()
+    throw error
+  } finally {
+    signal.removeEventListener('abort', onAbort)
   }
 }
 

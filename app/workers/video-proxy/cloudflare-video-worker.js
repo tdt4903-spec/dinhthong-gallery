@@ -54,15 +54,15 @@ function validDriveId(id) {
   return /^[a-zA-Z0-9_-]{10,}$/.test(id)
 }
 
-async function bannerAsset(request, env, url) {
+async function staticImageAsset(request, env, url, assetPath) {
   if (!env.ASSETS) {
     return new Response('Static asset unavailable', { status: 503, headers: { 'Cache-Control': 'no-store' } })
   }
-  const assetUrl = new URL('/assets/banner-v1.jpg', url.origin)
+  const assetUrl = new URL(assetPath, url.origin)
   const response = await env.ASSETS.fetch(new Request(assetUrl, request))
   const headers = new Headers(response.headers)
   if (response.ok || response.status === 304) {
-    headers.set('Cache-Control', url.pathname === '/assets/banner-v1.jpg'
+    headers.set('Cache-Control', url.pathname === assetPath
       ? 'public, max-age=31536000, immutable'
       : 'public, max-age=86400, s-maxage=604800')
     headers.set('X-Content-Type-Options', 'nosniff')
@@ -256,7 +256,12 @@ async function handleRequest(request, env) {
 
     if (url.pathname === '/folder') return listFolder(request, env, url)
     if (url.pathname === '/thumb') return thumbnail(request, env, url)
-    if (url.pathname === '/assets/banner-v1.jpg' || url.pathname === '/banner.jpg') return bannerAsset(request, env, url)
+    if (url.pathname === '/assets/banner-v1.jpg' || url.pathname === '/banner.jpg') {
+      return staticImageAsset(request, env, url, '/assets/banner-v1.jpg')
+    }
+    if (url.pathname === '/assets/site-background-v1.jpg' || url.pathname === '/nen-web.jpg') {
+      return staticImageAsset(request, env, url, '/assets/site-background-v1.jpg')
+    }
 
     // Hỗ trợ cả ảnh và video
     const isVideo = url.pathname === '/video'

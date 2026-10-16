@@ -900,7 +900,8 @@ export default function DashboardBooking() {
 
   return (
     <main
-      className={`min-h-screen ${
+      data-site-theme={isDarkMode ? 'dark' : 'light'}
+      className={`site-page-surface min-h-screen ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#202520]'

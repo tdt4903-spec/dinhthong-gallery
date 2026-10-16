@@ -153,7 +153,7 @@ export default function GalleryPage() {
 
   if (checking) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#f7f8f6] text-gray-500">
+      <div data-site-theme="light" className="site-page-surface min-h-screen flex flex-col items-center justify-center bg-[#f7f8f6] text-gray-500">
         <AppPopupHost popup={popup} onResolve={resolvePopup} />
         <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-3" />
         <p className="text-xs">Đang kiểm tra quyền truy cập...</p>
@@ -163,7 +163,7 @@ export default function GalleryPage() {
 
   if (showNameModal) {
     return (
-      <div className="min-h-screen bg-[#f7f8f6] flex items-center justify-center px-4">
+      <div data-site-theme="light" className="site-page-surface min-h-screen bg-[#f7f8f6] flex items-center justify-center px-4">
         <AppPopupHost popup={popup} onResolve={resolvePopup} />
         <div className="w-full max-w-md">
           <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-7 sm:p-8">

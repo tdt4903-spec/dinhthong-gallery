@@ -921,7 +921,7 @@ export default function MoneyManagerPage() {
 
   if (!mounted || authLoading) {
     return (
-      <div className="min-h-screen bg-[#0f1115] flex flex-col items-center justify-center text-white">
+      <div data-site-theme="dark" className="site-page-surface min-h-screen bg-[#0f1115] flex flex-col items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
         <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang tải dữ liệu...</p>
       </div>
@@ -929,7 +929,7 @@ export default function MoneyManagerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-800 pb-28 sm:pb-12">
+    <div data-site-theme="light" className="site-page-surface min-h-screen bg-[#f8fafc] text-slate-800 pb-28 sm:pb-12">
       
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-2xs">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">

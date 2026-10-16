@@ -7,7 +7,7 @@ import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import FaceFilterPanel, { FaceScanIcon } from '../../components/ui/FaceFilterPanel'
 import { createBrowserClient } from '@supabase/ssr'
 import { saveAs } from 'file-saver'
-import { fetchCloudflareMediaBlob, prepareCloudflareArchiveLocally, supportsLocalArchivePreparation, UnsupportedLocalArchiveError, runCloudflareArchive, type DownloadEntry } from '@/lib/cloudflare-download'
+import { fetchCloudflareMediaBlob, prepareCloudflareAlbumShare, prepareCloudflareArchiveLocally, supportsLocalArchivePreparation, UnsupportedLocalArchiveError, runCloudflareArchive, type DownloadEntry } from '@/lib/cloudflare-download'
 import { fetchCloudflareFolderPage } from '@/lib/cloudflare-folder'
 import { SITE_BANNER_URL } from '@/lib/site-assets'
 import { DEFAULT_ALBUM_FEATURES, normalizeAlbumFeatures, resolveAlbumFeatures } from '@/lib/album-features'
@@ -321,10 +321,15 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [zipProgress, setZipProgress] = useState('')
   const archiveControllerRef = useRef<AbortController | null>(null)
   const preparedArchiveRef = useRef<{ dispose: () => Promise<void> } | null>(null)
+  const mobileAlbumShareRef = useRef<{ dispose: () => Promise<void> } | null>(null)
+  const mobileAlbumSharingRef = useRef(false)
+  const downloadUiMountedRef = useRef(true)
+  const [pendingMobileAlbumShare, setPendingMobileAlbumShare] = useState<{ files: File[]; label: string; imageCount: number; videoCount: number } | null>(null)
+  const [isSharingMobileAlbum, setIsSharingMobileAlbum] = useState(false)
   const partResolverRef = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null)
   const [archiveProgress, setArchiveProgress] = useState<{
     title: string; completed: number; total: number; part: number
-    status: string; fileName?: string; error?: string
+    status: string; fileName?: string; error?: string; kind?: 'photos'
   } | null>(null)
   const [pendingArchivePart, setPendingArchivePart] = useState<{
     blob: Blob; name: string; part: number; hasMore: boolean
@@ -343,11 +348,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       if (!dialog?.contains(document.activeElement)) return
       if (event.key === 'Escape') {
         event.preventDefault()
+        if (mobileAlbumSharingRef.current) return
         archiveControllerRef.current?.abort()
         partResolverRef.current?.reject(new DOMException('Đã hủy tải', 'AbortError'))
         const prepared = preparedArchiveRef.current
         preparedArchiveRef.current = null
         void prepared?.dispose().catch(() => {})
+        const album = mobileAlbumShareRef.current
+        mobileAlbumShareRef.current = null
+        void album?.dispose().catch(() => {})
+        setPendingMobileAlbumShare(null)
         setPreparedArchive(null)
         setPendingArchivePart(null)
         setArchiveProgress(null)
@@ -368,12 +378,19 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
     }
   }, [archiveDialogOpen])
-  useEffect(() => () => {
-    archiveControllerRef.current?.abort()
-    partResolverRef.current?.reject(new DOMException('Đã hủy tải', 'AbortError'))
-    const prepared = preparedArchiveRef.current
-    preparedArchiveRef.current = null
-    void prepared?.dispose().catch(() => {})
+  useEffect(() => {
+    downloadUiMountedRef.current = true
+    return () => {
+      downloadUiMountedRef.current = false
+      archiveControllerRef.current?.abort()
+      partResolverRef.current?.reject(new DOMException('Đã hủy tải', 'AbortError'))
+      const prepared = preparedArchiveRef.current
+      preparedArchiveRef.current = null
+      void prepared?.dispose().catch(() => {})
+      const album = mobileAlbumShareRef.current
+      mobileAlbumShareRef.current = null
+      void album?.dispose().catch(() => {})
+    }
   }, [])
   const [pendingMobileShare, setPendingMobileShare] = useState<{ blob: Blob; fileName: string } | null>(null)
 
@@ -1573,7 +1590,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const startArchiveDownload = async (
     title: string, key: string, getEntries: (signal: AbortSignal) => Promise<DownloadEntry[]>
   ) => {
-    if (archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare) return
+    if (archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare || pendingMobileAlbumShare || mobileAlbumSharingRef.current) return
     const controller = new AbortController()
     archiveControllerRef.current = controller
     const previousArchive = preparedArchiveRef.current
@@ -1647,10 +1664,15 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const cancelArchiveDownload = () => {
+    if (mobileAlbumSharingRef.current) return
     archiveControllerRef.current?.abort()
     const prepared = preparedArchiveRef.current
     preparedArchiveRef.current = null
     void prepared?.dispose().catch(() => {})
+    const album = mobileAlbumShareRef.current
+    mobileAlbumShareRef.current = null
+    void album?.dispose().catch(() => {})
+    setPendingMobileAlbumShare(null)
     setPreparedArchive(null)
     partResolverRef.current?.reject(new DOMException('Đã hủy tải', 'AbortError'))
     partResolverRef.current = null
@@ -1669,6 +1691,45 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     if (prepared) window.setTimeout(() => { void prepared.dispose().catch(() => {}) }, 24 * 60 * 60 * 1000)
     setPreparedArchive(null)
     setArchiveProgress(previous => previous ? { ...previous, status: 'download_started' } : null)
+  }
+
+  const saveWholeAlbumToPhotos = async () => {
+    const album = pendingMobileAlbumShare
+    if (!album || mobileAlbumSharingRef.current) return
+    let canShareAlbum = false
+    try {
+      canShareAlbum = typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && navigator.canShare({ files: album.files })
+    } catch {}
+    if (!canShareAlbum) {
+      setArchiveProgress(previous => previous ? { ...previous, status: 'error', error: 'Trình duyệt này không hỗ trợ gửi toàn bộ album vào Ảnh trong một lần. Hãy mở bằng Safari trên iPhone/iPad hoặc Chrome mới nhất trên Android.' } : null)
+      return
+    }
+    const prepared = mobileAlbumShareRef.current
+    mobileAlbumShareRef.current = null
+    mobileAlbumSharingRef.current = true
+    setIsSharingMobileAlbum(true)
+    try {
+      // All originals are ready; one fresh user gesture opens one system sheet.
+      await navigator.share({ files: album.files, title: album.label })
+      if (prepared) window.setTimeout(() => { void prepared.dispose().catch(() => {}) }, 24 * 60 * 60 * 1000)
+      if (!downloadUiMountedRef.current) return
+      setPendingMobileAlbumShare(null)
+      setDownloadSelectedIds(new Set())
+      setArchiveProgress(previous => previous ? { ...previous, status: 'shared_album' } : null)
+    } catch (error) {
+      if (!downloadUiMountedRef.current) {
+        if (prepared) window.setTimeout(() => { void prepared.dispose().catch(() => {}) }, 24 * 60 * 60 * 1000)
+        return
+      }
+      mobileAlbumShareRef.current = prepared
+      if (!(error instanceof Error && error.name === 'AbortError')) {
+        const detail = error instanceof Error ? error.message : String(error)
+        setArchiveProgress(previous => previous ? { ...previous, status: 'error', error: `Điện thoại chưa nhận được toàn bộ album: ${detail}. Bạn có thể thử lại khi còn đủ dung lượng trống.` } : null)
+      }
+    } finally {
+      mobileAlbumSharingRef.current = false
+      if (downloadUiMountedRef.current) setIsSharingMobileAlbum(false)
+    }
   }
 
   const savePendingArchivePart = () => {
@@ -1865,7 +1926,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const startMobileImageDownload = async (sourceItems: MediaItem[], label: string) => {
-    if (isPreparingMobileImages || pendingMobileBatchShare) return
+    if (archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare || pendingMobileAlbumShare || mobileAlbumSharingRef.current) return
 
     const usedNames = new Set<string>()
     const imagesOnly = sourceItems.filter(item => item.type === 'image').map(item => {
@@ -1999,30 +2060,43 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     e?.stopPropagation()
     const currentFolder = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1] : null
     const target = targetInfo || currentFolder || selectedAlbum
-    if (!target || archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare) return
+    if (!target || archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare || pendingMobileAlbumShare || mobileAlbumSharingRef.current) return
     if (isSharedGuest && isLocked) return
 
     if (isMobileDevice()) {
+      if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') {
+        void showAlert('Hãy mở album bằng Safari trên iPhone/iPad hoặc Chrome mới nhất trên Android để lưu toàn bộ album vào Ảnh.')
+        return
+      }
       const controller = new AbortController()
       archiveControllerRef.current = controller
       setZippingFolderId(target.id || 'album')
-      setArchiveProgress({ title: target.title, completed: 0, total: 0, part: 1, status: 'preparing' })
+      setArchiveProgress({ title: target.title, completed: 0, total: 0, part: 1, status: 'preparing', kind: 'photos' })
       try {
         const entries = await collectAlbumDownloadEntries([target], controller.signal)
         controller.signal.throwIfAborted()
-        const images = entries.filter(item => item.type === 'image').map(item => ({ ...item, type: 'image' as const, url: '', fullUrl: '', downloadUrl: '' }))
-        setArchiveProgress(null)
-        if (images.length > 0) await startMobileImageDownload(images, `${target.title}_tat_ca_anh`)
-        for (const video of entries.filter(item => item.type === 'video')) {
-          controller.signal.throwIfAborted()
-          triggerDirectBrowserDownload(video.id, video.name)
-        }
-        if (entries.length === 0) void showAlert('Album này không có tệp nào được phép tải.')
+        if (entries.length === 0) throw new Error('Album này không có ảnh hoặc video nào được phép tải.')
+        let lastProgress = 0
+        const prepared = await prepareCloudflareAlbumShare({
+          entries, title: target.title, signal: controller.signal,
+          transformImage: activeSetting.enable_watermark ? applyWatermarkToImageBlob : undefined,
+          onProgress: progress => {
+            if (archiveControllerRef.current !== controller || controller.signal.aborted) return
+            const now = performance.now()
+            if (progress.completed < progress.total && now - lastProgress < 200) return
+            lastProgress = now
+            setArchiveProgress({ title: target.title, ...progress, kind: 'photos' })
+          },
+        })
+        if (controller.signal.aborted) { await prepared.dispose(); controller.signal.throwIfAborted() }
+        mobileAlbumShareRef.current = prepared
+        setPendingMobileAlbumShare({ files: prepared.files, label: target.title, imageCount: entries.filter(item => item.type === 'image').length, videoCount: entries.filter(item => item.type === 'video').length })
+        setArchiveProgress({ title: target.title, completed: entries.length, total: entries.length, part: 1, status: 'ready_album', kind: 'photos' })
       } catch (error) {
-        if (!controller.signal.aborted) void showAlert('Không thể tải album: ' + (error instanceof Error ? error.message : String(error)))
+        if (controller.signal.aborted) setArchiveProgress(null)
+        else setArchiveProgress(previous => previous ? { ...previous, status: 'error', error: error instanceof Error ? error.message : String(error) } : null)
       } finally {
         if (archiveControllerRef.current === controller) archiveControllerRef.current = null
-        setArchiveProgress(null)
         setZippingFolderId(null)
         setZipProgress('')
       }
@@ -3221,7 +3295,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#07130c] flex flex-col items-center justify-center text-white">
+      <div data-site-theme="dark" className="site-page-surface min-h-screen bg-[#07130c] flex flex-col items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
         <p className="text-xs font-light text-white/70 tracking-widest uppercase">Vui lòng đợi</p>
       </div>
@@ -3229,7 +3303,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   return (
-    <div className={`min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#06140f] text-white' : 'bg-[#f5f7f3] text-[#1c1d21]'}`}>
+    <div data-site-theme={isDarkMode ? 'dark' : 'light'} className={`site-page-surface min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#06140f] text-white' : 'bg-[#f5f7f3] text-[#1c1d21]'}`}>
       
       {/* HEADER */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#071710]/94 border-white/10' : 'bg-[#fbfdf9]/94 border-emerald-950/8'} ${selectedAlbum && !isSharedGuest ? 'lg:fixed lg:inset-x-0 lg:top-0 lg:z-[90] lg:h-[66px]' : ''}`}>
@@ -5150,16 +5224,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             <button
               type="button"
               onClick={handleDownloadAllImagesToPhone}
-              disabled={isPreparingMobileImages || Boolean(pendingMobileBatchShare)}
+              disabled={Boolean(zippingFolderId) || isPreparingMobileImages || Boolean(pendingMobileBatchShare) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum}
               className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 text-[11px] font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-45"
             >
-              {isPreparingMobileImages ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {isPreparingMobileImages || zippingFolderId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               Tải album
             </button>
             <button
               type="button"
               onClick={handleDownloadSelectedImagesToPhone}
-              disabled={selectedDownloadImages.length === 0 || isPreparingMobileImages || Boolean(pendingMobileBatchShare)}
+              disabled={selectedDownloadImages.length === 0 || Boolean(zippingFolderId) || isPreparingMobileImages || Boolean(pendingMobileBatchShare) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum}
               className={`flex h-11 items-center justify-center gap-2 rounded-xl border text-[11px] font-bold disabled:opacity-40 ${isDarkMode ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300' : 'border-emerald-600/20 bg-emerald-50 text-emerald-700'}`}
             >
               <ClipboardList className="h-4 w-4" />
@@ -6153,22 +6227,38 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           <div ref={archiveDialogRef} role="dialog" aria-modal="true" aria-label="Tiến trình tải album" tabIndex={-1} className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-[28px] border border-white/70 bg-[#fbfcf7] p-5 text-[#10261d] shadow-2xl outline-none sm:p-7">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-lg font-bold">{archiveProgress.status === 'error' ? 'Không thể chuẩn bị ZIP' : archiveProgress.status === 'ready' ? 'ZIP đã sẵn sàng' : archiveProgress.status === 'download_started' || archiveProgress.status === 'complete' ? 'Đã bắt đầu tải ZIP' : 'Đang chuẩn bị ZIP'}</h2>
+                <h2 className="text-lg font-bold">{archiveProgress.kind === 'photos'
+                  ? archiveProgress.status === 'error' ? 'Chưa thể lưu toàn bộ album' : archiveProgress.status === 'ready_album' ? 'Toàn bộ album đã sẵn sàng' : archiveProgress.status === 'shared_album' ? 'Đã gửi album tới bảng lưu' : 'Đang chuẩn bị toàn bộ album'
+                  : archiveProgress.status === 'error' ? 'Không thể chuẩn bị ZIP' : archiveProgress.status === 'ready' ? 'ZIP đã sẵn sàng' : archiveProgress.status === 'download_started' || archiveProgress.status === 'complete' ? 'Đã bắt đầu tải ZIP' : 'Đang chuẩn bị ZIP'}</h2>
                 <p className="mt-1 break-words text-sm text-emerald-950/65">{archiveProgress.title}</p>
               </div>
-              <button type="button" onClick={cancelArchiveDownload} aria-label="Đóng tiến trình tải" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-black/5"><X className="h-5 w-5" /></button>
+              <button type="button" onClick={cancelArchiveDownload} disabled={isSharingMobileAlbum} aria-label="Đóng tiến trình tải" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-black/5 disabled:opacity-40"><X className="h-5 w-5" /></button>
             </div>
             {archiveProgress.status === 'error' ? (
               <p role="alert" className="mt-5 break-words rounded-xl bg-red-50 p-3 text-sm leading-6 text-red-800">{archiveProgress.error}</p>
             ) : (
               <div className="mt-5" aria-live="polite">
                 <div className="flex items-center gap-2 text-sm font-semibold">
-                  {!['ready', 'download_started', 'complete', 'saving'].includes(archiveProgress.status) && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {!['ready', 'ready_album', 'shared_album', 'download_started', 'complete', 'saving'].includes(archiveProgress.status) && <Loader2 className="h-4 w-4 animate-spin" />}
                   <span>{archiveProgress.status === 'archiving' ? 'Đang đóng gói ZIP: ' : archiveProgress.status === 'fetching' ? 'Đang lấy ảnh: ' : ''}{archiveProgress.total ? `${archiveProgress.completed}/${archiveProgress.total} tệp` : (zipProgress || 'Đang chuẩn bị...')}</span>
                 </div>
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100"><div className="h-full bg-emerald-600 transition-all" style={{ width: `${archiveProgress.total ? Math.min(100, archiveProgress.completed / archiveProgress.total * 100) : 0}%` }} /></div>
                 {archiveProgress.fileName && <p className="mt-2 break-all text-xs text-gray-500">{archiveProgress.fileName}</p>}
               </div>
+            )}
+            {pendingMobileAlbumShare && (
+              <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-bold leading-6">
+                  Đã chuẩn bị đủ {pendingMobileAlbumShare.imageCount > 0 ? `${pendingMobileAlbumShare.imageCount} ảnh` : ''}{pendingMobileAlbumShare.imageCount > 0 && pendingMobileAlbumShare.videoCount > 0 ? ' và ' : ''}{pendingMobileAlbumShare.videoCount > 0 ? `${pendingMobileAlbumShare.videoCount} video` : ''}.
+                </p>
+                <p className="mt-2 text-sm leading-6">Nhấn nút bên dưới, rồi chọn “Lưu hình ảnh” hoặc “Lưu vào Ảnh” trong bảng của điện thoại để lưu toàn bộ cùng một lượt.</p>
+                <button type="button" onClick={saveWholeAlbumToPhotos} disabled={isSharingMobileAlbum} className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-60">
+                  {isSharingMobileAlbum ? <><Loader2 className="h-4 w-4 shrink-0 animate-spin" /> Đang mở bảng lưu...</> : `Lưu toàn bộ ${pendingMobileAlbumShare.files.length} ${pendingMobileAlbumShare.videoCount > 0 ? 'mục' : 'ảnh'} vào Ảnh`}
+                </button>
+              </div>
+            )}
+            {archiveProgress.status === 'shared_album' && (
+              <p className="mt-5 rounded-xl bg-emerald-50 p-4 text-sm leading-6">Đã chuyển đủ {archiveProgress.total} tệp tới bảng lưu của điện thoại. Ảnh và video được lưu theo lựa chọn của bạn trong bảng hệ thống.</p>
             )}
             {preparedArchive && (
               <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
@@ -6184,8 +6274,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </button>
               </div>
             )}
-            <button type="button" onClick={cancelArchiveDownload} className="mt-5 min-h-11 w-full rounded-xl border border-emerald-900/20 px-4 py-3 text-sm font-semibold">
-              {['ready', 'download_started', 'complete', 'error'].includes(archiveProgress.status) ? 'Đóng' : 'Hủy chuẩn bị'}
+            <button type="button" onClick={cancelArchiveDownload} disabled={isSharingMobileAlbum} className="mt-5 min-h-11 w-full rounded-xl border border-emerald-900/20 px-4 py-3 text-sm font-semibold disabled:opacity-40">
+              {['ready', 'ready_album', 'shared_album', 'download_started', 'complete', 'error'].includes(archiveProgress.status) ? 'Đóng' : 'Hủy chuẩn bị'}
             </button>
           </div>
         </div>, document.body

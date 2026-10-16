@@ -730,7 +730,8 @@ export default function CustomerProductsDashboard() {
 
   return (
     <main
-      className={`min-h-screen transition-colors ${
+      data-site-theme={isDarkMode ? 'dark' : 'light'}
+      className={`site-page-surface min-h-screen transition-colors ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'
