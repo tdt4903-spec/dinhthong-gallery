@@ -480,7 +480,9 @@ async function handleRequest(request, env) {
      */
     headers.set(
       'Content-Disposition',
-      contentDisposition(fileName)
+      isVideo && url.searchParams.get('inline') === '1'
+        ? contentDisposition(fileName).replace(/^attachment;/, 'inline;')
+        : contentDisposition(fileName)
     )
 
     headers.set('Accept-Ranges', 'bytes')

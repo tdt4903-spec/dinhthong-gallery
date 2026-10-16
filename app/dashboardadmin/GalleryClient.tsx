@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import FaceFilterPanel, { FaceScanIcon } from '../../components/ui/FaceFilterPanel'
+import AlbumVideoPreview from '../../components/ui/AlbumVideoPreview'
 import { createBrowserClient } from '@supabase/ssr'
 import { saveAs } from 'file-saver'
 import { fetchCloudflareMediaBlob, prepareCloudflareAlbumShare, prepareCloudflareArchiveLocally, supportsLocalArchivePreparation, UnsupportedLocalArchiveError, runCloudflareArchive, type DownloadEntry } from '@/lib/cloudflare-download'
@@ -4877,17 +4878,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       {/* MODAL LIGHTBOX */}
       {previewMedia && (
         <div 
-          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-2 sm:p-4 select-none touch-pan-y"
+          className="fixed inset-x-0 top-0 z-[100] flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-black/95 p-2 pt-[max(8px,env(safe-area-inset-top))] backdrop-blur-md select-none touch-pan-y sm:p-4"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="sm:hidden grid grid-cols-[42px_1fr_42px] items-center px-1 py-2 text-white z-30">
-            <button onClick={handleClosePreview} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md" aria-label="Đóng ảnh">
+          <div className="sm:hidden grid shrink-0 grid-cols-[42px_1fr_42px] items-center px-1 py-2 text-white z-30">
+            <button onClick={handleClosePreview} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md" aria-label={previewMedia.type === 'video' ? 'Đóng video' : 'Đóng ảnh'}>
               <BackIcon className="h-5 w-5" />
             </button>
             <div className="text-center text-xs font-semibold">{currentIndex + 1} / {previewSourceList.length}</div>
-            <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md disabled:opacity-50" aria-label="Tải ảnh">
+            <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md disabled:opacity-50" aria-label={previewMedia.type === 'video' ? 'Tải video' : 'Tải ảnh'}>
               {downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </button>
           </div>
@@ -4950,21 +4951,19 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           </div>
 
           <div 
-            className="relative flex-1 flex items-center justify-center p-2 overflow-hidden w-full h-full cursor-grab active:cursor-grabbing"
-            onClick={handleDoubleTap}
+            className={`relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden p-2 ${previewMedia.type === 'image' ? 'cursor-grab active:cursor-grabbing' : ''}`}
+            onClick={previewMedia.type === 'image' ? handleDoubleTap : undefined}
           >
             {previewMedia.type === 'video' ? (
-              <div className="relative w-full max-w-5xl aspect-video flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-2xl">
-                <iframe
-                  src={`https://drive.google.com/file/d/${previewMedia.id}/preview`}
-                  className="w-full h-full border-0 rounded-2xl"
-                  allow="autoplay; fullscreen"
-                  allowFullScreen
-                />
-              </div>
+              <AlbumVideoPreview
+                key={previewMedia.id}
+                id={previewMedia.id}
+                name={customNames[previewMedia.id] || previewMedia.name}
+                nativeControls={isMobileDevice()}
+              />
             ) : (
               <div 
-                className="relative max-h-full max-w-full flex items-center justify-center transition-transform duration-100 ease-out"
+                className="relative flex h-full min-h-0 w-full items-center justify-center transition-transform duration-100 ease-out"
                 style={{
                   transform: `scale(${zoomScale}) translate(${panPosition.x}px, ${panPosition.y}px)`
                 }}
@@ -4972,7 +4971,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <img 
                   src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
                   alt={previewMedia.name}
-                  className="max-h-[78vh] max-w-[95vw] object-contain rounded-lg shadow-2xl transition-all duration-150 pointer-events-none"
+                  className="max-h-full max-w-full object-contain rounded-lg shadow-2xl transition-all duration-150 pointer-events-none"
                 />
 
                 {activeSetting.enable_watermark && (
@@ -5003,7 +5002,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             )}
           </div>
 
-          <div className="sm:hidden z-30 w-full px-1 pb-[max(8px,env(safe-area-inset-bottom))]">
+          <div className="sm:hidden z-30 max-h-[40dvh] w-full shrink-0 overflow-y-auto px-1 pb-[max(8px,env(safe-area-inset-bottom))]">
             <div className="rounded-2xl border border-white/12 bg-black/72 p-2.5 shadow-2xl backdrop-blur-xl">
               {activeSetting.allow_comments && (
                 <div className="mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-white/6 px-2.5 py-2">
@@ -5013,7 +5012,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     value={currentCommentInput}
                     onChange={(e) => setCurrentCommentInput(e.target.value)}
                     placeholder="Ghi chú yêu cầu sửa ảnh..."
-                    className="min-w-0 flex-1 bg-transparent text-[11px] text-white outline-none placeholder:text-white/35"
+                    className="min-w-0 flex-1 bg-transparent text-base text-white outline-none placeholder:text-white/35"
                   />
                   <button onClick={() => handleSaveComment(previewMedia.id)} disabled={isSavingComment} className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-white disabled:opacity-50">
                     {isSavingComment ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
@@ -5057,7 +5056,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 )}
                 <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 text-[10px] font-bold text-white disabled:opacity-50">
                   {downloadingId === previewMedia.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                  Tải ảnh
+                  {previewMedia.type === 'video' ? 'Tải video' : 'Tải ảnh'}
                 </button>
               </div>
             </div>
