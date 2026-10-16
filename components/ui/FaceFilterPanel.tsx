@@ -253,17 +253,18 @@ export default function FaceFilterPanel({
           folderId: folderId || 'default_album',
           items: images,
           forceRescan,
-          concurrency: 1,
+          concurrency: 3,
           shouldCancel: () => run.cancelled || activeScanRef.current !== run,
-          onProgress: (info, partialFaces) => {
+          onProgress: (info) => {
             if (run.cancelled || activeScanRef.current !== run) return
             setScanProgress(info)
             setScannedCount(info.completed)
-            setDetectedFaces(partialFaces)
             if (info.failedCount) setScanError(`${info.failedCount} ảnh chưa quét được. Bấm Quét album để thử lại các ảnh này.`)
           },
         })
-        if (!run.cancelled && activeScanRef.current === run) {
+        // Group the scan once, keeping GPU time available during recognition.
+        // A stopped scan also returns its completed images for immediate use.
+        if (activeScanRef.current === run) {
           setDetectedFaces(finalFaces)
         }
       } catch (err: any) {
@@ -309,8 +310,6 @@ export default function FaceFilterPanel({
           setReferenceFaces(faces)
           setReferenceSourceLabel(`Ảnh: ${inspectImageItem.name}`)
           setSelectedReferenceFaceIds(faces.length === 1 ? new Set([faces[0].faceId]) : new Set())
-          setSelectedClusterIds(new Set())
-          setSelectedClusterFaces(new Map())
           void startAlbumScan(false)
         }
       } catch (err: any) {
@@ -374,13 +373,15 @@ export default function FaceFilterPanel({
       }
     }
 
-    if (targetDescriptors.length > 0 && detectedFaces.length > 0) {
+    // Rank each selected reference independently. Ranking all selected people
+    // together would only keep the closest person and silently drop the rest.
+    for (const target of targetDescriptors) {
       const ranked = faceClusters.map(cluster => {
         const references = new Set(cluster.referenceFaceIds || [cluster.faces[0]?.faceId])
         let distance = Infinity
         for (const face of cluster.faces) {
           if (!references.has(face.faceId)) continue
-          for (const target of targetDescriptors) distance = Math.min(distance, computeEuclideanDistance(face.descriptor, target))
+          distance = Math.min(distance, computeEuclideanDistance(face.descriptor, target))
         }
         return { cluster, distance }
       }).sort((a, b) => a.distance - b.distance)
@@ -388,7 +389,7 @@ export default function FaceFilterPanel({
       if (best && best.distance <= threshold && (!ranked[1] || ranked[1].distance - best.distance >= 0.05)) {
         faceClusterImageIds.get(best.cluster.id)?.forEach(id => resultIds.add(id))
       } else {
-        const { matchedImageIds: descriptorMatched } = matchFacesByDescriptors(detectedFaces, targetDescriptors, threshold)
+        const { matchedImageIds: descriptorMatched } = matchFacesByDescriptors(detectedFaces, [target], threshold)
         descriptorMatched.forEach(id => resultIds.add(id))
       }
     }
@@ -424,15 +425,27 @@ export default function FaceFilterPanel({
     }
     const representative = faceClusters.find(cluster => cluster.id === clusterId)?.faces[0]
     if (!representative) return
-    setSelectedClusterFaces(prev => prev.has(clusterId) ? new Map() : new Map([[clusterId, representative]]))
-    setSelectedClusterIds(prev => prev.has(clusterId) ? new Set() : new Set([clusterId]))
-    setSelectedReferenceFaceIds(new Set())
+    setSelectedClusterFaces(prev => {
+      const next = new Map(prev)
+      if (next.has(clusterId)) next.delete(clusterId)
+      else next.set(clusterId, representative)
+      return next
+    })
+    setSelectedClusterIds(prev => {
+      const next = new Set(prev)
+      if (next.has(clusterId)) next.delete(clusterId)
+      else next.add(clusterId)
+      return next
+    })
   }
 
   const toggleReferenceFaceSelection = (faceId: string) => {
-    setSelectedReferenceFaceIds(prev => prev.has(faceId) ? new Set() : new Set([faceId]))
-    setSelectedClusterIds(new Set())
-    setSelectedClusterFaces(new Map())
+    setSelectedReferenceFaceIds(prev => {
+      const next = new Set(prev)
+      if (next.has(faceId)) next.delete(faceId)
+      else next.add(faceId)
+      return next
+    })
   }
 
   const handleUploadReferenceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -453,8 +466,6 @@ export default function FaceFilterPanel({
       setReferenceFaces(faces)
       setReferenceSourceLabel(`Ảnh tải lên: ${file.name}`)
       setSelectedReferenceFaceIds(faces.length === 1 ? new Set([faces[0].faceId]) : new Set())
-      setSelectedClusterIds(new Set())
-      setSelectedClusterFaces(new Map())
 
       if (scannedCount < images.length && !isScanning) {
         void startAlbumScan(false)
@@ -555,7 +566,7 @@ export default function FaceFilterPanel({
           <div className="min-w-0 flex-1">
             <h2 id={titleId} className="text-base font-bold leading-snug sm:text-xl">Nhận diện khuôn mặt</h2>
             <p className={`mt-1 text-[11px] sm:text-xs ${isDarkMode ? 'text-white/60' : 'text-emerald-900/65'}`}>
-              {faceClusters.length} khuôn mặt • Đã quét {scannedCount}/{images.length} ảnh
+              {isScanning ? 'Đang tìm khuôn mặt' : `${faceClusters.length} khuôn mặt`} • Đã quét {scannedCount}/{images.length} ảnh
             </p>
           </div>
           <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Đóng nhận diện khuôn mặt" className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${isDarkMode ? 'text-white/65 hover:bg-white/10' : 'text-emerald-950/60 hover:bg-emerald-950/5'}`}>
@@ -654,7 +665,7 @@ export default function FaceFilterPanel({
 
       </div>
       <p className={`mt-3 text-xs leading-relaxed ${isDarkMode ? 'text-white/55' : 'text-gray-500'}`}>
-        Chọn một mặt để xem ảnh. Nếu mặt nghiêng bị tách, dùng “Gộp mặt trùng” để xác nhận cùng người.
+        Có thể chọn nhiều khuôn mặt cùng lúc. Kết quả gồm ảnh có ít nhất một mặt đã chọn; bấm lại để bỏ chọn. Nếu mặt nghiêng bị tách, dùng “Gộp mặt trùng”.
       </p>
 
       {/* THANH TIẾN TRÌNH QUÉT */}
@@ -699,7 +710,7 @@ export default function FaceFilterPanel({
         >
           <div className="flex items-center justify-between gap-2 mb-2">
             <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">
-              {referenceSourceLabel || 'Khuôn mặt từ ảnh mẫu'} (Bấm chọn đúng một mặt cần tìm)
+              {referenceSourceLabel || 'Khuôn mặt từ ảnh mẫu'} (Có thể chọn nhiều mặt cần tìm)
             </span>
             <button
               type="button"
@@ -724,6 +735,7 @@ export default function FaceFilterPanel({
                   key={face.faceId}
                   type="button"
                   onClick={() => toggleReferenceFaceSelection(face.faceId)}
+                  aria-pressed={isSelected}
                   className={`group relative flex flex-col items-center shrink-0 rounded-2xl p-1.5 border transition cursor-pointer ${
                     isSelected
                       ? 'border-emerald-500 bg-emerald-500/15 ring-2 ring-emerald-500/40'
@@ -869,6 +881,9 @@ export default function FaceFilterPanel({
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="font-bold text-emerald-500">
               Đã lọc tổng hợp: {matchedImagesList.length} ảnh khớp khuôn mặt
+            </span>
+            <span className={isDarkMode ? 'text-white/60' : 'text-gray-500'}>
+              Đã chọn {selectedClusterIds.size + selectedReferenceFaceIds.size} khuôn mặt
             </span>
             <span className={isDarkMode ? 'text-white/40' : 'text-gray-400'}>•</span>
             <span className={isDarkMode ? 'text-white/80 font-medium' : 'text-gray-700 font-medium'}>

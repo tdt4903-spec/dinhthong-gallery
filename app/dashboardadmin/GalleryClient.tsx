@@ -340,13 +340,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [clearFaceFilterSignal, setClearFaceFilterSignal] = useState(0)
   const handleFaceFilterChange = useCallback((matchedIds: Set<string> | null) => {
     setFaceMatchedIds(matchedIds)
-    setCurrentPage(1)
   }, [])
   const handleClearInspectFaceImage = useCallback(() => setInspectFaceImageItem(null), [])
 
-  const [currentPage, setCurrentPage] = useState(1)
   const [gridDensity, setGridDensity] = useState<'comfortable' | 'compact'>('comfortable')
-  const itemsPerPage = 24
 
   const [useComma, setUseComma] = useState(true)
   const [useSpace, setUseSpace] = useState(true)
@@ -1023,9 +1020,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const filteredAlbums = (albums || []).filter(album => album && album.title && album.title.toLowerCase().includes(searchTerm.toLowerCase()))
   const currentSelectionCount = selectedAlbum ? selectedItemIds.size : selectedAlbumIds.size
 
-  const totalPages = Math.ceil(filteredMediaFiles.length / itemsPerPage)
-  const paginatedImages = filteredMediaFiles.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-  const displayedImages = isSharedGuest ? paginatedImages : filteredMediaFiles
   const previewSourceList = filteredMediaFiles
   const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
 
@@ -1397,7 +1391,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setFaceMatchedIds(null)
     setIsFaceFilterOpen(false)
     setInspectFaceImageItem(null)
-    setCurrentPage(1)
     setSelectedItemIds(new Set())
     setDownloadSelectedIds(new Set())
     setPendingMobileBatchShare(null)
@@ -4285,19 +4278,19 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
                 <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
                   <button
-                    onClick={() => { setStarFilter('all'); setFaceMatchedIds(null); setClearFaceFilterSignal(prev => prev + 1); setCurrentPage(1) }}
+                    onClick={() => { setStarFilter('all'); setFaceMatchedIds(null); setClearFaceFilterSignal(prev => prev + 1) }}
                     className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'all' && faceMatchedIds === null ? 'border-emerald-500 bg-emerald-600 text-white shadow' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
                     <ImageIcon className="h-3.5 w-3.5" /> Tất cả ảnh ({mediaFiles.length})
                   </button>
                   <button
-                    onClick={() => { setStarFilter('selected'); setCurrentPage(1) }}
+                    onClick={() => setStarFilter('selected')}
                     className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'selected' ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
                     <Star className="h-3.5 w-3.5 fill-current" /> Ảnh đã chọn ({displaySelectedImagesList.length})
                   </button>
                   <button
-                    onClick={() => { setStarFilter(5); setCurrentPage(1) }}
+                    onClick={() => setStarFilter(5)}
                     className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 5 ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
                     <Star className="h-3.5 w-3.5 fill-current" /> Ảnh 5 sao ({mediaFiles.filter(img => (displayRatings[img.id] || 0) === 5).length})
@@ -4358,9 +4351,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               {mediaFiles.length > 0 && (
                 <div className="mt-2.5 flex items-center gap-1.5 overflow-x-auto border-t pt-2.5 scrollbar-none border-gray-200/70 dark:border-white/8">
                   <span className={`shrink-0 px-1 text-[10px] font-semibold ${isDarkMode ? 'text-white/35' : 'text-gray-400'}`}>Lọc:</span>
-                  <button onClick={() => { setStarFilter('all'); setCurrentPage(1) }} className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === 'all' ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>Tất cả</button>
+                  <button onClick={() => setStarFilter('all')} className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === 'all' ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>Tất cả</button>
                   {[0,1,2,3,4,5].map((star) => (
-                    <button key={star} onClick={() => { setStarFilter(star); setCurrentPage(1) }} className={`shrink-0 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === star ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>
+                    <button key={star} onClick={() => setStarFilter(star)} className={`shrink-0 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === star ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>
                       <Star className="h-3 w-3 fill-current text-emerald-400" /> {star}
                     </button>
                   ))}
@@ -4579,7 +4572,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     )}
 
                     <div className={`grid gap-2.5 sm:gap-3 ${!isSharedGuest ? 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8' : gridDensity === 'compact' ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}`}>
-                      {displayedImages
+                      {filteredMediaFiles
                         .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map((item) => {
                           const currentStar = displayRatings[item.id] || 0
@@ -4720,28 +4713,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                           )
                         })}
                     </div>
-
-                    {isSharedGuest && totalPages > 1 && (
-                      <div className="flex items-center justify-center gap-2 mt-8 sm:mt-10">
-                        <button
-                          onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
-                          disabled={currentPage === 1}
-                          className="px-3.5 py-1.5 rounded-xl bg-gray-200 dark:bg-white/10 text-xs font-semibold disabled:opacity-40 cursor-pointer transition"
-                        >
-                          Trang trước
-                        </button>
-                        <span className="text-xs px-2 text-gray-500">
-                          {currentPage} / {totalPages}
-                        </span>
-                        <button
-                          onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
-                          disabled={currentPage === totalPages}
-                          className="px-3.5 py-1.5 rounded-xl bg-gray-200 dark:bg-white/10 text-xs font-semibold disabled:opacity-40 cursor-pointer transition"
-                        >
-                          Trang sau
-                        </button>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>

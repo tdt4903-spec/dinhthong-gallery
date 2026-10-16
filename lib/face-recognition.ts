@@ -360,7 +360,7 @@ function cropFaceAvatarDataUrl(
   avatarCanvas.width = avatarSize
   avatarCanvas.height = avatarSize
   const ctx = avatarCanvas.getContext('2d')
-  if (!ctx) return ''
+  if (!ctx) { avatarCanvas.width = 0; avatarCanvas.height = 0; return '' }
 
   const padX = box.width * 0.32
   const padY = box.height * 0.32
@@ -374,7 +374,43 @@ function cropFaceAvatarDataUrl(
   const sHeight = Math.min(side, sourceCanvas.height - sy)
 
   ctx.drawImage(sourceCanvas, sx, sy, sWidth, sHeight, 0, 0, avatarSize, avatarSize)
-  return avatarCanvas.toDataURL('image/jpeg', 0.84)
+  const avatar = avatarCanvas.toDataURL('image/jpeg', 0.84)
+  avatarCanvas.width = 0
+  avatarCanvas.height = 0
+  return avatar
+}
+
+interface FaceDetectionProposal {
+  faceId: string
+  detection: any
+  region: { x: number; y: number; width: number; height: number; mirrored: boolean }
+  box: DetectedFaceRecord['box']
+  score: number
+}
+
+function uniqueFaceProposals(proposals: FaceDetectionProposal[]): FaceDetectionProposal[] {
+  const sorted = [...proposals].sort((a, b) => faceQuality(b) - faceQuality(a) || a.faceId.localeCompare(b.faceId))
+  const kept: FaceDetectionProposal[] = []
+  for (const proposal of sorted) {
+    // Only the same strict geometric duplicate rule used by final NMS is safe
+    // before embeddings exist. Nearby people still get independent embeddings.
+    if (!kept.some(existing => overlappingFaceBoxes(existing, proposal))) kept.push(proposal)
+  }
+  return kept
+}
+
+async function computeDescriptorBatch(faceapi: any, inputs: HTMLCanvasElement[]): Promise<number[][]> {
+  if (inputs.length === 0) return []
+  // Keep the model's single-chip tensor shape warm. Tensor batches with new
+  // sizes compile separate WebGL shaders, adding seconds on the first scan.
+  const result = await Promise.all(inputs.map(input => faceapi.computeFaceDescriptor(input)))
+  return result.map((descriptor: Float32Array) => {
+    const values = Array.from(descriptor)
+    if (values.length !== 128 || !values.every(Number.isFinite)) {
+      throw new Error('Mẫu nhận diện khuôn mặt không hợp lệ.')
+    }
+    return values
+  })
 }
 
 export async function detectFacesFromImageElement(
@@ -398,147 +434,215 @@ export async function detectFacesFromImageElement(
   workCanvas.width = width
   workCanvas.height = height
   const ctx = workCanvas.getContext('2d')
-  if (!ctx) return []
+  if (!ctx) { workCanvas.width = 0; workCanvas.height = 0; return [] }
 
   ctx.drawImage(img, 0, 0, width, height)
 
-  const faces: DetectedFaceRecord[] = []
-  const alignedBoxes = new Map<string, { x: number; y: number; width: number; height: number; mirrored: boolean }>()
-  const detectRegion = async (source: HTMLCanvasElement, offsetX = 0, offsetY = 0, mirrored = false) => {
-    if (shouldCancel?.()) return
-    const detections = await faceapi
-      .detectAllFaces(source, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6, maxResults: 100 }))
-      .withFaceLandmarks()
-      .withFaceDescriptors()
-    if (!Array.isArray(detections) || shouldCancel?.()) return
+  try {
+    const faces: DetectedFaceRecord[] = []
+    const proposals: FaceDetectionProposal[] = []
+    const alignedBoxes = new Map<string, { x: number; y: number; width: number; height: number; mirrored: boolean }>()
+    const detectRegion = async (source: HTMLCanvasElement, offsetX = 0, offsetY = 0, mirrored = false) => {
+      if (shouldCancel?.()) return
+      const detections = await faceapi
+        .detectAllFaces(source, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6, maxResults: 100 }))
+      if (!Array.isArray(detections) || shouldCancel?.()) return
 
-    for (const det of detections) {
-      const localBox = det.detection.box
-      // An internal crop edge can cut a face and produce a different descriptor.
-      // The overlapping neighbouring crop supplies its complete face instead.
-      const edgeMargin = 12
-      if (
-        (offsetX > 0 && localBox.x < edgeMargin) ||
-        (offsetY > 0 && localBox.y < edgeMargin) ||
-        (offsetX + source.width < width && localBox.x + localBox.width > source.width - edgeMargin) ||
-        (offsetY + source.height < height && localBox.y + localBox.height > source.height - edgeMargin)
-      ) continue
-      const box = { x: (mirrored ? source.width - localBox.x - localBox.width : localBox.x) + offsetX, y: localBox.y + offsetY, width: localBox.width, height: localBox.height }
-      const faceId = `${imageId}_face_${faces.length}`
-      const landmarkAligned = det.landmarks?.align?.(null, { useDlibAlignment: true })
-      const aligned = landmarkAligned?.box || landmarkAligned || det.alignedRect?.box || det.alignedRect || localBox
-      alignedBoxes.set(faceId, {
-        x: (mirrored ? source.width - aligned.x - aligned.width : aligned.x) + offsetX,
-        y: aligned.y + offsetY, width: aligned.width, height: aligned.height, mirrored,
-      })
-      faces.push({
-        faceId,
-        imageId,
-        imageName,
-        descriptor: Array.from(det.descriptor as Float32Array).map(value => Number(value.toFixed(6))),
-        avatarDataUrl: cropFaceAvatarDataUrl(workCanvas, box),
-        box: {
-          x: Number((box.x / width).toFixed(4)),
-          y: Number((box.y / height).toFixed(4)),
-          width: Number((box.width / width).toFixed(4)),
-          height: Number((box.height / height).toFixed(4)),
-        },
-        score: Number((det.detection.score || 0).toFixed(4)),
-      })
+      const region = { x: offsetX, y: offsetY, width: source.width, height: source.height, mirrored }
+      for (const detection of detections) {
+        const localBox = detection.box
+        // An internal crop edge can cut a face and produce a different descriptor.
+        // The overlapping neighbouring crop supplies its complete face instead.
+        const edgeMargin = 12
+        if (
+          (offsetX > 0 && localBox.x < edgeMargin) ||
+          (offsetY > 0 && localBox.y < edgeMargin) ||
+          (offsetX + source.width < width && localBox.x + localBox.width > source.width - edgeMargin) ||
+          (offsetY + source.height < height && localBox.y + localBox.height > source.height - edgeMargin)
+        ) continue
+        const box = { x: (mirrored ? source.width - localBox.x - localBox.width : localBox.x) + offsetX, y: localBox.y + offsetY, width: localBox.width, height: localBox.height }
+        proposals.push({
+          faceId: `${imageId}_face_${proposals.length}`,
+          detection,
+          region,
+          box: {
+            x: Number((box.x / width).toFixed(4)),
+            y: Number((box.y / height).toFixed(4)),
+            width: Number((box.width / width).toFixed(4)),
+            height: Number((box.height / height).toFixed(4)),
+          },
+          score: Number((detection.score || 0).toFixed(4)),
+        })
+      }
     }
-  }
 
-  await detectRegion(workCanvas)
-  if (!shouldCancel?.()) {
-    const mirroredImage = document.createElement('canvas')
-    mirroredImage.width = width
-    mirroredImage.height = height
-    try {
-      const mirroredContext = mirroredImage.getContext('2d')
-      if (mirroredContext) {
-        mirroredContext.translate(width, 0)
-        mirroredContext.scale(-1, 1)
-        mirroredContext.drawImage(workCanvas, 0, 0)
-        await detectRegion(mirroredImage, 0, 0, true)
+    await detectRegion(workCanvas)
+    if (!shouldCancel?.()) {
+      const mirroredImage = document.createElement('canvas')
+      mirroredImage.width = width
+      mirroredImage.height = height
+      try {
+        const mirroredContext = mirroredImage.getContext('2d')
+        if (mirroredContext) {
+          mirroredContext.translate(width, 0)
+          mirroredContext.scale(-1, 1)
+          mirroredContext.drawImage(workCanvas, 0, 0)
+          await detectRegion(mirroredImage, 0, 0, true)
+        }
+      } finally {
+        mirroredImage.width = 0
+        mirroredImage.height = 0
       }
-    } finally {
-      mirroredImage.width = 0
-      mirroredImage.height = 0
     }
-  }
-  // SSD rescales the entire image internally. Overlapping crops preserve
-  // more pixels around distant faces without enlarging a low-resolution image.
-  const needsDetailScan = Math.max(width, height) > 1000
-  const scanTiles = async (tileSize: number) => {
-    const tileWidth = Math.min(tileSize, width)
-    const tileHeight = Math.min(tileSize, height)
-    const offsets = (length: number, tile: number) => {
-      const positions = [0]
-      while (positions[positions.length - 1] + tile < length) {
-        positions.push(Math.min(length - tile, positions[positions.length - 1] + Math.floor(tile * 0.80)))
+    // SSD rescales the entire image internally. Overlapping crops preserve
+    // more pixels around distant faces without enlarging a low-resolution image.
+    const needsDetailScan = Math.max(width, height) > 1000
+    const scanTiles = async (tileSize: number) => {
+      const tileWidth = Math.min(tileSize, width)
+      const tileHeight = Math.min(tileSize, height)
+      const offsets = (length: number, tile: number) => {
+        const positions = [0]
+        while (positions[positions.length - 1] + tile < length) {
+          positions.push(Math.min(length - tile, positions[positions.length - 1] + Math.floor(tile * 0.80)))
+        }
+        return positions
       }
-      return positions
-    }
-    const tile = document.createElement('canvas')
-    tile.width = tileWidth
-    tile.height = tileHeight
-    const tileContext = tile.getContext('2d')
-    try {
-      if (tileContext) {
-        for (const y of offsets(height, tileHeight)) {
-          for (const x of offsets(width, tileWidth)) {
-            if (shouldCancel?.()) return
-            tileContext.drawImage(workCanvas, x, y, tileWidth, tileHeight, 0, 0, tileWidth, tileHeight)
-            await detectRegion(tile, x, y)
+      const tile = document.createElement('canvas')
+      tile.width = tileWidth
+      tile.height = tileHeight
+      const tileContext = tile.getContext('2d')
+      try {
+        if (tileContext) {
+          for (const y of offsets(height, tileHeight)) {
+            for (const x of offsets(width, tileWidth)) {
+              if (shouldCancel?.()) return
+              tileContext.drawImage(workCanvas, x, y, tileWidth, tileHeight, 0, 0, tileWidth, tileHeight)
+              await detectRegion(tile, x, y)
+            }
           }
         }
+      } finally {
+        tile.width = 0
+        tile.height = 0
       }
-    } finally {
-      tile.width = 0
-      tile.height = 0
     }
-  }
-  if (needsDetailScan) {
-    await scanTiles(900)
-    const detected = deduplicateDetectedFaces(faces)
-    const hasSmallFaces = detected.some(face => Math.min(face.box.width * width, face.box.height * height) < 96)
-    if (!shouldCancel?.() && (detected.length === 0 || hasSmallFaces)) await scanTiles(640)
-  }
+    if (needsDetailScan) {
+      await scanTiles(900)
+      const detected = uniqueFaceProposals(proposals)
+      const hasSmallFaces = detected.some(face => Math.min(face.box.width * width, face.box.height * height) < 96)
+      if (!shouldCancel?.() && (detected.length === 0 || hasSmallFaces)) await scanTiles(640)
+    }
 
-  if (shouldCancel?.()) return []
-  const uniqueFaces = deduplicateDetectedFaces(faces)
-  // Average the original aligned embedding with its mirrored view, as with
-  // recognition jittering. Do not widen a search by taking the best of many
-  // unrelated descriptors, and do not L2-normalize this model's embeddings.
-  if (typeof faceapi.computeFaceDescriptor === 'function') {
-    const chip = document.createElement('canvas')
-    chip.width = 150
-    chip.height = 150
-    const chipContext = chip.getContext('2d')
-    try {
-      if (chipContext) for (const face of uniqueFaces) {
+    if (shouldCancel?.()) return []
+
+    // Detection runs at every original scale. Landmarks and embeddings run only
+    // for distinct proposals, using the same region and Dlib alignment as before.
+    // Small groups cap mobile GPU memory and reuse the same network tensor shape.
+    const descriptorBatchSize = 4
+    const byRegion = new Map<FaceDetectionProposal['region'], FaceDetectionProposal[]>()
+    for (const proposal of uniqueFaceProposals(proposals)) {
+      const group = byRegion.get(proposal.region) || []
+      group.push(proposal)
+      byRegion.set(proposal.region, group)
+    }
+    for (const [region, selected] of byRegion) {
+      if (shouldCancel?.()) return []
+      const isWholeImage = !region.mirrored && region.x === 0 && region.y === 0 && region.width === width && region.height === height
+      const source = isWholeImage ? workCanvas : document.createElement('canvas')
+      if (!isWholeImage) {
+        source.width = region.width
+        source.height = region.height
+        const sourceContext = source.getContext('2d')
+        if (!sourceContext) { source.width = 0; source.height = 0; continue }
+        if (region.mirrored) sourceContext.setTransform(-1, 0, 0, 1, source.width, 0)
+        sourceContext.drawImage(workCanvas, region.x, region.y, region.width, region.height, 0, 0, source.width, source.height)
+      }
+      try {
+        for (let start = 0; start < selected.length; start += descriptorBatchSize) {
+          if (shouldCancel?.()) return []
+          const batch = selected.slice(start, start + descriptorBatchSize)
+          const landmarks = await new faceapi.DetectAllFaceLandmarksTask(
+            Promise.resolve(batch.map(proposal => ({ detection: proposal.detection }))), source, false
+          )
+          if (!Array.isArray(landmarks) || landmarks.length !== batch.length) {
+            throw new Error('Không thể căn chỉnh đầy đủ các khuôn mặt.')
+          }
+          const chips: HTMLCanvasElement[] = await faceapi.extractFaces(source, landmarks.map((det: any) => det.landmarks.align(null, { useDlibAlignment: true })))
+          try {
+            const descriptors = await computeDescriptorBatch(faceapi, chips)
+            for (let index = 0; index < landmarks.length; index++) {
+              const det = landmarks[index]
+              const proposal = batch[index]
+              const aligned = det.landmarks.align(null, { useDlibAlignment: true })
+              alignedBoxes.set(proposal.faceId, {
+                x: (region.mirrored ? source.width - aligned.x - aligned.width : aligned.x) + region.x,
+                y: aligned.y + region.y, width: aligned.width, height: aligned.height, mirrored: region.mirrored,
+              })
+              faces.push({
+                faceId: proposal.faceId, imageId, imageName, descriptor: descriptors[index].map(value => Number(value.toFixed(6))),
+                avatarDataUrl: '', box: proposal.box, score: proposal.score,
+              })
+            }
+          } finally {
+            for (const chip of chips) { chip.width = 0; chip.height = 0 }
+          }
+        }
+      } finally {
+        if (!isWholeImage) { source.width = 0; source.height = 0 }
+      }
+    }
+    const uniqueFaces = deduplicateDetectedFaces(faces)
+    // Average the original aligned embedding with its mirrored view, as with
+    // recognition jittering. Do not widen a search by taking the best of many
+    // unrelated descriptors, and do not L2-normalize this model's embeddings.
+    if (typeof faceapi.computeFaceDescriptor === 'function') {
+      for (let start = 0; start < uniqueFaces.length; start += descriptorBatchSize) {
         if (shouldCancel?.()) return []
-        const aligned = alignedBoxes.get(face.faceId)
-        if (!aligned) continue
-        const x = Math.max(0, aligned.x), y = Math.max(0, aligned.y)
-        const cropWidth = Math.min(width - x, aligned.width - (x - aligned.x))
-        const cropHeight = Math.min(height - y, aligned.height - (y - aligned.y))
-        if (cropWidth <= 0 || cropHeight <= 0) continue
-        chip.width = Math.max(1, Math.round(cropWidth))
-        chip.height = Math.max(1, Math.round(cropHeight))
-        chipContext.setTransform(aligned.mirrored ? 1 : -1, 0, 0, 1, aligned.mirrored ? 0 : chip.width, 0)
-        chipContext.drawImage(workCanvas, x, y, cropWidth, cropHeight, 0, 0, chip.width, chip.height)
-        const mirrored = Array.from(await faceapi.computeFaceDescriptor(chip)) as number[]
-        if (mirrored.length === face.descriptor.length && mirrored.every(Number.isFinite)) {
-          face.descriptor = face.descriptor.map((value, index) => Number(((value + mirrored[index]) / 2).toFixed(6)))
+        const batch = uniqueFaces.slice(start, start + descriptorBatchSize)
+        const chips: HTMLCanvasElement[] = []
+        const chipFaces: DetectedFaceRecord[] = []
+        try {
+          for (const face of batch) {
+            const aligned = alignedBoxes.get(face.faceId)
+            if (!aligned) continue
+            const x = Math.max(0, aligned.x), y = Math.max(0, aligned.y)
+            const cropWidth = Math.min(width - x, aligned.width - (x - aligned.x))
+            const cropHeight = Math.min(height - y, aligned.height - (y - aligned.y))
+            if (cropWidth <= 0 || cropHeight <= 0) continue
+            const chip = document.createElement('canvas')
+            chip.width = Math.max(1, Math.round(cropWidth))
+            chip.height = Math.max(1, Math.round(cropHeight))
+            const chipContext = chip.getContext('2d')
+            if (!chipContext) continue
+            chipContext.setTransform(aligned.mirrored ? 1 : -1, 0, 0, 1, aligned.mirrored ? 0 : chip.width, 0)
+            chipContext.drawImage(workCanvas, x, y, cropWidth, cropHeight, 0, 0, chip.width, chip.height)
+            chips.push(chip)
+            chipFaces.push(face)
+          }
+          const mirroredDescriptors = await computeDescriptorBatch(faceapi, chips)
+          for (let index = 0; index < chipFaces.length; index++) {
+            const face = chipFaces[index]
+            const mirrored = mirroredDescriptors[index]
+            if (mirrored.length === face.descriptor.length && mirrored.every(Number.isFinite)) {
+              face.descriptor = face.descriptor.map((value, dimension) => Number(((value + mirrored[dimension]) / 2).toFixed(6)))
+            }
+          }
+        } finally {
+          for (const chip of chips) { chip.width = 0; chip.height = 0 }
         }
       }
-    } finally {
-      chip.width = 0
-      chip.height = 0
     }
+    for (const face of uniqueFaces) {
+      face.avatarDataUrl = cropFaceAvatarDataUrl(workCanvas, {
+        x: face.box.x * width, y: face.box.y * height,
+        width: face.box.width * width, height: face.box.height * height,
+      })
+    }
+    return shouldCancel?.() ? [] : uniqueFaces
+  } finally {
+    workCanvas.width = 0
+    workCanvas.height = 0
   }
-  return shouldCancel?.() ? [] : uniqueFaces
 }
 
 export async function detectFacesInUploadedFile(file: File): Promise<DetectedFaceRecord[]> {
@@ -562,7 +666,7 @@ export async function detectFacesInDriveImage(
 ): Promise<DetectedFaceRecord[]> {
   if (folderId) {
     const cached = await getCachedFacesForImage(folderId, item.id)
-    if (cached && cached.length > 0) return deduplicateDetectedFaces(cached)
+    if (cached !== null) return deduplicateDetectedFaces(cached)
   }
   const img = await loadDriveThumbnailForCanvas(item)
   const detected = await detectFacesFromImageElement(img, item.id, item.name)
@@ -620,24 +724,34 @@ export async function scanAlbumFaces(options: {
   let attempted = 0
   let failedCount = 0
 
-  const processOne = async (item: ScannableMediaItem) => {
-    if (shouldCancel?.()) return
-
+  type PreparedImage = { cached: DetectedFaceRecord[] } | { image: HTMLImageElement } | { error: unknown } | null
+  const prepareImage = async (item: ScannableMediaItem): Promise<PreparedImage> => {
+    if (shouldCancel?.()) return null
     try {
       if (!forceRescan && folderId) {
         const cached = await getCachedFacesForImage(folderId, item.id)
-        if (cached !== null) {
-          if (cached.length > 0) {
-            allFaces.push(...cached)
-          }
-          completed++
-          return
-        }
+        if (cached !== null) return { cached }
       }
+      if (shouldCancel?.()) return null
+      return { image: await loadDriveThumbnailForCanvas(item) }
+    } catch (error) {
+      // Prefetch promises always resolve, including when cancellation leaves
+      // queued images unconsumed. This prevents unhandled request rejections.
+      return { error }
+    }
+  }
 
-      const img = await loadDriveThumbnailForCanvas(item)
+  const processOne = async (item: ScannableMediaItem, prepared: PreparedImage) => {
+    try {
+      if (!prepared || shouldCancel?.()) return
+      if ('error' in prepared) throw prepared.error
+      if ('cached' in prepared) {
+        allFaces.push(...prepared.cached)
+        completed++
+        return
+      }
       if (shouldCancel?.()) return
-      const detected = await detectFacesFromImageElement(img, item.id, item.name, FACE_IMAGE_SIZE, shouldCancel)
+      const detected = await detectFacesFromImageElement(prepared.image, item.id, item.name, FACE_IMAGE_SIZE, shouldCancel)
       if (shouldCancel?.()) return
       if (folderId) {
         await setCachedFacesForImage(folderId, item.id, detected)
@@ -650,6 +764,7 @@ export async function scanAlbumFaces(options: {
       failedCount++
       console.warn(`Bỏ qua ảnh không quét được (${item.name}):`, err)
     } finally {
+      if (prepared && 'image' in prepared) prepared.image.src = ''
       attempted++
       if (shouldCancel?.()) return
       onProgress?.(
@@ -668,11 +783,37 @@ export async function scanAlbumFaces(options: {
     }
   }
 
-  const batchSize = Math.max(1, Math.floor(concurrency) || 1)
-  for (let i = 0; i < total; i += batchSize) {
-    if (shouldCancel?.()) break
-    const batch = items.slice(i, i + batchSize)
-    await Promise.all(batch.map((item) => processOne(item)))
+  // Network/decode stays ahead of inference; only one image uses the shared
+  // GPU at once. A sliding window avoids the old slowest-image batch barrier
+  // and bounds decoded image memory on phones.
+  const prefetchCount = Math.min(4, Math.max(1, Number.isFinite(concurrency) ? Math.floor(concurrency) : 3))
+  const preparedImages = new Map<number, Promise<PreparedImage>>()
+  for (let index = 0; index < Math.min(prefetchCount, total); index++) {
+    preparedImages.set(index, prepareImage(items[index]))
+  }
+  let nextIndex = Math.min(prefetchCount, total)
+  try {
+    while (preparedImages.size > 0) {
+      if (shouldCancel?.()) break
+      // Process the next decoded image, even if an earlier Drive request is
+      // slow. Identity grouping sorts faces independently of completion order.
+      const { index, prepared } = await Promise.race(
+        [...preparedImages].map(([index, pending]) => pending.then(prepared => ({ index, prepared })))
+      )
+      preparedImages.delete(index)
+      if (nextIndex < total && !shouldCancel?.()) {
+        preparedImages.set(nextIndex, prepareImage(items[nextIndex]))
+        nextIndex++
+      }
+      await processOne(items[index], prepared)
+    }
+  } finally {
+    // Requests already in flight may finish after the user closes a scan.
+    for (const pending of preparedImages.values()) {
+      void pending.then(prepared => {
+        if (prepared && 'image' in prepared) prepared.image.src = ''
+      })
+    }
   }
 
   return allFaces
@@ -695,13 +836,13 @@ function updateCentroid(current: number[], added: number[], countBefore: number)
   return current.map((val, idx) => (val * countBefore + (added[idx] || 0)) / nextCount)
 }
 
-function faceQuality(face: DetectedFaceRecord): number {
+function faceQuality(face: Pick<DetectedFaceRecord, 'score' | 'box'>): number {
   return face.score * Math.sqrt(Math.max(face.box.width * face.box.height, 0.0001))
 }
 
 function overlappingFaceBoxes(
-  a: DetectedFaceRecord,
-  b: DetectedFaceRecord,
+  a: Pick<DetectedFaceRecord, 'box'>,
+  b: Pick<DetectedFaceRecord, 'box'>,
   minimumIoU = 0.75,
   minimumContainment = 0.90
 ): boolean {
