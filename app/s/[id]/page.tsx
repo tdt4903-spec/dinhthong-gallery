@@ -1,7 +1,7 @@
 import { Metadata } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import GalleryClient from '@/app/gallery/GalleryClient'
-import { SITE_BANNER_URL } from '@/lib/site-assets'
+import { SITE_SHARE_IMAGE_URL } from '@/lib/site-assets'
 
 interface Props {
   params: Promise<{ id: string }> | { id: string }
@@ -40,7 +40,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const secretKey = getSecretKey()
 
   let title = 'DinhThong Gallery'
-  let coverUrl = ''
 
   if (supabaseUrl && secretKey && sharedId) {
     try {
@@ -49,8 +48,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       })
 
       // 1. Tìm thông tin trong albums
-      const { data: albums } = await admin.from('albums').select('id, title, cover_url, drive_url')
-      let matched = (albums || []).find((a: any) => 
+      const { data: albums } = await admin.from('albums').select('id, title, drive_url')
+      const matched = (albums || []).find((a: any) =>
         String(a.id) === sharedId || 
         toNumericCode(String(a.id)) === sharedId || 
         extractDriveId(a.drive_url) === sharedId
@@ -58,10 +57,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
       if (matched) {
         title = matched.title || title
-        coverUrl = matched.cover_url || ''
       }
 
-      // 2. Nếu là thư mục con, tìm trong known_drive_folders & custom_covers
+      // 2. Nếu là thư mục con, lấy tên từ known_drive_folders.
       if (!matched) {
         const { data: knownRows } = await admin.from('known_drive_folders').select('id, name')
         const matchedFolder = (knownRows || []).find((f: any) => 
@@ -70,16 +68,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
         if (matchedFolder) {
           title = matchedFolder.name || title
-          const targetFolderId = String(matchedFolder.id)
-          const { data: customCover } = await admin
-            .from('custom_covers')
-            .select('cover_url')
-            .eq('id', targetFolderId)
-            .single()
-
-          if (customCover?.cover_url) {
-            coverUrl = customCover.cover_url
-          }
         }
       }
     } catch (e) {
@@ -87,17 +75,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     }
   }
 
-  // Chuẩn hóa định dạng ảnh để Zalo/Facebook/Messenger đọc được
-  let ogImageUrl = SITE_BANNER_URL
-  if (coverUrl) {
-    const driveId = extractDriveId(coverUrl)
-    if (driveId) {
-      // Dùng link thumbnail khổ lớn công khai chuẩn của Google CDN
-      ogImageUrl = `https://lh3.googleusercontent.com/d/${driveId}=w1200-h630-p-k-no`
-    } else {
-      ogImageUrl = coverUrl
-    }
-  }
+  const ogImageUrl = SITE_SHARE_IMAGE_URL
 
   return {
     title: `${title} - DinhThong Gallery`,
@@ -108,8 +86,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       images: [
         {
           url: ogImageUrl,
-          width: 1200,
-          height: 630,
+          width: 512,
+          height: 512,
+          type: 'image/png',
           alt: title,
         },
       ],

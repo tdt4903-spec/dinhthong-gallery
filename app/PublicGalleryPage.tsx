@@ -20,6 +20,7 @@ import {
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { SITE_BANNER_URL } from '@/lib/site-assets'
 import PublicCategoryCards from '@/components/PublicCategoryCards'
+import SiteLogo from '@/components/SiteLogo'
 
 
 function publicWebImage(input: string) {
@@ -123,6 +124,9 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
 
   useEffect(() => {
     document.title = category ? `${category.name} - Dinh Thong Gallery` : 'Dinh Thong Gallery'
+    if (!category && window.location.hash === '#categories') {
+      window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+    }
   }, [category])
 
   return (
@@ -143,14 +147,13 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
             : 'border-emerald-950/8 bg-[#fbfdf9]/94'
         }`}
       >
-        <div className={`mx-auto min-h-[68px] max-w-[1500px] items-center gap-3 px-4 py-2 sm:px-6 ${category ? 'grid grid-cols-[49px_minmax(0,1fr)_49px] sm:grid-cols-[120px_minmax(0,1fr)_120px]' : 'flex justify-end'}`}>
+        <div className={`mx-auto min-h-[68px] max-w-[1500px] items-center gap-3 px-4 py-2 sm:px-6 ${category ? 'grid grid-cols-[auto_minmax(0,1fr)_49px] sm:grid-cols-[200px_minmax(0,1fr)_200px]' : 'flex'}`}>
+          <Link href="/" prefetch={false} aria-label="Quay lại trang chủ" className={`inline-flex shrink-0 items-center gap-1 ${category ? '' : 'mr-auto'}`}>
+            {category && <ArrowLeft className="h-4 w-4 shrink-0" />}
+            <SiteLogo />
+          </Link>
           {category ? (
-            <>
-              <Link href="/#categories" prefetch={false} aria-label="Quay lại trang chủ" className="inline-flex min-h-11 items-center gap-2 text-xs font-semibold">
-                <ArrowLeft className="h-5 w-5 shrink-0" /><span className="hidden sm:inline">Trang chủ</span>
-              </Link>
-              <p className="min-w-0 break-words text-center text-sm font-semibold uppercase tracking-wide sm:text-lg">{category.name}</p>
-            </>
+            <p className="min-w-0 break-words text-center text-sm font-semibold uppercase tracking-wide sm:text-lg">{category.name}</p>
           ) : (
             <Link href="/booking" prefetch={false} className="inline-flex min-h-11 items-center justify-center rounded-full bg-[#075b43] px-6 text-[10px] font-bold uppercase tracking-[0.15em] text-white transition hover:bg-[#064c38]">Booking</Link>
           )}
@@ -257,23 +260,22 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
       {/* ALBUM SECTION */}
       <section
         id={category ? 'albums' : 'categories'}
-        className="mx-auto max-w-[1500px] scroll-mt-20 px-4 py-16 sm:px-6 sm:py-24"
+        className={`mx-auto max-w-[1500px] scroll-mt-20 px-4 sm:px-6 ${category ? 'py-16 sm:py-24' : 'py-10 sm:py-14'}`}
       >
         <div className="text-center">
 
-          <div
-            className={`text-[9px] font-bold uppercase tracking-[0.32em] ${
-              isDarkMode
-                ? 'text-white/30'
-                : 'text-emerald-950/38'
-            }`}
-          >
-            Bộ sưu tập
-          </div>
-
-          <h2 className="mt-4 font-serif text-3xl font-medium uppercase tracking-[0.02em] sm:text-5xl">
-            {category?.name || 'Thể loại ảnh'}
-          </h2>
+          {category ? (
+            <>
+              <div className={`text-[9px] font-bold uppercase tracking-[0.32em] ${isDarkMode ? 'text-white/30' : 'text-emerald-950/38'}`}>
+                Bộ sưu tập
+              </div>
+              <h2 className="mt-4 font-serif text-3xl font-medium uppercase tracking-[0.02em] sm:text-5xl">
+                {category.name}
+              </h2>
+            </>
+          ) : (
+            <h2 className="font-serif text-2xl font-medium uppercase tracking-[0.06em] sm:text-3xl">Bộ sưu tập</h2>
+          )}
 
           <div
             className={`mx-auto mt-5 h-px w-16 ${

@@ -12,6 +12,7 @@ import type {
 } from 'react'
 
 import Link from 'next/link'
+import SiteLogo from '@/components/SiteLogo'
 
 import {
   ArrowLeft,
@@ -804,9 +805,7 @@ export default function BookingPage() {
 
             <ArrowLeft className="h-3.5 w-3.5" />
 
-            <span className="font-serif text-base font-semibold">
-              Dinh Thong Gallery
-            </span>
+            <SiteLogo />
 
           </Link>
 

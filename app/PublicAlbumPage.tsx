@@ -15,6 +15,7 @@ import {
 import { getCustomerProductsSupabase } from '@/lib/customer-products'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { getPublicCategoryPath } from '@/lib/public-gallery-paths'
+import SiteLogo from '@/components/SiteLogo'
 
 type DriveItem = {
   id: string
@@ -415,7 +416,7 @@ export default function PublicAlbumPage() {
           </p>
 
           <Link
-            href="/#categories"
+            href="/"
             prefetch={false}
             className="mt-7 inline-flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em]"
           >
@@ -451,15 +452,16 @@ export default function PublicAlbumPage() {
             : 'border-emerald-950/8 bg-[#fbfdf9]/94'
         }`}
       >
-        <div className="mx-auto flex h-[68px] max-w-[1600px] items-center justify-between px-5 sm:px-8">
+        <div className="mx-auto flex h-[68px] max-w-[1600px] items-center justify-between gap-3 px-5 sm:px-8">
+          <Link href="/" prefetch={false} aria-label="Trang chủ" className="inline-flex shrink-0 items-center"><SiteLogo /></Link>
           <Link
-            href={category?.slug ? getPublicCategoryPath(category.slug) : '/#categories'}
+            href={category?.slug ? getPublicCategoryPath(category.slug) : '/'}
             prefetch={false}
-            className="flex items-center gap-3"
+            className="flex min-w-0 items-center gap-2"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-4 w-4 shrink-0" />
 
-            <span className="font-serif text-lg font-semibold">
+            <span className="font-serif text-xs font-semibold sm:text-base">
               Quay lại album
             </span>
           </Link>
