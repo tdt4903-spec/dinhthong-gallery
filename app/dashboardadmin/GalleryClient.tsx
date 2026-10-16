@@ -10,6 +10,7 @@ import { saveAs } from 'file-saver'
 import { fetchCloudflareMediaBlob, prepareCloudflareArchiveLocally, supportsLocalArchivePreparation, UnsupportedLocalArchiveError, runCloudflareArchive, type DownloadEntry } from '@/lib/cloudflare-download'
 import { fetchCloudflareFolderPage } from '@/lib/cloudflare-folder'
 import { SITE_BANNER_URL } from '@/lib/site-assets'
+import { DEFAULT_ALBUM_FEATURES, normalizeAlbumFeatures, resolveAlbumFeatures } from '@/lib/album-features'
 import { 
   Search, Sun, Moon, Plus, Camera, 
   Trash2, LogOut, User as UserIcon,
@@ -245,12 +246,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [newAlbumFeatures, setNewAlbumFeatures] = useState({ passwordEnabled: false, password: '', selectionLimitEnabled: false, selectionLimit: '', watermark: false })
 
   const [selectedAlbumIds, setSelectedAlbumIds] = useState<Set<string>>(new Set())
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
 
   const [albumCovers, setAlbumCovers] = useState<Record<string, string>>({})
   const [editingFolderSetting, setEditingFolderSetting] = useState<FolderSettings | null>(null)
+  const [editingFeatureFlags, setEditingFeatureFlags] = useState({ password: false, selectionLimit: false })
 
   const [ratings, setRatings] = useState<Record<string, number>>({})
   const [comments, setComments] = useState<Record<string, string>>({})
@@ -419,15 +422,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const guestRootAlbumId = selectedAlbum?.id || currentActiveFolderId
 
-  const activeSetting: FolderSettings = folderSettingsMap[currentActiveFolderId] || {
+  const activeSetting: FolderSettings = {
+    allow_comments: selectedAlbum?.allow_comments ?? true,
+    collect_customer_info: selectedAlbum?.collect_customer_info ?? false,
+    max_viewers: selectedAlbum?.max_viewers ?? 0,
+    ...folderSettingsMap[currentActiveFolderId],
     id: currentActiveFolderId,
     title: currentActiveFolderTitle,
-    password: selectedAlbum?.password || '',
-    max_select: selectedAlbum?.max_select || 0,
-    allow_comments: selectedAlbum?.allow_comments ?? true,
-    enable_watermark: selectedAlbum?.enable_watermark ?? false,
-    collect_customer_info: selectedAlbum?.collect_customer_info ?? false,
-    max_viewers: selectedAlbum?.max_viewers ?? 0
+    ...resolveAlbumFeatures(currentActiveFolderId, folderSettingsMap[currentActiveFolderId], selectedAlbum),
   }
 
   const getActorKey = (guestMode = isSharedGuest) => {
@@ -924,7 +926,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const fullByAlbum: Record<string, any> = {}
       Object.entries(latestActorPerAlbum).forEach(([albumId, info]) => {
         const selectedRows = (guestRows || []).filter((r: any) => String(r.album_id) === albumId && String(r.actor_key) === info.actor && Number(r.stars) > 0)
-        const max = Number(folderSettingsMap[albumId]?.max_select || albums.find(a => String(a.id) === albumId)?.max_select || 0)
+        const max = resolveAlbumFeatures(albumId, folderSettingsMap[albumId], albums.find(a => String(a.id) === albumId)).max_select
         const latestTime = Math.max(...selectedRows.map((r: any) => new Date(r.updated_at || 0).getTime()), 0)
         if (max > 0 && selectedRows.length >= max) {
           fullByAlbum[albumId] = {
@@ -1130,10 +1132,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           map[f.id] = {
             id: f.id,
             title: '',
-            password: f.password || '',
-            max_select: Number(f.max_select || 0),
+            ...normalizeAlbumFeatures(f),
             allow_comments: f.allow_comments ?? true,
-            enable_watermark: f.enable_watermark ?? false,
             collect_customer_info: f.collect_customer_info ?? false,
             max_viewers: Number(f.max_viewers || 0)
           }
@@ -1190,10 +1190,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           title: item.title,
           driveUrl: item.drive_url,
           coverUrl: item.cover_url || '',
-          password: item.password || '',
-          max_select: Number(item.max_select || 0),
+          ...normalizeAlbumFeatures(item),
           allow_comments: item.allow_comments ?? true,
-          enable_watermark: item.enable_watermark ?? false
         }))
         setAlbums(formatted)
         return formatted
@@ -2081,21 +2079,37 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
+  const handleOpenAddAlbum = () => {
+    setNewAlbumFeatures({ passwordEnabled: false, password: '', selectionLimitEnabled: false, selectionLimit: '', watermark: false })
+    setIsModalOpen(true)
+  }
+
   const handleAddAlbum = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const form = e.currentTarget
     const titleInput = form.elements.namedItem('title') as HTMLInputElement
     const urlInput = form.elements.namedItem('url') as HTMLInputElement
     const coverInput = form.elements.namedItem('cover') as HTMLInputElement
-    const passInput = form.elements.namedItem('password') as HTMLInputElement
-    const maxSelectInput = form.elements.namedItem('max_select') as HTMLInputElement
-    const watermarkInput = form.elements.namedItem('enable_watermark') as HTMLInputElement
     const commentsInput = form.elements.namedItem('allow_comments') as HTMLInputElement
 
     const newTitle = titleInput.value
     const newDriveUrl = urlInput.value
     const newId = extractDriveId(newDriveUrl) || Date.now().toString()
     const newCoverUrl = coverInput.value.trim() ? formatDriveCoverUrl(coverInput.value) : ''
+    const limit = Number(newAlbumFeatures.selectionLimit)
+    if (newAlbumFeatures.passwordEnabled && !newAlbumFeatures.password.trim()) {
+      void showAlert('Hãy nhập mật khẩu hoặc tắt bảo vệ bằng mật khẩu.')
+      return
+    }
+    if (newAlbumFeatures.selectionLimitEnabled && (!Number.isSafeInteger(limit) || limit < 1)) {
+      void showAlert('Hãy nhập giới hạn là số nguyên lớn hơn 0 hoặc tắt giới hạn chọn ảnh.')
+      return
+    }
+    const features = normalizeAlbumFeatures({
+      password: newAlbumFeatures.passwordEnabled ? newAlbumFeatures.password : '',
+      max_select: newAlbumFeatures.selectionLimitEnabled ? limit : 0,
+      enable_watermark: newAlbumFeatures.watermark,
+    })
 
     const { error } = await supabase.from('albums').insert([
       { 
@@ -2103,9 +2117,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         title: newTitle, 
         drive_url: newDriveUrl, 
         cover_url: newCoverUrl,
-        password: passInput.value.trim(),
-        max_select: Number(maxSelectInput.value || 0),
-        enable_watermark: watermarkInput.checked,
+        ...features,
         allow_comments: commentsInput.checked
       }
     ])
@@ -2318,13 +2330,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const handleOpenCurrentFolderSetting = () => {
+    setEditingFeatureFlags({ password: Boolean(activeSetting.password), selectionLimit: Boolean(activeSetting.max_select) })
     setEditingFolderSetting({
       id: currentActiveFolderId,
       title: currentActiveFolderTitle,
       password: activeSetting.password || '',
       max_select: activeSetting.max_select || 0,
       allow_comments: activeSetting.allow_comments ?? true,
-      enable_watermark: activeSetting.enable_watermark ?? false,
+      enable_watermark: activeSetting.enable_watermark === true,
       collect_customer_info: activeSetting.collect_customer_info ?? false,
       max_viewers: activeSetting.max_viewers ?? 0
     })
@@ -2336,31 +2349,45 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     try {
       const newTitle = editingFolderSetting.title.trim()
+      const limit = Number(editingFolderSetting.max_select)
+      if (editingFeatureFlags.password && !editingFolderSetting.password?.trim()) {
+        void showAlert('Hãy nhập mật khẩu hoặc tắt bảo vệ bằng mật khẩu.')
+        return
+      }
+      if (editingFeatureFlags.selectionLimit && (!Number.isSafeInteger(limit) || limit < 1)) {
+        void showAlert('Hãy nhập giới hạn là số nguyên lớn hơn 0 hoặc tắt giới hạn chọn ảnh.')
+        return
+      }
       const payload = {
         id: editingFolderSetting.id,
-        password: editingFolderSetting.password?.trim() || '',
-        max_select: Number(editingFolderSetting.max_select || 0),
+        ...normalizeAlbumFeatures({
+          password: editingFeatureFlags.password ? editingFolderSetting.password : '',
+          max_select: editingFeatureFlags.selectionLimit ? limit : 0,
+          enable_watermark: editingFolderSetting.enable_watermark,
+        }),
         allow_comments: editingFolderSetting.allow_comments ?? true,
-        enable_watermark: editingFolderSetting.enable_watermark ?? false,
         collect_customer_info: editingFolderSetting.collect_customer_info ?? false,
         max_viewers: Math.max(0, Number(editingFolderSetting.max_viewers || 0))
       }
 
-      await supabase.from('folder_settings').upsert(payload, { onConflict: 'id' })
+      const { error: settingsError } = await supabase.from('folder_settings').upsert(payload, { onConflict: 'id' })
+      if (settingsError) throw settingsError
 
       if (newTitle) {
-        await supabase.from('custom_item_names').upsert({ id: editingFolderSetting.id, custom_name: newTitle }, { onConflict: 'id' })
+        const { error: nameError } = await supabase.from('custom_item_names').upsert({ id: editingFolderSetting.id, custom_name: newTitle }, { onConflict: 'id' })
+        if (nameError) throw nameError
         setCustomNames(prev => ({ ...prev, [editingFolderSetting.id]: newTitle }))
       }
 
       if (folderHistory.length === 0 && selectedAlbum?.id === editingFolderSetting.id) {
-        await supabase.from('albums').update({ ...payload, title: newTitle || selectedAlbum.title }).eq('id', editingFolderSetting.id)
+        const { error: albumError } = await supabase.from('albums').update({ ...payload, title: newTitle || selectedAlbum.title }).eq('id', editingFolderSetting.id)
+        if (albumError) throw albumError
         await fetchAlbumsFromSupabase()
       }
 
       setFolderSettingsMap(prev => ({
         ...prev,
-        [editingFolderSetting.id]: editingFolderSetting
+        [editingFolderSetting.id]: { ...editingFolderSetting, ...payload }
       }))
 
       setEditingFolderSetting(null)
@@ -2440,7 +2467,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         const nextHistory: FolderBreadcrumb[] = []
         setFolderHistory(nextHistory)
         persistAdminLocation(selectedAlbum, nextHistory)
-        const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
+        const mainPass = resolveAlbumFeatures(selectedAlbum.id, folderSettingsMap[selectedAlbum.id], selectedAlbum).password
         if (mainPass && isSharedGuest) {
           setIsLocked(true)
         } else {
@@ -2480,7 +2507,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const nextHistory: FolderBreadcrumb[] = []
       setFolderHistory(nextHistory)
       persistAdminLocation(selectedAlbum, nextHistory)
-      const mainPass = folderSettingsMap[selectedAlbum.id]?.password || selectedAlbum.password
+      const mainPass = resolveAlbumFeatures(selectedAlbum.id, folderSettingsMap[selectedAlbum.id], selectedAlbum).password
       if (mainPass && isSharedGuest) {
         setIsLocked(true)
       } else {
@@ -2501,7 +2528,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setFolderHistory(nextHistory)
     persistAdminLocation(album, nextHistory)
     const fSetting = folderSettingsMap[album.id]
-    const currentPass = fSetting?.password || album.password
+    const currentPass = resolveAlbumFeatures(album.id, fSetting, album).password
     if (currentPass && isSharedGuest) {
       setIsLocked(true)
     } else {
@@ -2692,8 +2719,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     try {
       const newMaster: MasterFolderItem = { id: cleanId, name: cleanName, url: cleanUrl }
-      await supabase.from('master_folders').upsert([newMaster], { onConflict: 'id' })
-      await supabase.from('albums').upsert([{ id: cleanId, title: cleanName, drive_url: cleanUrl, cover_url: '' }], { onConflict: 'id' })
+      const { error: masterError } = await supabase.from('master_folders').upsert([newMaster], { onConflict: 'id' })
+      if (masterError) throw masterError
+      const { error: createError } = await supabase.from('albums').upsert([
+        { id: cleanId, title: cleanName, drive_url: cleanUrl, cover_url: '', ...DEFAULT_ALBUM_FEATURES }
+      ], { onConflict: 'id', ignoreDuplicates: true })
+      if (createError) throw createError
+      const { error: albumError } = await supabase.from('albums').update({ title: cleanName, drive_url: cleanUrl }).eq('id', cleanId)
+      if (albumError) throw albumError
 
       const updatedMasters = [newMaster, ...masterFoldersList.filter(m => m.id !== cleanId)]
       setMasterFoldersList(updatedMasters)
@@ -2949,7 +2982,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           if (matchedAlbum) {
             setSelectedAlbum(matchedAlbum)
             setFolderHistory([])
-            const currentPass = fSettings[matchedAlbum.id]?.password || matchedAlbum.password
+            const currentPass = resolveAlbumFeatures(matchedAlbum.id, fSettings[matchedAlbum.id], matchedAlbum).password
             if (currentPass) {
               setIsLocked(true)
             } else {
@@ -3491,7 +3524,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`hidden sm:inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold ${isDarkMode ? 'bg-white/8 text-white/55' : 'bg-gray-100 text-gray-500'}`}>{filteredAlbums.length} album</span>
-                  <button type="button" onClick={() => setIsModalOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-[11px] font-bold text-white hover:bg-emerald-700">
+                  <button type="button" onClick={handleOpenAddAlbum} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-[11px] font-bold text-white hover:bg-emerald-700">
                     <Plus className="h-3.5 w-3.5" /> Thêm album
                   </button>
                 </div>
@@ -3757,7 +3790,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
                     <button
                       type="button"
-                      onClick={() => setIsModalOpen(true)}
+                      onClick={handleOpenAddAlbum}
                       className={`dt-sidebar-item ${
                         isDarkMode
                           ? 'dt-sidebar-item-dark'
@@ -3975,7 +4008,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(true)}
+                  onClick={handleOpenAddAlbum}
                   className={`admin-tool-card min-w-[155px] shrink-0 ${
                     isDarkMode
                       ? 'admin-tool-dark'
@@ -5515,7 +5548,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       {/* MODAL CÀI ĐẶT RIÊNG CHO TỪNG THƯ MỤC / ALBUM */}
       {editingFolderSetting && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
+          <div className={`max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl p-6 shadow-2xl border transition-all ${
             isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
           }`}>
             <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
@@ -5547,7 +5580,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </button>
             </div>
 
-            <form onSubmit={handleSaveCurrentFolderSetting} className="mt-4 space-y-3.5 text-xs">
+            <form onSubmit={handleSaveCurrentFolderSetting} autoComplete="off" className="mt-4 space-y-3.5 text-xs">
+              <p className="text-xs leading-relaxed text-gray-500">Các tùy chọn chỉ áp dụng cho album này sau khi bạn bật và lưu cài đặt.</p>
               <div>
                 <label className="block font-medium mb-1">Tên hiển thị album:</label>
                 <input 
@@ -5560,25 +5594,40 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="block font-medium mb-1">Mật khẩu PIN:</label>
+                  <label className="mb-1 flex min-h-11 items-center gap-2 font-medium">
+                    <input type="checkbox" checked={editingFeatureFlags.password} onChange={e => setEditingFeatureFlags(previous => ({ ...previous, password: e.target.checked }))} />
+                    Bật mật khẩu
+                  </label>
                   <input 
-                    type="text" 
+                    type="password"
+                    aria-label="Mật khẩu PIN"
+                    autoComplete="new-password"
+                    disabled={!editingFeatureFlags.password}
+                    required={editingFeatureFlags.password}
                     value={editingFolderSetting.password || ''} 
                     onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, password: e.target.value })} 
-                    placeholder="Để trống nếu không khóa" 
-                    className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
+                    placeholder={editingFeatureFlags.password ? 'Nhập mật khẩu' : 'Không đặt mật khẩu'}
+                    className={`min-h-11 w-full px-3.5 py-2 rounded-xl border outline-none disabled:opacity-50 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}
                   />
                 </div>
                 <div>
-                  <label className="block font-medium mb-1">Giới hạn chọn ảnh:</label>
+                  <label className="mb-1 flex min-h-11 items-center gap-2 font-medium">
+                    <input type="checkbox" checked={editingFeatureFlags.selectionLimit} onChange={e => setEditingFeatureFlags(previous => ({ ...previous, selectionLimit: e.target.checked }))} />
+                    Giới hạn chọn ảnh
+                  </label>
                   <input 
                     type="number" 
-                    value={editingFolderSetting.max_select || 0} 
+                    aria-label="Số ảnh được chọn tối đa"
+                    min="1"
+                    step="1"
+                    disabled={!editingFeatureFlags.selectionLimit}
+                    required={editingFeatureFlags.selectionLimit}
+                    value={editingFolderSetting.max_select || ''}
                     onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, max_select: Number(e.target.value) })} 
-                    placeholder="0 = Vô hạn" 
-                    className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
+                    placeholder={editingFeatureFlags.selectionLimit ? 'Nhập số lượng ảnh' : 'Không giới hạn'}
+                    className={`min-h-11 w-full px-3.5 py-2 rounded-xl border outline-none disabled:opacity-50 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`}
                   />
                 </div>
               </div>
@@ -5610,7 +5659,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input 
                     type="checkbox" 
-                    checked={editingFolderSetting.enable_watermark ?? false} 
+                    checked={editingFolderSetting.enable_watermark === true}
                     onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, enable_watermark: e.target.checked })} 
                     className="rounded text-emerald-600" 
                   />
@@ -5639,7 +5688,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       {/* MODAL THÊM ALBUM MỚI */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`w-full max-w-md rounded-2xl p-6 shadow-2xl border transition-all ${
+          <div className={`max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-2xl p-6 shadow-2xl border transition-all ${
             isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'
           }`}>
             <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-white/10">
@@ -5648,7 +5697,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleAddAlbum} className="mt-4 space-y-3.5 text-xs">
+            <form onSubmit={handleAddAlbum} autoComplete="off" className="mt-4 space-y-3.5 text-xs">
+              <p className="text-xs leading-relaxed text-gray-500">Mặc định không giới hạn ảnh chọn, không có mật khẩu và không bật watermark.</p>
               <div>
                 <label className="block font-medium mb-1">Tên album:</label>
                 <input type="text" name="title" required placeholder="Ví dụ: Đám cưới Hương & Tuấn" className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
@@ -5662,20 +5712,26 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <input type="text" name="cover" placeholder="Link ảnh hoặc để trống tự động lấy" className={`w-full px-3.5 py-2.5 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
               </div>
               
-              <div className="grid grid-cols-2 gap-3 pt-2">
+              <div className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-2">
                 <div>
-                  <label className="block font-medium mb-1">Mật khẩu bảo vệ (Tùy chọn):</label>
-                  <input type="text" name="password" placeholder="Đặt mã PIN..." className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+                  <label className="mb-1 flex min-h-11 items-center gap-2 font-medium">
+                    <input type="checkbox" checked={newAlbumFeatures.passwordEnabled} onChange={e => setNewAlbumFeatures(previous => ({ ...previous, passwordEnabled: e.target.checked }))} />
+                    Bật mật khẩu
+                  </label>
+                  <input type="password" aria-label="Mật khẩu PIN" autoComplete="new-password" value={newAlbumFeatures.password} onChange={e => setNewAlbumFeatures(previous => ({ ...previous, password: e.target.value }))} disabled={!newAlbumFeatures.passwordEnabled} required={newAlbumFeatures.passwordEnabled} placeholder={newAlbumFeatures.passwordEnabled ? 'Nhập mật khẩu' : 'Không đặt mật khẩu'} className={`min-h-11 w-full px-3.5 py-2 rounded-xl border outline-none disabled:opacity-50 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
                 </div>
                 <div>
-                  <label className="block font-medium mb-1">Giới hạn chọn ảnh:</label>
-                  <input type="number" name="max_select" placeholder="0 = Không giới hạn" className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
+                  <label className="mb-1 flex min-h-11 items-center gap-2 font-medium">
+                    <input type="checkbox" checked={newAlbumFeatures.selectionLimitEnabled} onChange={e => setNewAlbumFeatures(previous => ({ ...previous, selectionLimitEnabled: e.target.checked }))} />
+                    Giới hạn chọn ảnh
+                  </label>
+                  <input type="number" aria-label="Số ảnh được chọn tối đa" min="1" step="1" value={newAlbumFeatures.selectionLimit} onChange={e => setNewAlbumFeatures(previous => ({ ...previous, selectionLimit: e.target.value }))} disabled={!newAlbumFeatures.selectionLimitEnabled} required={newAlbumFeatures.selectionLimitEnabled} placeholder={newAlbumFeatures.selectionLimitEnabled ? 'Nhập số lượng ảnh' : 'Không giới hạn'} className={`min-h-11 w-full px-3.5 py-2 rounded-xl border outline-none disabled:opacity-50 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} />
                 </div>
               </div>
 
               <div className="flex items-center justify-between pt-2">
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" name="enable_watermark" className="rounded text-emerald-600" />
+                  <input type="checkbox" name="enable_watermark" checked={newAlbumFeatures.watermark} onChange={e => setNewAlbumFeatures(previous => ({ ...previous, watermark: e.target.checked }))} className="rounded text-emerald-600" />
                   <span>Bật Watermark bản quyền</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
