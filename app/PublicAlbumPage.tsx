@@ -438,7 +438,7 @@ export default function PublicAlbumPage() {
     <main
       onContextMenu={(event) => event.preventDefault()}
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`site-page-surface min-h-screen select-none transition-colors ${
+      className={`public-compact site-page-surface min-h-screen select-none transition-colors ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'

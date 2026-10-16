@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 
@@ -183,6 +184,8 @@ export default function CustomerProductsDashboard() {
 
   const [newCategoryName, setNewCategoryName] = useState('')
   const [showCategoryForm, setShowCategoryForm] = useState(false)
+  const [deletingCategoryId, setDeletingCategoryId] = useState<string | null>(null)
+  const deletingCategoryRef = useRef(false)
 
   const [publicCounts, setPublicCounts] = useState<
     Record<string, number>
@@ -755,6 +758,55 @@ export default function CustomerProductsDashboard() {
     void showAlert('Đã thêm danh mục.')
   }
 
+  async function deleteCategory(category: Category) {
+    if (deletingCategoryRef.current) return
+    deletingCategoryRef.current = true
+    setDeletingCategoryId(category.id)
+    try {
+      const { count, error: countError } = await supabase.from('customer_product_albums')
+        .select('id', { count: 'exact', head: true }).eq('category_id', category.id)
+      if (countError) throw countError
+      if (count === null) throw new Error('Chưa kiểm tra được album trong danh mục. Vui lòng thử lại.')
+      if (count > 0) {
+        await showAlert(`Danh mục “${category.name}” còn ${count} album. Hãy chuyển các album sang danh mục khác trước khi xoá.`, { title: 'Danh mục còn album' })
+        return
+      }
+      if (!await showConfirm(`Xoá danh mục “${category.name}”?`, {
+        title: 'Xoá danh mục',
+        detail: 'Danh mục sẽ được gỡ khỏi dashboard sản phẩm và trang chủ public.',
+        variant: 'danger',
+        confirmText: 'Xoá danh mục',
+      })) return
+      const { data: deleted, error } = await supabase.from('customer_product_categories').delete().eq('id', category.id).select('id')
+      if (error?.code === '23503') throw new Error('Danh mục vừa có thêm album. Hãy chuyển các album sang danh mục khác trước khi xoá.')
+      if (error) throw error
+      if (!deleted?.some(row => row.id === category.id)) throw new Error('Danh mục chưa được xoá. Vui lòng đăng nhập lại hoặc tải lại danh sách.')
+      setCategoryFilter(current => current === category.id ? 'all' : current)
+      setOrderingCategory(current => current?.id === category.id ? null : current)
+      await loadData()
+      void showAlert('Đã xoá danh mục.')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : (error as { message?: string })?.message
+      void showAlert(`Chưa xoá được danh mục: ${message || 'Vui lòng thử lại.'}`)
+    } finally {
+      deletingCategoryRef.current = false
+      setDeletingCategoryId(null)
+    }
+  }
+
+  function renderDeleteCategoryButton(category: Category, withLabel = false) {
+    return (
+      <button type="button" onClick={() => void deleteCategory(category)} disabled={deletingCategoryId !== null}
+        aria-label={`Xoá danh mục ${category.name}`} title={`Xoá danh mục ${category.name}`}
+        className={withLabel
+          ? 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-red-500/25 bg-red-500/10 px-4 text-xs font-semibold text-red-500 disabled:opacity-40'
+          : 'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-red-500/70 hover:bg-red-500/10 disabled:opacity-40'}>
+        {deletingCategoryId === category.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+        {withLabel && 'Xoá danh mục'}
+      </button>
+    )
+  }
+
   const totalPublicImages =
     Object.values(publicCounts).reduce(
       (sum, count) => sum + count,
@@ -821,15 +873,15 @@ export default function CustomerProductsDashboard() {
             </button>
 
             {categories.map((category) => (
+              <div key={category.id} className="mb-1 flex items-center gap-1">
               <button
-                key={category.id}
                 type="button"
                 onClick={() =>
                   setCategoryFilter(
                     category.id
                   )
                 }
-                className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs ${
+                className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-xs ${
                   categoryFilter ===
                   category.id
                     ? isDarkMode
@@ -838,7 +890,7 @@ export default function CustomerProductsDashboard() {
                     : ''
                 }`}
               >
-                <span>{category.name}</span>
+                <span className="min-w-0 break-words">{category.name}</span>
 
                 <span className="opacity-40">
                   {
@@ -850,6 +902,8 @@ export default function CustomerProductsDashboard() {
                   }
                 </span>
               </button>
+              {renderDeleteCategoryButton(category)}
+              </div>
             ))}
 
             {showCategoryForm ? (
@@ -1013,7 +1067,7 @@ export default function CustomerProductsDashboard() {
                 <div className="flex-1 overflow-y-auto p-4">
                   <div className="mb-3 text-[9px] font-bold uppercase tracking-[0.2em] opacity-35">Danh mục</div>
                   <button type="button" onClick={() => { setCategoryFilter('all'); setMobileSidebarOpen(false) }} className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-xs ${categoryFilter === 'all' ? (isDarkMode ? 'bg-white/10' : 'bg-black/[0.06]') : ''}`}><span>Tất cả album</span><span className="opacity-40">{albums.length}</span></button>
-                  {categories.map(category => <button key={category.id} type="button" onClick={() => { setCategoryFilter(category.id); setMobileSidebarOpen(false) }} className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-xs ${categoryFilter === category.id ? (isDarkMode ? 'bg-white/10' : 'bg-black/[0.06]') : ''}`}><span>{category.name}</span><span className="opacity-40">{albums.filter(album => album.category_id === category.id).length}</span></button>)}
+                  {categories.map(category => <div key={category.id} className="mb-1 flex items-center gap-1"><button type="button" onClick={() => { setCategoryFilter(category.id); setMobileSidebarOpen(false) }} className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl px-3 py-3 text-left text-xs ${categoryFilter === category.id ? (isDarkMode ? 'bg-white/10' : 'bg-black/[0.06]') : ''}`}><span className="break-words">{category.name}</span><span className="opacity-40">{albums.filter(album => album.category_id === category.id).length}</span></button>{renderDeleteCategoryButton(category)}</div>)}
                   <button type="button" onClick={() => { setShowCategoryForm(true); setMobileSidebarOpen(false) }} className="mt-2 flex w-full items-center gap-2 rounded-xl border border-dashed border-current/15 px-3 py-3 text-xs"><Plus className="h-4 w-4" />Thêm danh mục</button>
                   <div className="mb-3 mt-7 text-[9px] font-bold uppercase tracking-[0.2em] opacity-35">Công cụ quản trị</div>
                   <Link onClick={() => setMobileSidebarOpen(false)} href="/dashboardadmin" className="mb-1 flex items-center gap-3 rounded-xl px-3 py-3 text-xs"><Images className="h-4 w-4 text-emerald-500" />Dashboard Gallery</Link>
@@ -1183,12 +1237,15 @@ export default function CustomerProductsDashboard() {
                 </div>
 
                 {categoryFilter !== 'all' && (
+                  <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     disabled={loading || !albums.some(album => album.category_id === categoryFilter)}
                     onClick={() => setOrderingCategory(categories.find(category => category.id === categoryFilter) || null)}
                     className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 text-xs font-semibold text-emerald-600 disabled:opacity-40"
                   ><ArrowUpDown className="h-4 w-4" />Sắp xếp album</button>
+                  {categories.find(category => category.id === categoryFilter) && renderDeleteCategoryButton(categories.find(category => category.id === categoryFilter)!, true)}
+                  </div>
                 )}
 
                 <select

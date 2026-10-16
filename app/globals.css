@@ -74,6 +74,20 @@ html:is(.dark, [data-theme='dark']) body:not(:has(.site-page-surface[data-site-t
   background-image: none !important;
 }
 
+/* Compact public pages without scaling the full-screen photo viewer. */
+.public-compact > :is(header, section, footer) {
+  zoom: 0.9;
+}
+
+/* Keep header controls comfortable to tap after the visual size reduction. */
+.public-compact > header :is(button, a) {
+  min-height: 49px;
+}
+
+.public-compact > header button {
+  min-width: 49px;
+}
+
 .public-hero {
   --hero-zoom-start: 1.035;
   --hero-zoom-end: 1.085;

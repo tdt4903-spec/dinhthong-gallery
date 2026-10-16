@@ -128,7 +128,7 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
   return (
     <main
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`site-page-surface min-h-screen transition-colors duration-300 ${
+      className={`public-compact site-page-surface min-h-screen transition-colors duration-300 ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'
@@ -143,7 +143,7 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
             : 'border-emerald-950/8 bg-[#fbfdf9]/94'
         }`}
       >
-        <div className={`mx-auto min-h-[68px] max-w-[1500px] items-center gap-3 px-4 py-2 sm:px-6 ${category ? 'grid grid-cols-[44px_minmax(0,1fr)_44px] sm:grid-cols-[120px_minmax(0,1fr)_120px]' : 'flex justify-end'}`}>
+        <div className={`mx-auto min-h-[68px] max-w-[1500px] items-center gap-3 px-4 py-2 sm:px-6 ${category ? 'grid grid-cols-[49px_minmax(0,1fr)_49px] sm:grid-cols-[120px_minmax(0,1fr)_120px]' : 'flex justify-end'}`}>
           {category ? (
             <>
               <Link href="/#categories" prefetch={false} aria-label="Quay lại trang chủ" className="inline-flex min-h-11 items-center gap-2 text-xs font-semibold">
