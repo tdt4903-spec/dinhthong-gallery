@@ -1,12 +1,13 @@
 'use client'
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import FaceFilterPanel, { FaceScanIcon } from '../../components/ui/FaceFilterPanel'
 import { createBrowserClient } from '@supabase/ssr'
-import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
+import { fetchCloudflareMediaBlob, runCloudflareArchive, type DownloadEntry } from '@/lib/cloudflare-download'
 import { 
   Search, Sun, Moon, Plus, Camera, 
   Trash2, LogOut, User as UserIcon,
@@ -78,10 +79,6 @@ const VIDEO_WORKER_BASE = (process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || 'https://d
 // iPhone/Safari dễ thiếu RAM nếu giữ quá nhiều ảnh gốc cùng lúc. Tách thành
 // từng đợt nhỏ nhưng vẫn lần lượt lưu hết số ảnh người dùng yêu cầu.
 const MOBILE_IMAGE_SHARE_BATCH_SIZE = 10
-
-// Ảnh tải xuống cũng đi qua Cloudflare Worker để không phát sinh Fast Origin Transfer trên Vercel.
-const getImageWorkerDownloadUrl = (fileId: string, fileName: string) =>
-  `${VIDEO_WORKER_BASE}/image?id=${encodeURIComponent(fileId)}&name=${encodeURIComponent(fileName)}`
 
 const extractDriveId = (url: string) => {
   if (!url) return ''
@@ -317,6 +314,53 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [zippingFolderId, setZippingFolderId] = useState<string | null>(null)
   const [zipProgress, setZipProgress] = useState('')
+  const archiveControllerRef = useRef<AbortController | null>(null)
+  const partResolverRef = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null)
+  const [archiveProgress, setArchiveProgress] = useState<{
+    title: string; completed: number; total: number; part: number
+    status: string; fileName?: string; error?: string
+  } | null>(null)
+  const [pendingArchivePart, setPendingArchivePart] = useState<{
+    blob: Blob; name: string; part: number; hasMore: boolean
+  } | null>(null)
+  const archiveDialogRef = useRef<HTMLDivElement | null>(null)
+  const archiveDialogOpen = archiveProgress !== null
+  useEffect(() => {
+    if (!archiveDialogOpen) return
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    archiveDialogRef.current?.focus({ preventScroll: true })
+    const onKeyDown = (event: KeyboardEvent) => {
+      const dialog = archiveDialogRef.current
+      if (!dialog?.contains(document.activeElement)) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        archiveControllerRef.current?.abort()
+        partResolverRef.current?.reject(new DOMException('Đã hủy tải', 'AbortError'))
+        setPendingArchivePart(null)
+        setArchiveProgress(null)
+      } else if (event.key === 'Tab') {
+        const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button:not([disabled])'))
+        const first = buttons[0], last = buttons[buttons.length - 1]
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+          event.preventDefault(); last?.focus()
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault(); first?.focus()
+        }
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', onKeyDown)
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
+    }
+  }, [archiveDialogOpen])
+  useEffect(() => () => {
+    archiveControllerRef.current?.abort()
+    partResolverRef.current?.reject(new DOMException('Đã hủy tải', 'AbortError'))
+  }, [])
   const [pendingMobileShare, setPendingMobileShare] = useState<{ blob: Blob; fileName: string } | null>(null)
 
   // Một vùng tick duy nhất dành cho TẢI ẢNH trên cả desktop và mobile.
@@ -1471,59 +1515,135 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     URL.revokeObjectURL(url)
   }
 
-  // DESKTOP: dùng chính vùng tick tải ảnh ở trên để nén các ảnh đã chọn thành ZIP.
-  // Không dùng selectedItemIds và không liên quan đến ratings / file TXT.
-  const handleDownloadSelectedImagesDesktopZip = async (customList?: unknown) => {
-    if (zippingFolderId) return
-    const targetImages = Array.isArray(customList) ? (customList as MediaItem[]) : selectedDownloadImages
-    if (targetImages.length === 0) {
-      void showAlert('Hãy tick ít nhất 1 ảnh trước khi tải.')
-      return
-    }
+  const toDownloadEntry = (item: MediaItem, prefix = ''): DownloadEntry => {
+    const type = item.type === 'video' ? 'video' : 'image'
+    const name = item.name.includes('.') ? item.name : `${item.name}.${type === 'video' ? 'mp4' : 'jpg'}`
+    return { id: item.id, name, type, archivePath: `${prefix}${name}` }
+  }
 
-    setZippingFolderId('download_selected_images')
-    setZipProgress('Chuẩn bị...')
-
-    try {
-      const zip = new JSZip()
-      const total = targetImages.length
-      let completedCount = 0
-      const CONCURRENCY_LIMIT = 5
-
-      const fetchImage = async (fileItem: MediaItem) => {
-        const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
-        try {
-          const downloadEndpoint = getImageWorkerDownloadUrl(fileItem.id, exactFileName)
-          const res = await fetch(downloadEndpoint, { cache: 'no-store' })
-          if (!res.ok) throw new Error(`${exactFileName}: HTTP ${res.status}`)
-
-          let blob = await res.blob()
-          if (activeSetting.enable_watermark) {
-            blob = await applyWatermarkToImageBlob(blob)
+  const collectAlbumDownloadEntries = async (
+    roots: { title: string; driveUrl: string }[], signal: AbortSignal
+  ): Promise<DownloadEntry[]> => {
+    const entries: DownloadEntry[] = []
+    for (const root of roots) {
+      const visited = new Set<string>()
+      const walk = async (driveUrl: string, prefix: string) => {
+        signal.throwIfAborted()
+        const folderId = extractDriveId(driveUrl)
+        if (!folderId || visited.has(folderId)) return
+        visited.add(folderId)
+        setZipProgress(`Đang đọc thư mục: ${prefix || root.title}`)
+        const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}`, { signal, cache: 'no-store' })
+        const data = await res.json()
+        if (!res.ok || !Array.isArray(data.files)) throw new Error(data.error || `Không đọc được thư mục ${root.title}`)
+        for (const item of data.files as MediaItem[]) {
+          if (!item?.id || hiddenItemIds.has(item.id)) continue
+          if (item.type === 'folder') {
+            if (isSharedGuest && folderSettingsMap[item.id]?.password) {
+              throw new Error(`Thư mục “${item.name}” có mật khẩu riêng. Vui lòng mở thư mục đó để tải.`)
+            }
+            await walk(`https://drive.google.com/drive/folders/${item.id}`, `${prefix}${item.name}/`)
+          } else if (item.type === 'image' || item.type === 'video') {
+            entries.push(toDownloadEntry(item, prefix))
           }
-          zip.file(exactFileName, blob, { compression: 'STORE' })
-        } finally {
-          completedCount++
-          setZipProgress(`${completedCount}/${total}`)
         }
       }
+      await walk(root.driveUrl, roots.length > 1 ? `${root.title}/` : '')
+    }
+    return entries
+  }
 
-      for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
-        const chunk = targetImages.slice(i, i + CONCURRENCY_LIMIT)
-        await Promise.all(chunk.map(fetchImage))
+  const startArchiveDownload = async (
+    title: string, key: string, getEntries: (signal: AbortSignal) => Promise<DownloadEntry[]>
+  ) => {
+    if (archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare) return
+    const controller = new AbortController()
+    archiveControllerRef.current = controller
+    setZippingFolderId(key)
+    setZipProgress('Chuẩn bị tải...')
+    setArchiveProgress({ title, completed: 0, total: 0, part: 1, status: 'preparing' })
+    let writable: WritableStream<Uint8Array> | undefined
+    try {
+      // Ask for a destination while the original click still has user activation.
+      const picker = (window as Window & {
+        showSaveFilePicker?: (options: unknown) => Promise<FileSystemFileHandle>
+      }).showSaveFilePicker
+      if (picker && !isMobileDevice()) {
+        try {
+          const handle = await picker.call(window, {
+            suggestedName: `${title.replace(/[\\/:*?"<>|]/g, '_')}.zip`,
+            types: [{ description: 'ZIP', accept: { 'application/zip': ['.zip'] } }],
+          })
+          writable = await handle.createWritable()
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') throw error
+          // Browsers embedded in other apps may disallow the picker. Use the
+          // bounded archive parts below, each saved with a fresh user click.
+        }
       }
-
-      setZipProgress('Tạo file ZIP...')
-      const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
-      saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
+      controller.signal.throwIfAborted()
+      const entries = await getEntries(controller.signal)
+      if (entries.length === 0) throw new Error('Album này không có tệp nào được phép tải.')
+      await runCloudflareArchive({
+        entries, title, signal: controller.signal, writable,
+        transformImage: activeSetting.enable_watermark ? applyWatermarkToImageBlob : undefined,
+        onProgress: progress => {
+          if (archiveControllerRef.current !== controller) return
+          setArchiveProgress({ title, ...progress })
+          setZipProgress(`${progress.completed}/${progress.total}`)
+        },
+        savePart: (blob, name, context) => new Promise<void>((resolve, reject) => {
+          if (controller.signal.aborted) { reject(new DOMException('Đã hủy tải', 'AbortError')); return }
+          partResolverRef.current = { resolve, reject }
+          setPendingArchivePart({ blob, name, part: context.part, hasMore: context.hasMore })
+        }),
+      })
       setDownloadSelectedIds(new Set())
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      void showAlert('Không thể tạo ZIP ảnh đã chọn: ' + message)
+      setSelectedAlbumIds(new Set())
+      setSelectedItemIds(new Set())
+    } catch (error) {
+      if (writable) await writable.abort().catch(() => {})
+      if ((error instanceof Error && error.name === 'AbortError') || controller.signal.aborted) {
+        setArchiveProgress(null)
+      } else {
+        const message = error instanceof Error ? error.message : String(error)
+        setArchiveProgress(previous => previous ? { ...previous, status: 'error', error: message } : null)
+      }
     } finally {
+      if (archiveControllerRef.current === controller) archiveControllerRef.current = null
+      setPendingArchivePart(null)
+      partResolverRef.current = null
       setZippingFolderId(null)
       setZipProgress('')
     }
+  }
+
+  const cancelArchiveDownload = () => {
+    archiveControllerRef.current?.abort()
+    partResolverRef.current?.reject(new DOMException('Đã hủy tải', 'AbortError'))
+    partResolverRef.current = null
+    setPendingArchivePart(null)
+    setArchiveProgress(null)
+  }
+
+  const savePendingArchivePart = () => {
+    if (!pendingArchivePart) return
+    const resolver = partResolverRef.current
+    try {
+      saveAs(pendingArchivePart.blob, pendingArchivePart.name)
+      partResolverRef.current = null
+      setPendingArchivePart(null)
+      resolver?.resolve()
+    } catch (error) {
+      resolver?.reject(error instanceof Error ? error : new Error(String(error)))
+    }
+  }
+
+  const handleDownloadSelectedImagesDesktopZip = async (customList?: unknown) => {
+    const targetImages = Array.isArray(customList) ? customList as MediaItem[] : selectedDownloadImages
+    await startArchiveDownload(`${currentActiveFolderTitle}_da_chon`, 'download_selected_images', async () =>
+      targetImages.map(item => toDownloadEntry(item))
+    )
   }
 
   const handleDownloadFromFaceFilter = async (targetItems: { id: string; name: string }[]) => {
@@ -1624,11 +1744,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
       const prepareOne = async (item: MediaItem, index: number) => {
         const exactFileName = item.name.includes('.') ? item.name : `${item.name}.jpg`
-        const downloadEndpoint = getImageWorkerDownloadUrl(item.id, exactFileName)
-        const res = await fetch(downloadEndpoint, { cache: 'no-store' })
-        if (!res.ok) throw new Error(`${exactFileName}: HTTP ${res.status}`)
-
-        let blob = await res.blob()
+        let blob = await fetchCloudflareMediaBlob({ id: item.id, name: exactFileName, type: 'image' })
         if (activeSetting.enable_watermark) {
           blob = await applyWatermarkToImageBlob(blob)
         }
@@ -1706,7 +1822,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const startMobileImageDownload = async (sourceItems: MediaItem[], label: string) => {
     if (isPreparingMobileImages || pendingMobileBatchShare) return
 
-    const imagesOnly = sourceItems.filter(item => item.type === 'image')
+    const usedNames = new Set<string>()
+    const imagesOnly = sourceItems.filter(item => item.type === 'image').map(item => {
+      const original = item.name.includes('.') ? item.name : `${item.name}.jpg`
+      const dot = original.lastIndexOf('.')
+      const stem = dot > 0 ? original.slice(0, dot) : original
+      const extension = dot > 0 ? original.slice(dot) : ''
+      let name = original, suffix = 2
+      while (usedNames.has(name.toLowerCase())) name = `${stem} (${suffix++})${extension}`
+      usedNames.add(name.toLowerCase())
+      return { ...item, name }
+    })
     if (imagesOnly.length === 0) {
       void showAlert('Không có ảnh nào để tải.')
       return
@@ -1725,7 +1851,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const handleDownloadAllImagesToPhone = async () => {
-    await startMobileImageDownload(downloadableImages, `${currentActiveFolderTitle}_tat_ca_anh`)
+    await handleDownloadAlbumZip()
   }
 
   const handleConfirmMobileBatchSave = async () => {
@@ -1794,11 +1920,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       }
 
       // ẢNH: 100% qua Cloudflare Worker /image, không đi qua Vercel.
-      const downloadEndpoint = getImageWorkerDownloadUrl(item.id, exactFileName)
-      const res = await fetch(downloadEndpoint, { cache: 'no-store' })
-      if (!res.ok) throw new Error(`Máy chủ không thể lấy ảnh (HTTP ${res.status})`)
-
-      let blob = await res.blob()
+      let blob = await fetchCloudflareMediaBlob({ id: item.id, name: exactFileName, type: 'image' })
       if (activeSetting.enable_watermark) {
         blob = await applyWatermarkToImageBlob(blob)
       }
@@ -1826,175 +1948,52 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  // 3. NÉN TOÀN BỘ ALBUM ZIP QUA API DRIVE ALT=MEDIA
+  // Album archives read original image/video bytes only from Cloudflare.
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault()
-      e.stopPropagation()
-    }
+    e?.preventDefault()
+    e?.stopPropagation()
     const currentFolder = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1] : null
-    const target = targetInfo || (currentFolder ? { id: currentFolder.id, title: currentFolder.title, driveUrl: currentFolder.driveUrl } : (selectedAlbum ? { id: selectedAlbum.id, title: selectedAlbum.title, driveUrl: selectedAlbum.driveUrl } : null))
-    if (!target || zippingFolderId) return
+    const target = targetInfo || currentFolder || selectedAlbum
+    if (!target || archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare) return
+    if (isSharedGuest && isLocked) return
 
-    const targetId = target.id || target.driveUrl || 'global'
-    setZippingFolderId(targetId)
-    setZipProgress('Chuẩn bị...')
-
-    try {
-      let targetFiles: MediaItem[] = []
-      
-      if (targetInfo && targetInfo.driveUrl !== (currentFolder?.driveUrl || selectedAlbum?.driveUrl)) {
-        const res = await fetch(`/api/drive?url=${encodeURIComponent(targetInfo.driveUrl)}`)
-        const data = await res.json()
-        targetFiles = (data.files || []).filter((f: any) => f.type !== 'folder' && !hiddenItemIds.has(f.id))
-      } else {
-        targetFiles = visibleItems.filter(f => f.type !== 'folder')
-      }
-
-      if (targetFiles.length === 0) {
-        void showAlert(`Thư mục "${target.title}" hiện không có tệp nào để tải!`)
+    if (isMobileDevice()) {
+      const controller = new AbortController()
+      archiveControllerRef.current = controller
+      setZippingFolderId(target.id || 'album')
+      setArchiveProgress({ title: target.title, completed: 0, total: 0, part: 1, status: 'preparing' })
+      try {
+        const entries = await collectAlbumDownloadEntries([target], controller.signal)
+        controller.signal.throwIfAborted()
+        const images = entries.filter(item => item.type === 'image').map(item => ({ ...item, type: 'image' as const, url: '', fullUrl: '', downloadUrl: '' }))
+        setArchiveProgress(null)
+        if (images.length > 0) await startMobileImageDownload(images, `${target.title}_tat_ca_anh`)
+        for (const video of entries.filter(item => item.type === 'video')) {
+          controller.signal.throwIfAborted()
+          triggerDirectBrowserDownload(video.id, video.name)
+        }
+        if (entries.length === 0) void showAlert('Album này không có tệp nào được phép tải.')
+      } catch (error) {
+        if (!controller.signal.aborted) void showAlert('Không thể tải album: ' + (error instanceof Error ? error.message : String(error)))
+      } finally {
+        if (archiveControllerRef.current === controller) archiveControllerRef.current = null
+        setArchiveProgress(null)
         setZippingFolderId(null)
         setZipProgress('')
-        return
       }
-
-      const videoFiles = targetFiles.filter(f => f.type === 'video')
-      const imageFiles = targetFiles.filter(f => f.type === 'image')
-
-      // Video tải trực tiếp qua Cloudflare Worker
-      if (videoFiles.length > 0) {
-        for (let i = 0; i < videoFiles.length; i++) {
-          const v = videoFiles[i]
-          const ext = 'mp4'
-          const exactFileName = v.name.includes('.') ? v.name : `${v.name}.${ext}`
-          triggerDirectBrowserDownload(v.id, exactFileName)
-          await new Promise(resolve => setTimeout(resolve, 500))
-        }
-      }
-
-      // Nén ảnh: lấy dữ liệu qua Cloudflare Worker, không đi qua Vercel
-      if (imageFiles.length > 0) {
-        const zip = new JSZip()
-        const total = imageFiles.length
-        let completedCount = 0
-
-        const CONCURRENCY_LIMIT = 5
-        const fetchImage = async (fileItem: MediaItem) => {
-          const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
-          try {
-            const downloadEndpoint = getImageWorkerDownloadUrl(fileItem.id, exactFileName)
-            const res = await fetch(downloadEndpoint)
-            if (res.ok) {
-              let blob = await res.blob()
-              if (activeSetting.enable_watermark) {
-                blob = await applyWatermarkToImageBlob(blob)
-              }
-              zip.file(exactFileName, blob, { compression: 'STORE' })
-            }
-          } catch (err) {
-            console.error(`Lỗi tải: ${exactFileName}`, err)
-          } finally {
-            completedCount++
-            setZipProgress(`${completedCount}/${total}`)
-          }
-        }
-
-        for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
-          const chunk = imageFiles.slice(i, i + CONCURRENCY_LIMIT)
-          await Promise.all(chunk.map(fileItem => fetchImage(fileItem)))
-        }
-
-        setZipProgress('Tạo file ZIP...')
-        const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
-        saveAs(zipContent, `${target.title}.zip`)
-      }
-    } catch (err: any) {
-      void showAlert('Có lỗi xảy ra khi tải album: ' + err.message)
-    } finally {
-      setZippingFolderId(null)
-      setZipProgress('')
+      return
     }
+    await startArchiveDownload(target.title, target.id || 'album', signal => collectAlbumDownloadEntries([target], signal))
   }
 
   const handleBatchDownload = async () => {
-    if (zippingFolderId) return
     if (!selectedAlbum) {
-      const selectedAlbumsList = (albums || []).filter(a => a && selectedAlbumIds.has(a.id))
-      if (selectedAlbumsList.length === 0) return
-
-      setZippingFolderId('batch_albums')
-      setZipProgress('Chuẩn bị tải...')
-      try {
-        for (const alb of selectedAlbumsList) {
-          await handleDownloadAlbumZip({ id: alb.id, title: alb.title, driveUrl: alb.driveUrl })
-        }
-        setSelectedAlbumIds(new Set())
-      } finally {
-        setZippingFolderId(null)
-        setZipProgress('')
-      }
+      const roots = albums.filter(album => selectedAlbumIds.has(album.id))
+      if (roots.length === 0) return
+      await startArchiveDownload('Albums_da_chon', 'batch_albums', signal => collectAlbumDownloadEntries(roots, signal))
     } else {
-      const selectedFiles = visibleItems.filter(f => selectedItemIds.has(f.id) && f.type !== 'folder')
-      if (selectedFiles.length === 0) {
-        void showAlert('Vui lòng chọn ít nhất 1 tệp ảnh/video để tải!')
-        return
-      }
-
-      setZippingFolderId('batch_items')
-      setZipProgress('Đang xử lý...')
-      try {
-        const videoFiles = selectedFiles.filter(f => f.type === 'video')
-        const imageFiles = selectedFiles.filter(f => f.type === 'image')
-
-        for (const v of videoFiles) {
-          const exactFileName = v.name.includes('.') ? v.name : `${v.name}.mp4`
-          triggerDirectBrowserDownload(v.id, exactFileName)
-          await new Promise(resolve => setTimeout(resolve, 500))
-        }
-
-        if (imageFiles.length > 0) {
-          const zip = new JSZip()
-          const total = imageFiles.length
-          let completedCount = 0
-
-          const CONCURRENCY_LIMIT = 5
-          const fetchImage = async (fileItem: MediaItem) => {
-            const exactFileName = fileItem.name.includes('.') ? fileItem.name : `${fileItem.name}.jpg`
-            try {
-              const downloadEndpoint = getImageWorkerDownloadUrl(fileItem.id, exactFileName)
-              const res = await fetch(downloadEndpoint)
-              if (res.ok) {
-                let blob = await res.blob()
-                if (activeSetting.enable_watermark) {
-                  blob = await applyWatermarkToImageBlob(blob)
-                }
-                zip.file(exactFileName, blob, { compression: 'STORE' })
-              }
-            } catch (err) {
-              console.error(err)
-            } finally {
-              completedCount++
-              setZipProgress(`${completedCount}/${total}`)
-            }
-          }
-
-          for (let i = 0; i < total; i += CONCURRENCY_LIMIT) {
-            const chunk = imageFiles.slice(i, i + CONCURRENCY_LIMIT)
-            await Promise.all(chunk.map(fileItem => fetchImage(fileItem)))
-          }
-
-          setZipProgress('Tạo file ZIP...')
-          const zipContent = await zip.generateAsync({ type: 'blob', compression: 'STORE' })
-          saveAs(zipContent, `${currentActiveFolderTitle}_da_chon.zip`)
-        }
-
-        setSelectedItemIds(new Set())
-      } catch (e: any) {
-        void showAlert('Lỗi tải tệp: ' + e.message)
-      } finally {
-        setZippingFolderId(null)
-        setZipProgress('')
-      }
+      const files = visibleItems.filter(item => selectedItemIds.has(item.id) && item.type !== 'folder')
+      await startArchiveDownload(`${currentActiveFolderTitle}_da_chon`, 'batch_items', async () => files.map(item => toDownloadEntry(item)))
     }
   }
 
@@ -6046,6 +6045,42 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
+      {archiveProgress && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-[#02110b]/75 p-3 backdrop-blur-md sm:p-6">
+          <div ref={archiveDialogRef} role="dialog" aria-modal="true" aria-label="Tiến trình tải album" tabIndex={-1} className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-[28px] border border-white/70 bg-[#fbfcf7] p-5 text-[#10261d] shadow-2xl outline-none sm:p-7">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold">{archiveProgress.status === 'error' ? 'Không thể hoàn tất tải album' : archiveProgress.status === 'complete' ? 'Đã hoàn tất tải album' : 'Đang tải album'}</h2>
+                <p className="mt-1 break-words text-sm text-emerald-950/65">{archiveProgress.title}</p>
+              </div>
+              <button type="button" onClick={cancelArchiveDownload} aria-label="Đóng tiến trình tải" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full hover:bg-black/5"><X className="h-5 w-5" /></button>
+            </div>
+            {archiveProgress.status === 'error' ? (
+              <p role="alert" className="mt-5 break-words rounded-xl bg-red-50 p-3 text-sm leading-6 text-red-800">{archiveProgress.error}</p>
+            ) : (
+              <div className="mt-5" aria-live="polite">
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  {archiveProgress.status !== 'complete' && <Loader2 className="h-4 w-4 animate-spin" />}
+                  <span>{archiveProgress.total ? `${archiveProgress.completed}/${archiveProgress.total} tệp` : (zipProgress || 'Đang chuẩn bị...')}</span>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100"><div className="h-full bg-emerald-600 transition-all" style={{ width: `${archiveProgress.total ? Math.min(100, archiveProgress.completed / archiveProgress.total * 100) : 0}%` }} /></div>
+                {archiveProgress.fileName && <p className="mt-2 break-all text-xs text-gray-500">{archiveProgress.fileName}</p>}
+              </div>
+            )}
+            {pendingArchivePart && (
+              <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                <p className="text-sm leading-6">Phần {pendingArchivePart.part} đã sẵn sàng. Album lớn được chia thành nhiều phần để tránh treo trình duyệt. Hãy lưu từng phần để nhận đủ ảnh.</p>
+                <button type="button" onClick={savePendingArchivePart} className="mt-3 min-h-11 w-full rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white">
+                  {pendingArchivePart.hasMore ? `Tải phần ${pendingArchivePart.part} và tiếp tục` : 'Tải ZIP'}
+                </button>
+              </div>
+            )}
+            <button type="button" onClick={cancelArchiveDownload} className="mt-5 min-h-11 w-full rounded-xl border border-emerald-900/20 px-4 py-3 text-sm font-semibold">
+              {archiveProgress.status === 'complete' || archiveProgress.status === 'error' ? 'Đóng' : 'Hủy tải'}
+            </button>
+          </div>
+        </div>, document.body
+      )}
       <AppPopupHost popup={popup} onResolve={resolvePopup} />
 
       {/* Footer */}
