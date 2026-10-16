@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation'
 
 import {
   ArrowLeft,
+  ArrowUpDown,
   Check,
   ExternalLink,
   Eye,
@@ -40,6 +41,7 @@ import {
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import ProductPreviewImage from '@/components/ui/ProductPreviewImage'
+import AlbumOrderDialog from '@/components/ui/AlbumOrderDialog'
 
 type Category = {
   id: string
@@ -160,6 +162,8 @@ export default function CustomerProductsDashboard() {
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [orderingCategory, setOrderingCategory] = useState<Category | null>(null)
+  const closeAlbumOrder = useCallback(() => setOrderingCategory(null), [])
 
   const [showAlbumModal, setShowAlbumModal] = useState(false)
   const [editingAlbum, setEditingAlbum] = useState<Album | null>(
@@ -570,6 +574,10 @@ export default function CustomerProductsDashboard() {
         is_featured: form.is_featured,
         updated_at:
           new Date().toISOString(),
+        ...(editingAlbum?.category_id !== form.category_id ? {
+          position: albums.filter(album => album.category_id === form.category_id)
+            .reduce((maximum, album) => Math.max(maximum, album.position), -1) + 1,
+        } : {}),
       }
 
       if (editingAlbum) {
@@ -689,6 +697,30 @@ export default function CustomerProductsDashboard() {
     if (!error) {
       await loadData()
     }
+  }
+
+  async function saveAlbumOrder(ids: string[]) {
+    if (!orderingCategory) throw new Error('Vui lòng chọn thể loại cần sắp xếp.')
+    const { data: current, error: readError } = await supabase
+      .from('customer_product_albums')
+      .select('id,title,slug,album_url')
+      .eq('category_id', orderingCategory.id)
+    if (readError) throw new Error(readError.message)
+    const byId = new Map((current || []).map(album => [album.id, album]))
+    if (ids.length !== byId.size || new Set(ids).size !== ids.length || ids.some(id => !byId.has(id))) {
+      throw new Error('Danh sách album của thể loại đã thay đổi. Hãy đóng cửa sổ, tải lại danh sách và sắp xếp lại.')
+    }
+    // One bulk request saves the complete order together. Send only required
+    // insert keys and position; other album settings are not part of the update.
+    const timestamp = new Date().toISOString()
+    const { data: saved, error } = await supabase.from('customer_product_albums')
+      .upsert(ids.map((id, position) => ({ ...byId.get(id)!, position, updated_at: timestamp })), { onConflict: 'id' })
+      .select('id')
+    if (error) throw new Error(error.message)
+    if (saved?.length !== ids.length) throw new Error('Chưa xác nhận được thứ tự của toàn bộ album. Vui lòng tải lại danh sách.')
+    setOrderingCategory(null)
+    await loadData()
+    void showAlert('Đã lưu thứ tự album. Web public sẽ hiển thị theo thứ tự này.')
   }
 
   async function addCategory() {
@@ -1149,6 +1181,15 @@ export default function CustomerProductsDashboard() {
                     className="w-full bg-transparent text-xs outline-none"
                   />
                 </div>
+
+                {categoryFilter !== 'all' && (
+                  <button
+                    type="button"
+                    disabled={loading || !albums.some(album => album.category_id === categoryFilter)}
+                    onClick={() => setOrderingCategory(categories.find(category => category.id === categoryFilter) || null)}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 text-xs font-semibold text-emerald-600 disabled:opacity-40"
+                  ><ArrowUpDown className="h-4 w-4" />Sắp xếp album</button>
+                )}
 
                 <select
                   value={statusFilter}
@@ -1914,6 +1955,15 @@ export default function CustomerProductsDashboard() {
             </div>
           </div>
         </div>
+      )}
+      {orderingCategory && (
+        <AlbumOrderDialog
+          key={orderingCategory.id}
+          categoryName={orderingCategory.name}
+          albums={albums.filter(album => album.category_id === orderingCategory.id)}
+          onClose={closeAlbumOrder}
+          onSave={saveAlbumOrder}
+        />
       )}
       <AppPopupHost popup={popup} onResolve={resolvePopup} />
     </main>

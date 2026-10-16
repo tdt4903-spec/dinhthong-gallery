@@ -466,7 +466,7 @@ export default function AlbumPublicPage() {
 
                       {album.description && (
                         <p
-                          className={`mt-2 line-clamp-2 text-[10px] uppercase leading-5 tracking-[0.08em] ${
+                          className={`mt-2 whitespace-pre-wrap break-words text-[10px] leading-5 tracking-[0.08em] ${
                             isDarkMode
                               ? 'text-white/38'
                               : 'text-gray-500'

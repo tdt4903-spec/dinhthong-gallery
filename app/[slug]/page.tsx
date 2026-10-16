@@ -521,7 +521,7 @@ export default function PublicAlbumPage() {
 
         {album.description && (
           <p
-            className={`mt-6 max-w-2xl text-sm leading-7 ${
+            className={`mt-6 max-w-2xl whitespace-pre-wrap break-words text-sm leading-7 ${
               isDarkMode
                 ? 'text-white/50'
                 : 'text-black/55'
