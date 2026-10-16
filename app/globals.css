@@ -74,6 +74,63 @@ html:is(.dark, [data-theme='dark']) body:not(:has(.site-page-surface[data-site-t
   background-image: none !important;
 }
 
+.public-hero {
+  --hero-zoom-start: 1.035;
+  --hero-zoom-end: 1.085;
+  isolation: isolate;
+}
+
+.public-hero-image {
+  transform-origin: 54% 48%;
+  animation: public-hero-drift 18s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.public-hero[data-motion-paused='true'] .public-hero-image {
+  animation-play-state: paused;
+  will-change: auto;
+}
+
+.public-hero-reveal {
+  animation: public-hero-reveal 850ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.public-hero-title { animation-delay: 160ms; }
+.public-hero-description { animation-delay: 320ms; }
+.public-hero-cta { animation-delay: 480ms; }
+.public-hero-footnote { animation-delay: 640ms; }
+
+@keyframes public-hero-drift {
+  from { transform: scale(var(--hero-zoom-start)) translate3d(-0.4%, 0, 0); }
+  to { transform: scale(var(--hero-zoom-end)) translate3d(0.4%, -0.3%, 0); }
+}
+
+@keyframes public-hero-reveal {
+  from { opacity: 0; transform: translate3d(0, 18px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@media (max-width: 640px) {
+  .public-hero {
+    --hero-zoom-start: 1.02;
+    --hero-zoom-end: 1.05;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .public-hero-cta svg { transition: transform 200ms ease; }
+  .public-hero-cta:is(:hover, :focus-visible) svg { transform: translateX(4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-hero-image,
+  .public-hero-reveal {
+    animation: none;
+    transform: none;
+    will-change: auto;
+  }
+}
+
 /* Keep existing sizes, weights, and tracking while matching the brand subtitle font. */
 .font-serif {
   font-family: Arial, Helvetica, sans-serif;

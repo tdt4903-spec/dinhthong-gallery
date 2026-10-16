@@ -1,12 +1,14 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
   Camera,
   ImageIcon,
   Loader2,
   Moon,
+  Pause,
+  Play,
   Sun,
 } from 'lucide-react'
 
@@ -50,6 +52,27 @@ export default function AlbumPublicPage() {
   const [albums, setAlbums] = useState<CustomerAlbum[]>([])
   const [activeCategory, setActiveCategory] = useState('')
   const [loading, setLoading] = useState(true)
+  const heroRef = useRef<HTMLDivElement>(null)
+  const [heroMotionPaused, setHeroMotionPaused] = useState(false)
+  const [heroVisible, setHeroVisible] = useState(true)
+
+  useEffect(() => {
+    const element = heroRef.current
+    if (!element) return
+    let intersects = true
+    const updateVisibility = () => setHeroVisible(intersects && !document.hidden)
+    const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(([entry]) => {
+      intersects = entry.isIntersecting
+      updateVisibility()
+    })
+    observer?.observe(element)
+    document.addEventListener('visibilitychange', updateVisibility)
+    updateVisibility()
+    return () => {
+      observer?.disconnect()
+      document.removeEventListener('visibilitychange', updateVisibility)
+    }
+  }, [])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -231,12 +254,12 @@ export default function AlbumPublicPage() {
 
       {/* HERO */}
       <section className="px-3 pt-3 sm:px-5 sm:pt-5">
-        <div className="relative mx-auto h-[560px] max-w-[1500px] overflow-hidden rounded-[30px] sm:h-[640px]">
+        <div ref={heroRef} data-motion-paused={heroMotionPaused || !heroVisible} className="public-hero relative mx-auto h-[560px] max-w-[1500px] overflow-hidden rounded-[30px] sm:h-[640px]">
 
           <img
             src={SITE_BANNER_URL}
             alt="Dinh Thong Gallery"
-            className="absolute inset-0 block h-full w-full max-w-none object-cover object-center"
+            className="public-hero-image absolute inset-0 block h-full w-full max-w-none object-cover object-center"
             style={{
               width: '100%',
               height: '100%',
@@ -254,14 +277,25 @@ export default function AlbumPublicPage() {
             }`}
           />
 
+          <button
+            type="button"
+            onClick={() => setHeroMotionPaused(paused => !paused)}
+            aria-label={heroMotionPaused ? 'Tiếp tục hiệu ứng ảnh' : 'Tạm dừng hiệu ứng ảnh'}
+            title={heroMotionPaused ? 'Tiếp tục hiệu ứng ảnh' : 'Tạm dừng hiệu ứng ảnh'}
+            className="absolute right-4 top-4 z-20 inline-flex h-10 min-w-10 items-center justify-center gap-2 rounded-full border border-white/25 bg-black/25 px-3 text-[10px] font-semibold text-white backdrop-blur-md transition-colors hover:bg-black/45 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white motion-reduce:hidden sm:right-6 sm:top-6"
+          >
+            {heroMotionPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">{heroMotionPaused ? 'Tiếp tục' : 'Tạm dừng'}</span>
+          </button>
+
           <div className="relative z-10 flex h-full items-end p-6 sm:p-12 lg:p-16">
             <div className="w-full min-w-0 max-w-[820px] text-white">
 
-              <div className="text-[9px] font-bold uppercase tracking-[0.32em] text-white/60">
+              <div className="public-hero-reveal text-[9px] font-bold uppercase tracking-[0.32em] text-white/60">
                 Dinh Thong Gallery
               </div>
 
-              <div className="mt-5">
+              <div className="public-hero-reveal public-hero-title mt-5">
                 <div className="font-serif text-6xl font-medium uppercase leading-[0.92] tracking-[0.01em] sm:text-7xl lg:text-[92px]">
                   Album
                 </div>
@@ -271,7 +305,7 @@ export default function AlbumPublicPage() {
                 </div>
               </div>
 
-              <div className="mt-5 max-w-[760px] text-[10px] font-medium uppercase leading-6 tracking-[0.1em] text-white/70 sm:mt-6 sm:text-[11px] sm:leading-7 lg:text-xs">
+              <div className="public-hero-reveal public-hero-description mt-5 max-w-[760px] text-[10px] font-medium uppercase leading-6 tracking-[0.1em] text-white/70 sm:mt-6 sm:text-[11px] sm:leading-7 lg:text-xs">
                 <div className="whitespace-normal">
                   Những câu chuyện thật, khoảnh khắc thật và những bộ ảnh
                 </div>
@@ -287,10 +321,10 @@ export default function AlbumPublicPage() {
                   document
                     .getElementById('albums')
                     ?.scrollIntoView({
-                      behavior: 'smooth',
+                      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
                     })
                 }
-                className="mt-6 inline-flex items-center gap-3 rounded-full border border-white/25 bg-black/15 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.14em] text-white backdrop-blur-md transition hover:bg-white hover:text-black sm:mt-7"
+                className="public-hero-reveal public-hero-cta mt-6 inline-flex items-center gap-3 rounded-full border border-white/25 bg-black/15 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.14em] text-white backdrop-blur-md transition hover:bg-white hover:text-black sm:mt-7"
               >
                 Khám phá album
 
@@ -301,7 +335,7 @@ export default function AlbumPublicPage() {
           </div>
 
           {/* HERO FOOTNOTE — GÓC PHẢI DƯỚI */}
-          <div className="absolute bottom-8 right-8 z-20 hidden max-w-[380px] text-right text-[9px] font-medium leading-5 tracking-[0.08em] text-white/55 lg:block">
+          <div className="public-hero-reveal public-hero-footnote absolute bottom-8 right-8 z-20 hidden max-w-[380px] text-right text-[9px] font-medium leading-5 tracking-[0.08em] text-white/55 lg:block">
             Mỗi bức ảnh là một câu chuyện, cảm ơn bạn đã tiếp tục hành trình cùng DinhThong Photos.
           </div>
 
