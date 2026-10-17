@@ -147,7 +147,7 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
             : 'border-emerald-950/8 bg-[#fbfdf9]/94'
         }`}
       >
-        <div className={`mx-auto min-h-[68px] max-w-[1500px] items-center gap-3 px-4 py-2 sm:px-6 ${category ? 'grid grid-cols-[49px_minmax(0,1fr)_49px] sm:grid-cols-[120px_minmax(0,1fr)_120px]' : 'flex'}`}>
+        <div className={`mx-auto min-h-[68px] max-w-[1500px] items-center gap-2 px-4 py-2 sm:gap-3 sm:px-6 ${category ? 'grid grid-cols-[49px_minmax(0,1fr)_49px] sm:grid-cols-[120px_minmax(0,1fr)_120px]' : 'flex'}`}>
           <Link href="/" prefetch={false} aria-label="Quay lại trang chủ" className={`inline-flex shrink-0 items-center gap-1 ${category ? '' : 'mr-auto'}`}>
             {category ? <>
               <ArrowLeft className="h-4 w-4 shrink-0" />
@@ -157,7 +157,7 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
           {category ? (
             <p className="min-w-0 break-words text-center text-sm font-semibold uppercase tracking-wide sm:text-lg">{category.name}</p>
           ) : (
-            <Link href="/booking" prefetch={false} className="inline-flex min-h-11 items-center justify-center rounded-full bg-[#075b43] px-6 text-[10px] font-bold uppercase tracking-[0.15em] text-white transition hover:bg-[#064c38]">Booking</Link>
+            <Link href="/booking" prefetch={false} className="inline-flex min-h-11 items-center justify-center rounded-full bg-[#075b43] px-4 text-[10px] sm:px-6 font-bold uppercase tracking-[0.15em] text-white transition hover:bg-[#064c38]">Booking</Link>
           )}
 
           <button

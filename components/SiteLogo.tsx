@@ -1,27 +1,15 @@
 import { Camera } from 'lucide-react'
-import { SITE_LOGO_URL } from '@/lib/site-assets'
 
 export default function SiteLogo({ isDarkMode }: { isDarkMode: boolean }) {
   return (
-    <span role="img" aria-label="Dinh Thong Photos" className="inline-flex shrink-0 items-center gap-2.5">
-      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl ${isDarkMode ? 'bg-emerald-400/10 text-emerald-300' : 'bg-emerald-700/10 text-emerald-800'}`}>
-        <Camera aria-hidden="true" className="h-[18px] w-[18px]" />
+    <span className="inline-flex min-w-0 items-center gap-2 sm:gap-3">
+      <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl sm:h-11 sm:w-11 ${isDarkMode ? 'bg-emerald-400/10 text-emerald-300' : 'bg-[#005640] text-white'}`}>
+        <Camera aria-hidden="true" className="h-[18px] w-[18px] sm:h-5 sm:w-5" />
       </span>
-      <span
-      aria-hidden="true"
-      className="block h-[25px] w-[72px] shrink-0 transition-colors duration-300 sm:h-[27px] sm:w-[90px]"
-      style={{
-        backgroundColor: isDarkMode ? '#f4fff8' : '#103b2c',
-        maskImage: `url("${SITE_LOGO_URL}")`,
-        WebkitMaskImage: `url("${SITE_LOGO_URL}")`,
-        maskSize: '138% auto',
-        WebkitMaskSize: '138% auto',
-        maskPosition: '50% 54%',
-        WebkitMaskPosition: '50% 54%',
-        maskRepeat: 'no-repeat',
-        WebkitMaskRepeat: 'no-repeat',
-      }}
-      />
+      <span className="min-w-0 text-left">
+        <span className={`block whitespace-nowrap text-xs font-bold leading-tight sm:text-xl ${isDarkMode ? 'text-[#f4fff8]' : 'text-[#173b2c]'}`}>DinhThong Gallery</span>
+        <span className={`mt-1 block whitespace-nowrap text-[7px] font-semibold uppercase tracking-[0.2em] sm:text-[9px] ${isDarkMode ? 'text-emerald-100/50' : 'text-[#91a69e]'}`}>Moment of life</span>
+      </span>
     </span>
   )
 }

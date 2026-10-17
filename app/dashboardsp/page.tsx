@@ -100,12 +100,14 @@ type FormState = {
   is_featured: boolean
 }
 
+const ALBUM_DESCRIPTION_TEMPLATE = 'Location : .....\nProduced by DinhThong'
+
 const emptyForm: FormState = {
   title: '',
   category_id: '',
   album_url: '',
   cover_url: '',
-  description: '',
+  description: ALBUM_DESCRIPTION_TEMPLATE,
   shoot_date: '',
   is_public: true,
   is_featured: false,
@@ -1751,11 +1753,22 @@ export default function CustomerProductsDashboard() {
                   )}
                 />
 
-                <FieldLabel>
-                  Mô tả
-                </FieldLabel>
+                <div className="flex items-center justify-between gap-3">
+                  <FieldLabel>Mô tả</FieldLabel>
+                  {!form.description.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => setForm(current => ({ ...current, description: ALBUM_DESCRIPTION_TEMPLATE }))}
+                      className="rounded-lg px-2 py-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400"
+                    >
+                      Dùng mẫu mô tả
+                    </button>
+                  )}
+                </div>
 
                 <textarea
+                  aria-label="Mô tả album"
+                  placeholder={ALBUM_DESCRIPTION_TEMPLATE}
                   rows={4}
                   value={form.description}
                   onChange={(event) =>
@@ -1771,6 +1784,8 @@ export default function CustomerProductsDashboard() {
                     isDarkMode
                   )} h-auto py-3`}
                 />
+
+                <p className="mt-2 text-[11px] opacity-55">Thay ..... bằng địa điểm chụp. Bạn có thể sửa nội dung mẫu theo ý muốn.</p>
 
                 <div className="mt-5 grid grid-cols-2 gap-2">
                   <button
