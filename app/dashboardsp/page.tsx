@@ -44,6 +44,7 @@ import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import ProductPreviewImage from '@/components/ui/ProductPreviewImage'
 import AlbumOrderDialog from '@/components/ui/AlbumOrderDialog'
+import CategoryNameDialog from '@/components/ui/CategoryNameDialog'
 import { prepareAlbumCover, uploadAlbumCover } from '@/lib/album-cover-upload'
 
 type Category = {
@@ -235,6 +236,8 @@ export default function CustomerProductsDashboard() {
   const [showCategoryForm, setShowCategoryForm] = useState(false)
   const [deletingCategoryId, setDeletingCategoryId] = useState<string | null>(null)
   const deletingCategoryRef = useRef(false)
+  const [renamingCategory, setRenamingCategory] = useState<Category | null>(null)
+  const closeCategoryNameDialog = useCallback(() => setRenamingCategory(null), [])
 
   const [publicCounts, setPublicCounts] = useState<
     Record<string, number>
@@ -819,6 +822,35 @@ export default function CustomerProductsDashboard() {
     void showAlert('Đã thêm danh mục.')
   }
 
+  async function saveCategoryName(name: string) {
+    if (!renamingCategory) throw new Error('Vui lòng chọn danh mục cần sửa.')
+    const duplicate = categories.some(category => category.id !== renamingCategory.id &&
+      category.name.trim().normalize('NFC').toLocaleLowerCase('vi') === name.normalize('NFC').toLocaleLowerCase('vi'))
+    if (duplicate) throw new Error('Tên này đã có trong danh mục. Vui lòng chọn tên khác.')
+    const { data, error } = await supabase.from('customer_product_categories')
+      .update({ name, updated_at: new Date().toISOString() })
+      .eq('id', renamingCategory.id).eq('name', renamingCategory.name)
+      .select('id,name').maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!data) throw new Error('Danh mục đã thay đổi hoặc bạn chưa có quyền sửa. Vui lòng tải lại danh sách.')
+    setCategories(current => current.map(category => category.id === data.id ? { ...category, name: data.name } : category))
+    setOrderingCategory(current => current && current.id === data.id ? { ...current, name: data.name } : current)
+    setRenamingCategory(null)
+    void showAlert('Đã đổi tên danh mục.')
+  }
+
+  function renderRenameCategoryButton(category: Category, withLabel = false) {
+    return (
+      <button type="button" onClick={() => setRenamingCategory(category)} disabled={deletingCategoryId !== null}
+        aria-label={`Sửa tên danh mục ${category.name}`} title={`Sửa tên danh mục ${category.name}`}
+        className={withLabel
+          ? 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 text-xs font-semibold text-emerald-600 disabled:opacity-40'
+          : 'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-40'}>
+        <Pencil className="h-4 w-4" />{withLabel && 'Sửa tên danh mục'}
+      </button>
+    )
+  }
+
   async function deleteCategory(category: Category) {
     if (deletingCategoryRef.current) return
     deletingCategoryRef.current = true
@@ -963,7 +995,7 @@ export default function CustomerProductsDashboard() {
                   }
                 </span>
               </button>
-              {renderDeleteCategoryButton(category)}
+              {renderRenameCategoryButton(category)}{renderDeleteCategoryButton(category)}
               </div>
             ))}
 
@@ -1128,7 +1160,7 @@ export default function CustomerProductsDashboard() {
                 <div className="flex-1 overflow-y-auto p-4">
                   <div className="mb-3 text-[9px] font-bold uppercase tracking-[0.2em] opacity-35">Danh mục</div>
                   <button type="button" onClick={() => { setCategoryFilter('all'); setMobileSidebarOpen(false) }} className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-xs ${categoryFilter === 'all' ? (isDarkMode ? 'bg-white/10' : 'bg-black/[0.06]') : ''}`}><span>Tất cả album</span><span className="opacity-40">{albums.length}</span></button>
-                  {categories.map(category => <div key={category.id} className="mb-1 flex items-center gap-1"><button type="button" onClick={() => { setCategoryFilter(category.id); setMobileSidebarOpen(false) }} className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl px-3 py-3 text-left text-xs ${categoryFilter === category.id ? (isDarkMode ? 'bg-white/10' : 'bg-black/[0.06]') : ''}`}><span className="break-words">{category.name}</span><span className="opacity-40">{albums.filter(album => album.category_id === category.id).length}</span></button>{renderDeleteCategoryButton(category)}</div>)}
+                  {categories.map(category => <div key={category.id} className="mb-1 flex items-center gap-1"><button type="button" onClick={() => { setCategoryFilter(category.id); setMobileSidebarOpen(false) }} className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl px-3 py-3 text-left text-xs ${categoryFilter === category.id ? (isDarkMode ? 'bg-white/10' : 'bg-black/[0.06]') : ''}`}><span className="break-words">{category.name}</span><span className="opacity-40">{albums.filter(album => album.category_id === category.id).length}</span></button>{renderRenameCategoryButton(category)}{renderDeleteCategoryButton(category)}</div>)}
                   <button type="button" onClick={() => { setShowCategoryForm(true); setMobileSidebarOpen(false) }} className="mt-2 flex w-full items-center gap-2 rounded-xl border border-dashed border-current/15 px-3 py-3 text-xs"><Plus className="h-4 w-4" />Thêm danh mục</button>
                   <div className="mb-3 mt-7 text-[9px] font-bold uppercase tracking-[0.2em] opacity-35">Công cụ quản trị</div>
                   <Link onClick={() => setMobileSidebarOpen(false)} href="/dashboardadmin" className="mb-1 flex items-center gap-3 rounded-xl px-3 py-3 text-xs"><Images className="h-4 w-4 text-emerald-500" />Dashboard Gallery</Link>
@@ -1305,6 +1337,7 @@ export default function CustomerProductsDashboard() {
                     onClick={() => setOrderingCategory(categories.find(category => category.id === categoryFilter) || null)}
                     className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 text-xs font-semibold text-emerald-600 disabled:opacity-40"
                   ><ArrowUpDown className="h-4 w-4" />Sắp xếp album</button>
+                  {categories.find(category => category.id === categoryFilter) && renderRenameCategoryButton(categories.find(category => category.id === categoryFilter)!, true)}
                   {categories.find(category => category.id === categoryFilter) && renderDeleteCategoryButton(categories.find(category => category.id === categoryFilter)!, true)}
                   </div>
                 )}
@@ -2131,6 +2164,10 @@ export default function CustomerProductsDashboard() {
           onClose={closeAlbumOrder}
           onSave={saveAlbumOrder}
         />
+      )}
+      {renamingCategory && (
+        <CategoryNameDialog key={renamingCategory.id} name={renamingCategory.name} isDarkMode={isDarkMode}
+          onClose={closeCategoryNameDialog} onSave={saveCategoryName} />
       )}
       <AppPopupHost popup={popup} onResolve={resolvePopup} />
     </main>
