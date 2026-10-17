@@ -27,6 +27,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Upload,
   Search,
   Star,
   Sun,
@@ -43,6 +44,7 @@ import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import ProductPreviewImage from '@/components/ui/ProductPreviewImage'
 import AlbumOrderDialog from '@/components/ui/AlbumOrderDialog'
+import { prepareAlbumCover, uploadAlbumCover } from '@/lib/album-cover-upload'
 
 type Category = {
   id: string
@@ -174,6 +176,47 @@ export default function CustomerProductsDashboard() {
   )
 
   const [form, setForm] = useState<FormState>(emptyForm)
+  const [coverBlob, setCoverBlob] = useState<Blob | null>(null)
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState('')
+  const [preparingCover, setPreparingCover] = useState(false)
+  const [pickingCover, setPickingCover] = useState(false)
+  const coverInputRef = useRef<HTMLInputElement>(null)
+  const coverGridRef = useRef<HTMLDivElement>(null)
+  const coverPreparationRef = useRef(0)
+
+  useEffect(() => {
+    if (!coverBlob) { setCoverPreviewUrl(''); return }
+    const url = URL.createObjectURL(coverBlob)
+    setCoverPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [coverBlob])
+
+  function resetCoverSelection() {
+    coverPreparationRef.current += 1
+    setCoverBlob(null)
+    setPreparingCover(false)
+    setPickingCover(false)
+  }
+
+  useEffect(() => {
+    if (!showAlbumModal) resetCoverSelection()
+  }, [showAlbumModal])
+
+  async function chooseDeviceCover(file: File) {
+    const preparation = ++coverPreparationRef.current
+    setPreparingCover(true)
+    try {
+      const blob = await prepareAlbumCover(file)
+      if (preparation !== coverPreparationRef.current) return
+      setCoverBlob(blob)
+      setPickingCover(false)
+      setForm(current => ({ ...current, cover_url: '' }))
+    } catch (error: unknown) {
+      if (preparation === coverPreparationRef.current) void showAlert(error instanceof Error ? error.message : 'Không xử lý được ảnh bìa.')
+    } finally {
+      if (preparation === coverPreparationRef.current) setPreparingCover(false)
+    }
+  }
 
   const [driveImages, setDriveImages] = useState<DriveItem[]>([])
   const [approvedIds, setApprovedIds] = useState<Set<string>>(
@@ -183,6 +226,10 @@ export default function CustomerProductsDashboard() {
   const [driveLoading, setDriveLoading] = useState(false)
   const [driveLoaded, setDriveLoaded] = useState(false)
   const [driveError, setDriveError] = useState('')
+
+  useEffect(() => {
+    if (pickingCover && driveLoaded && !driveLoading) coverGridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [pickingCover, driveLoaded, driveLoading])
 
   const [newCategoryName, setNewCategoryName] = useState('')
   const [showCategoryForm, setShowCategoryForm] = useState(false)
@@ -328,6 +375,7 @@ export default function CustomerProductsDashboard() {
   }
 
   function openCreateAlbum() {
+    resetCoverSelection()
     setEditingAlbum(null)
 
     setForm({
@@ -340,6 +388,7 @@ export default function CustomerProductsDashboard() {
   }
 
   async function openEditAlbum(album: Album) {
+    resetCoverSelection()
     setEditingAlbum(album)
 
     setForm({
@@ -529,6 +578,7 @@ export default function CustomerProductsDashboard() {
   }
 
   async function saveAlbum() {
+    if (saving || preparingCover) return
     const title = form.title.trim()
     const driveUrl = normalizeDriveUrl(
       form.album_url
@@ -553,6 +603,15 @@ export default function CustomerProductsDashboard() {
 
     try {
       let albumId = editingAlbum?.id || ''
+      let coverUrl = form.cover_url.trim()
+      if (coverBlob) {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError || !sessionData.session) throw new Error('Vui lòng đăng nhập lại để tải ảnh bìa.')
+        coverUrl = await uploadAlbumCover(coverBlob, sessionData.session.access_token)
+        // Reuse a successful upload if saving the album needs to be retried.
+        setForm(current => ({ ...current, cover_url: coverUrl }))
+        setCoverBlob(null)
+      }
 
       const firstApprovedImage =
         driveImages.find((image) =>
@@ -568,7 +627,7 @@ export default function CustomerProductsDashboard() {
         category_id: form.category_id,
         album_url: driveUrl,
         cover_url:
-          form.cover_url.trim() ||
+          coverUrl ||
           firstImage?.url ||
           '',
         description:
@@ -1478,7 +1537,7 @@ export default function CustomerProductsDashboard() {
           <button
             type="button"
             aria-label="Đóng cửa sổ album"
-            onClick={() => setShowAlbumModal(false)}
+            onClick={() => !saving && setShowAlbumModal(false)}
             className="absolute inset-0 cursor-default"
           />
           <div
@@ -1514,7 +1573,7 @@ export default function CustomerProductsDashboard() {
               <button
                 type="button"
                 onClick={() =>
-                  setShowAlbumModal(false)
+                  !saving && setShowAlbumModal(false)
                 }
                 className="flex h-9 w-9 items-center justify-center rounded-full border border-current/10"
               >
@@ -1711,26 +1770,46 @@ export default function CustomerProductsDashboard() {
                   Link được tự động chuẩn hóa để tránh lỗi dán trùng.
                 </p>
 
-                <FieldLabel>
-                  Ảnh bìa
-                </FieldLabel>
+                <FieldLabel>Ảnh bìa</FieldLabel>
 
-                <input
-                  value={form.cover_url}
-                  onChange={(event) =>
-                    setForm(
-                      (current) => ({
-                        ...current,
-                        cover_url:
-                          event.target.value,
-                      })
-                    )
-                  }
-                  placeholder="Để trống sẽ tự lấy ảnh đầu tiên được duyệt"
-                  className={inputClass(
-                    isDarkMode
+                <div className="space-y-3 rounded-2xl border border-current/10 p-3">
+                  {(coverPreviewUrl || form.cover_url) ? (
+                    <div className="relative h-36 overflow-hidden rounded-xl bg-black/5">
+                      <ProductPreviewImage src={coverPreviewUrl || form.cover_url} alt="Ảnh bìa đã chọn" className="h-full! w-full object-cover" />
+                      <span className="absolute bottom-2 left-2 rounded-lg bg-black/65 px-2 py-1 text-[10px] text-white">{coverBlob ? 'Ảnh từ thiết bị · sẽ tải lên khi lưu' : 'Ảnh bìa đã chọn'}</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs leading-5 opacity-55">Chọn ảnh bìa riêng hoặc để tự lấy ảnh đầu tiên trong album.</p>
                   )}
-                />
+                  <input
+                    ref={coverInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/avif,image/heic,image/heif"
+                    className="sr-only"
+                    aria-label="Chọn ảnh bìa từ thiết bị"
+                    disabled={saving || preparingCover}
+                    onChange={event => {
+                      const file = event.target.files?.[0]
+                      event.target.value = ''
+                      if (file) void chooseDeviceCover(file)
+                    }}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => coverInputRef.current?.click()} disabled={saving || preparingCover} className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-600 px-3 text-xs font-semibold text-white disabled:opacity-50">
+                      {preparingCover ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                      {preparingCover ? 'Đang xử lý ảnh...' : 'Chọn từ thiết bị'}
+                    </button>
+                    <button type="button" disabled={saving || preparingCover || driveLoading} onClick={() => {
+                      setPickingCover(true)
+                      if (!driveLoaded) void loadDriveImages(form.album_url, editingAlbum?.id)
+                    }} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-current/15 px-3 text-xs font-semibold disabled:opacity-50"><Images className="h-4 w-4" />Chọn từ album</button>
+                    {(coverBlob || form.cover_url) && <button type="button" disabled={saving || preparingCover} onClick={() => {
+                      resetCoverSelection()
+                      setForm(current => ({ ...current, cover_url: '' }))
+                    }} className="min-h-11 rounded-xl px-2 text-xs opacity-60 disabled:opacity-30">Bỏ ảnh bìa</button>}
+                  </div>
+                  <p className="text-[10px] leading-5 opacity-50">Ảnh từ thiết bị được tối ưu kích thước và lưu trên Cloudflare khi bấm Lưu album.</p>
+                </div>
 
                 <FieldLabel>
                   Ngày chụp
@@ -1882,7 +1961,8 @@ export default function CustomerProductsDashboard() {
                   </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                <div ref={coverGridRef} className="min-h-0 flex-1 overflow-y-auto p-4">
+                  {pickingCover && <p className="mb-3 rounded-xl bg-emerald-500/10 p-3 text-xs font-semibold text-emerald-600 dark:text-emerald-400">Bấm “Đặt làm bìa” bên dưới ảnh bạn muốn chọn.</p>}
                   {driveLoading ? (
                     <div className="flex h-full min-h-[420px] flex-col items-center justify-center">
                       <Loader2 className="h-7 w-7 animate-spin opacity-40" />
@@ -1930,50 +2010,65 @@ export default function CustomerProductsDashboard() {
                             )
 
                           return (
-                            <button
-                              key={image.id}
-                              type="button"
-                              onClick={() =>
-                                toggleApproval(
-                                  image.id
-                                )
-                              }
-                              className={`group overflow-hidden rounded-xl border text-left transition ${
-                                approved
-                                  ? 'border-emerald-400 ring-2 ring-emerald-400/20'
-                                  : isDarkMode
-                                  ? 'border-white/10'
-                                  : 'border-black/10'
-                              }`}
-                            >
-                              <div className="relative aspect-[4/5] overflow-hidden bg-black/10">
-                                <ProductPreviewImage
-                                  src={
-                                    image.url || image.id
-                                  }
-                                  alt={
-                                    image.name
-                                  }
-                                  className="h-full w-full object-cover"
-                                />
+                            <div key={image.id} className="min-w-0">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  toggleApproval(
+                                    image.id
+                                  )
+                                }
+                                disabled={saving}
+                                className={`group w-full overflow-hidden rounded-xl border text-left transition ${
+                                  approved
+                                    ? 'border-emerald-400 ring-2 ring-emerald-400/20'
+                                    : isDarkMode
+                                    ? 'border-white/10'
+                                    : 'border-black/10'
+                                }`}
+                              >
+                                <div className="relative aspect-[4/5] overflow-hidden bg-black/10">
+                                  <ProductPreviewImage
+                                    src={
+                                      image.url || image.id
+                                    }
+                                    alt={
+                                      image.name
+                                    }
+                                    className="h-full w-full object-cover"
+                                  />
 
-                                <div
-                                  className={`absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur ${
-                                    approved
-                                      ? 'border-emerald-300 bg-emerald-500 text-white'
-                                      : 'border-white/40 bg-black/35 text-white'
-                                  }`}
-                                >
-                                  {approved && (
-                                    <Check className="h-4 w-4" />
-                                  )}
+                                  <div
+                                    className={`absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur ${
+                                      approved
+                                        ? 'border-emerald-300 bg-emerald-500 text-white'
+                                        : 'border-white/40 bg-black/35 text-white'
+                                    }`}
+                                  >
+                                    {approved && (
+                                      <Check className="h-4 w-4" />
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
 
-                              <div className="truncate px-2.5 py-2 text-[9px] opacity-55">
-                                {image.name}
-                              </div>
-                            </button>
+                                <div className="truncate px-2.5 py-2 text-[9px] opacity-55">
+                                  {image.name}
+                                </div>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={saving || preparingCover}
+                                aria-pressed={!coverBlob && form.cover_url === image.url}
+                                onClick={() => {
+                                  resetCoverSelection()
+                                  setForm(current => ({ ...current, cover_url: image.url }))
+                                }}
+                                className={`mt-1 flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border px-2 text-[11px] font-semibold disabled:opacity-50 ${!coverBlob && form.cover_url === image.url ? 'border-emerald-500 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'border-current/10'}`}
+                              >
+                                {!coverBlob && form.cover_url === image.url && <Check className="h-3.5 w-3.5" />}
+                                {!coverBlob && form.cover_url === image.url ? 'Ảnh bìa đã chọn' : 'Đặt làm bìa'}
+                              </button>
+                            </div>
                           )
                         }
                       )}
@@ -2000,7 +2095,7 @@ export default function CustomerProductsDashboard() {
                 <button
                   type="button"
                   onClick={() =>
-                    setShowAlbumModal(false)
+                    !saving && setShowAlbumModal(false)
                   }
                   className="rounded-xl border border-current/10 px-4 py-2.5 text-xs"
                 >
@@ -2012,7 +2107,7 @@ export default function CustomerProductsDashboard() {
                   onClick={() =>
                     void saveAlbum()
                   }
-                  disabled={saving}
+                  disabled={saving || preparingCover}
                   className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 text-xs font-bold text-white disabled:opacity-50"
                 >
                   {saving ? (
@@ -2021,7 +2116,7 @@ export default function CustomerProductsDashboard() {
                     <Save className="h-4 w-4" />
                   )}
 
-                  Lưu album
+                  {saving ? 'Đang lưu album...' : 'Lưu album'}
                 </button>
               </div>
             </div>

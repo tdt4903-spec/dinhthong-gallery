@@ -6,6 +6,7 @@
  *
  * Cloudflare Worker cần Secret:
  * GOOGLE_DRIVE_API_KEY
+ * SUPABASE_URL, SUPABASE_ANON_KEY (xác thực quyền tải ảnh bìa)
  */
 
 const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3/files/'
@@ -17,8 +18,8 @@ const CACHE_TTL = 60 * 60 * 24 * 7
 function withCors(response) {
   const headers = new Headers(response.headers)
   headers.set('Access-Control-Allow-Origin', '*')
-  headers.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
-  headers.set('Access-Control-Allow-Headers', 'Range')
+  headers.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS')
+  headers.set('Access-Control-Allow-Headers', 'Range, Authorization, Content-Type')
   headers.set(
     'Access-Control-Expose-Headers',
     'Content-Length, Content-Disposition, Content-Range, Accept-Ranges, Retry-After'
@@ -234,6 +235,65 @@ async function listFolder(request, env, url) {
   }), { headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' } })
 }
 
+const MAX_COVER_BYTES = 768 * 1024
+
+async function albumCover(request, env, url) {
+  const noStore = { 'Cache-Control': 'no-store' }
+  if (!env.ALBUM_COVERS) return Response.json({ error: 'Kho ảnh bìa chưa sẵn sàng.' }, { status: 503, headers: noStore })
+  if (url.pathname === '/album-covers' && request.method === 'POST') {
+    const origin = request.headers.get('Origin') || ''
+    const allowedOrigins = ['https://dinhthongphotos.io.vn', 'https://www.dinhthongphotos.io.vn', 'https://dinhthong-gallery.vercel.app', 'http://localhost:3000', 'http://127.0.0.1:3000']
+    if (origin && !allowedOrigins.includes(origin)) return Response.json({ error: 'Không cho phép tải từ trang này.' }, { status: 403, headers: noStore })
+    const authorization = request.headers.get('Authorization') || ''
+    if (!authorization.startsWith('Bearer ')) return Response.json({ error: 'Vui lòng đăng nhập lại.' }, { status: 401, headers: noStore })
+    if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return Response.json({ error: 'Chưa cấu hình xác thực tải ảnh bìa.' }, { status: 503, headers: noStore })
+    const permission = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/is_gallery_admin`, {
+      method: 'POST',
+      headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: authorization, 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    if (!permission.ok || await permission.json() !== true) return Response.json({ error: 'Tài khoản không có quyền tải ảnh bìa.' }, { status: 403, headers: noStore })
+    if (request.headers.get('Content-Type')?.split(';')[0] !== 'image/jpeg') return Response.json({ error: 'Chỉ nhận ảnh bìa JPEG.' }, { status: 415, headers: noStore })
+    if (Number(request.headers.get('Content-Length') || 0) > MAX_COVER_BYTES) return Response.json({ error: 'Ảnh bìa quá lớn.' }, { status: 413, headers: noStore })
+    const reader = request.body?.getReader()
+    if (!reader) return Response.json({ error: 'Chưa chọn ảnh bìa.' }, { status: 400, headers: noStore })
+    const chunks = []
+    let length = 0
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      length += value.byteLength
+      if (length > MAX_COVER_BYTES) {
+        await reader.cancel()
+        return Response.json({ error: 'Ảnh bìa quá lớn.' }, { status: 413, headers: noStore })
+      }
+      chunks.push(value)
+    }
+    const bytes = new Uint8Array(length)
+    let offset = 0
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+    if (length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) return Response.json({ error: 'Ảnh bìa không hợp lệ.' }, { status: 400, headers: noStore })
+    const key = `${crypto.randomUUID()}.jpg`
+    await env.ALBUM_COVERS.put(key, bytes.buffer)
+    const imageUrl = new URL(`/album-covers/${key}`, url.origin)
+    await caches.default.put(new Request(imageUrl), new Response(bytes, {
+      headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' },
+    })).catch(() => {})
+    return Response.json({ url: imageUrl.toString() }, { status: 201, headers: noStore })
+  }
+  if (!['GET', 'HEAD'].includes(request.method)) return new Response('Method Not Allowed', { status: 405, headers: { ...noStore, Allow: 'GET, HEAD, POST, OPTIONS' } })
+  const key = url.pathname.slice('/album-covers/'.length)
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.jpg$/.test(key)) return new Response('Not Found', { status: 404, headers: noStore })
+  const cacheKey = new Request(new URL(url.pathname, url.origin))
+  const cached = await caches.default.match(cacheKey)
+  if (cached) return new Response(request.method === 'HEAD' ? null : cached.body, cached)
+  const value = await env.ALBUM_COVERS.get(key, 'arrayBuffer')
+  if (!value) return new Response('Not Found', { status: 404, headers: noStore })
+  const response = new Response(value, { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' } })
+  await caches.default.put(cacheKey, response.clone()).catch(() => {})
+  return new Response(request.method === 'HEAD' ? null : response.body, response)
+}
+
 async function handleRequest(request, env) {
     const url = new URL(request.url)
 
@@ -243,6 +303,8 @@ async function handleRequest(request, env) {
         headers: { 'Access-Control-Max-Age': '86400' },
       })
     }
+
+    if (url.pathname === '/album-covers' || url.pathname.startsWith('/album-covers/')) return albumCover(request, env, url)
 
     // Chỉ cho phép GET và HEAD; OPTIONS phục vụ kiểm tra CORS.
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -580,7 +642,7 @@ export default {
       return withCors(await handleRequest(request, env))
     } catch {
       return withCors(Response.json(
-        { error: 'Unable to fetch from Google Drive. Please retry.' },
+        { error: new URL(request.url).pathname.startsWith('/album-covers') ? 'Không thể xử lý ảnh bìa trên Cloudflare. Vui lòng thử lại.' : 'Unable to fetch from Google Drive. Please retry.' },
         { status: 502, headers: { 'Cache-Control': 'no-store' } }
       ))
     }

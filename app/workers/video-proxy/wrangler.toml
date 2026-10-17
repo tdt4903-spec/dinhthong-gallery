@@ -10,3 +10,8 @@ run_worker_first = true
 [vars]
 # Do NOT put GOOGLE_DRIVE_API_KEY here.
 # Add it as a Worker secret in Cloudflare.
+# Cover uploads also require SUPABASE_URL and SUPABASE_ANON_KEY secrets.
+
+[[kv_namespaces]]
+binding = "ALBUM_COVERS"
+id = "cd08ede4fd3746fb9acbdfd18520bcf2"
