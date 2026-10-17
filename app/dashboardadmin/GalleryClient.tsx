@@ -83,10 +83,6 @@ const preloadedCache = new Set<string>()
 // Domain Cloudflare Worker thực tế của bạn
 const VIDEO_WORKER_BASE = (process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || 'https://dinhthong-video-proxy.tdt4903.workers.dev').replace(/\/$/, '')
 
-// iPhone/Safari dễ thiếu RAM nếu giữ quá nhiều ảnh gốc cùng lúc. Tách thành
-// từng đợt nhỏ nhưng vẫn lần lượt lưu hết số ảnh người dùng yêu cầu.
-const MOBILE_IMAGE_SHARE_BATCH_SIZE = 10
-
 const extractDriveId = (url: string) => {
   if (!url) return ''
   const clean = url.trim()
@@ -328,7 +324,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const mobileAlbumShareRef = useRef<{ dispose: () => Promise<void> } | null>(null)
   const mobileAlbumSharingRef = useRef(false)
   const downloadUiMountedRef = useRef(true)
-  const [pendingMobileAlbumShare, setPendingMobileAlbumShare] = useState<{ files: File[]; label: string; imageCount: number; videoCount: number } | null>(null)
+  const [pendingMobileAlbumShare, setPendingMobileAlbumShare] = useState<{ files: File[]; label: string; imageCount: number; videoCount: number; entryIds: string[] } | null>(null)
   const [isSharingMobileAlbum, setIsSharingMobileAlbum] = useState(false)
   const partResolverRef = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null)
   const [archiveProgress, setArchiveProgress] = useState<{
@@ -404,14 +400,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [downloadSelectedIds, setDownloadSelectedIds] = useState<Set<string>>(new Set())
   const [isPreparingMobileImages, setIsPreparingMobileImages] = useState(false)
   const [mobileDownloadProgress, setMobileDownloadProgress] = useState('')
-  const [pendingMobileBatchShare, setPendingMobileBatchShare] = useState<{
-    files: File[]
-    remainingItems: MediaItem[]
-    label: string
-    batchNumber: number
-    totalBatches: number
-    totalImages: number
-  } | null>(null)
+
 
   const [isFaceFilterOpen, setIsFaceFilterOpen] = useState(false)
   const [faceToolsRequested, setFaceToolsRequested] = useState(false)
@@ -1471,7 +1460,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setInspectFaceImageItem(null)
     setSelectedItemIds(new Set())
     setDownloadSelectedIds(new Set())
-    setPendingMobileBatchShare(null)
     setMobileDownloadProgress('')
     setIsPreparingMobileImages(false)
     try {
@@ -1598,7 +1586,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const startArchiveDownload = async (
     title: string, key: string, getEntries: (signal: AbortSignal) => Promise<DownloadEntry[]>
   ) => {
-    if (archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare || pendingMobileAlbumShare || mobileAlbumSharingRef.current) return
+    if (isMobileDevice()) { await startMobileMediaDownload(title, key, getEntries); return }
+    if (archiveControllerRef.current || isPreparingMobileImages || pendingMobileAlbumShare || mobileAlbumSharingRef.current) return
     const controller = new AbortController()
     archiveControllerRef.current = controller
     const previousArchive = preparedArchiveRef.current
@@ -1708,6 +1697,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     try {
       canShareAlbum = typeof navigator.share === 'function' && typeof navigator.canShare === 'function' && navigator.canShare({ files: album.files })
     } catch {}
+    if (!album.files.length || album.files.length !== album.entryIds.length) {
+      setArchiveProgress(previous => previous ? { ...previous, status: 'error', error: 'Danh sách tệp chưa đủ để lưu. Hãy đóng cửa sổ và chuẩn bị lại, các dấu tích của bạn vẫn được giữ.' } : null)
+      return
+    }
     if (!canShareAlbum) {
       setArchiveProgress(previous => previous ? { ...previous, status: 'error', error: 'Trình duyệt này không hỗ trợ gửi toàn bộ album vào Ảnh trong một lần. Hãy mở bằng Safari trên iPhone/iPad hoặc Chrome mới nhất trên Android.' } : null)
       return
@@ -1722,7 +1715,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       if (prepared) window.setTimeout(() => { void prepared.dispose().catch(() => {}) }, 24 * 60 * 60 * 1000)
       if (!downloadUiMountedRef.current) return
       setPendingMobileAlbumShare(null)
-      setDownloadSelectedIds(new Set())
+      setDownloadSelectedIds(current => new Set([...current].filter(id => !album.entryIds.includes(id))))
       setArchiveProgress(previous => previous ? { ...previous, status: 'shared_album' } : null)
     } catch (error) {
       if (!downloadUiMountedRef.current) {
@@ -1836,124 +1829,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setDownloadSelectedIds(new Set(downloadableImages.map(item => item.id)))
   }
 
-  const prepareMobileImageBatch = async (
-    sourceItems: MediaItem[],
-    label: string,
-    batchNumber: number,
-    totalBatches: number,
-    totalImages: number
-  ) => {
-    const currentBatch = sourceItems.slice(0, MOBILE_IMAGE_SHARE_BATCH_SIZE)
-    const remainingItems = sourceItems.slice(MOBILE_IMAGE_SHARE_BATCH_SIZE)
-
-    if (currentBatch.length === 0) return
-
-    setIsPreparingMobileImages(true)
-    setMobileDownloadProgress(`Đang chuẩn bị ${Math.min((batchNumber - 1) * MOBILE_IMAGE_SHARE_BATCH_SIZE + 1, totalImages)}-${Math.min(batchNumber * MOBILE_IMAGE_SHARE_BATCH_SIZE, totalImages)} / ${totalImages}`)
-
-    try {
-      const preparedFiles: Array<File | null> = new Array(currentBatch.length).fill(null)
-      let completed = 0
-      const CONCURRENCY_LIMIT = 3
-
-      const prepareOne = async (item: MediaItem, index: number) => {
-        const exactFileName = item.name.includes('.') ? item.name : `${item.name}.jpg`
-        let blob = await fetchCloudflareMediaBlob({ id: item.id, name: exactFileName, type: 'image' })
-        if (activeSetting.enable_watermark) {
-          blob = await applyWatermarkToImageBlob(blob)
-        }
-
-        const mimeType = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg'
-        preparedFiles[index] = new File([blob], exactFileName, { type: mimeType })
-
-        completed++
-        const preparedOverall = Math.min((batchNumber - 1) * MOBILE_IMAGE_SHARE_BATCH_SIZE + completed, totalImages)
-        setMobileDownloadProgress(`Đã chuẩn bị ${preparedOverall}/${totalImages} ảnh`)
-      }
-
-      for (let i = 0; i < currentBatch.length; i += CONCURRENCY_LIMIT) {
-        const chunk = currentBatch.slice(i, i + CONCURRENCY_LIMIT)
-        await Promise.all(chunk.map((item, offset) => prepareOne(item, i + offset)))
-      }
-
-      const files = preparedFiles.filter((file): file is File => Boolean(file))
-      if (files.length === 0) throw new Error('Không chuẩn bị được ảnh nào để lưu.')
-
-      const preparedBatch = {
-        files,
-        remainingItems,
-        label,
-        batchNumber,
-        totalBatches,
-        totalImages,
-      }
-
-      setMobileDownloadProgress('')
-
-      // Thử mở ngay bảng lưu ảnh ở lần bấm đầu tiên. Nếu Safari đã làm mất
-      // user activation trong lúc tải ảnh gốc từ Worker, ta giữ batch đã chuẩn bị
-      // và hiện nút “Lưu ... ảnh vào album” để người dùng bấm một lần nữa.
-      const canNativeShare =
-        typeof navigator.share === 'function' &&
-        typeof navigator.canShare === 'function' &&
-        navigator.canShare({ files })
-
-      if (batchNumber === 1 && canNativeShare) {
-        try {
-          await navigator.share({ files, title: label })
-
-          if (remainingItems.length > 0) {
-            await prepareMobileImageBatch(
-              remainingItems,
-              label,
-              batchNumber + 1,
-              totalBatches,
-              totalImages
-            )
-          } else {
-            setPendingMobileBatchShare(null)
-            setDownloadSelectedIds(new Set())
-          }
-          return
-        } catch (shareErr: unknown) {
-          // NotAllowedError thường xảy ra khi iOS hết transient user activation
-          // sau quá trình fetch. AbortError cũng giữ batch để người dùng có thể thử lại.
-          console.warn('Cần thao tác bấm mới để mở bảng lưu ảnh:', shareErr)
-        }
-      }
-
-      setPendingMobileBatchShare(preparedBatch)
-    } catch (err: unknown) {
-      console.error('Lỗi chuẩn bị ảnh hàng loạt:', err)
-      const message = err instanceof Error ? err.message : String(err)
-      void showAlert('Không thể chuẩn bị ảnh để tải: ' + message)
-      setMobileDownloadProgress('')
-    } finally {
-      setIsPreparingMobileImages(false)
-    }
-  }
-
+  // Selected images and complete albums use the same one-sheet preparation.
   const startMobileImageDownload = async (sourceItems: MediaItem[], label: string) => {
-    if (archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare || pendingMobileAlbumShare || mobileAlbumSharingRef.current) return
-
-    const usedNames = new Set<string>()
-    const imagesOnly = sourceItems.filter(item => item.type === 'image').map(item => {
-      const original = item.name.includes('.') ? item.name : `${item.name}.jpg`
-      const dot = original.lastIndexOf('.')
-      const stem = dot > 0 ? original.slice(0, dot) : original
-      const extension = dot > 0 ? original.slice(dot) : ''
-      let name = original, suffix = 2
-      while (usedNames.has(name.toLowerCase())) name = `${stem} (${suffix++})${extension}`
-      usedNames.add(name.toLowerCase())
-      return { ...item, name }
-    })
-    if (imagesOnly.length === 0) {
-      void showAlert('Không có ảnh nào để tải.')
-      return
-    }
-
-    const totalBatches = Math.ceil(imagesOnly.length / MOBILE_IMAGE_SHARE_BATCH_SIZE)
-    await prepareMobileImageBatch(imagesOnly, label, 1, totalBatches, imagesOnly.length)
+    const seen = new Set<string>()
+    const entries = sourceItems.filter(item => {
+      if (item.type !== 'image' || seen.has(item.id)) return false
+      seen.add(item.id)
+      return true
+    }).map(item => toDownloadEntry(item))
+    if (!entries.length) { void showAlert('Không có ảnh nào để tải.'); return }
+    await startMobileMediaDownload(label, 'download_selected_images', async () => entries)
   }
 
   const handleDownloadSelectedImagesToPhone = async () => {
@@ -1966,52 +1851,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const handleDownloadAllImagesToPhone = async () => {
     await handleDownloadAlbumZip()
-  }
-
-  const handleConfirmMobileBatchSave = async () => {
-    const pending = pendingMobileBatchShare
-    if (!pending) return
-
-    try {
-      const canNativeShare =
-        typeof navigator.share === 'function' &&
-        typeof navigator.canShare === 'function' &&
-        navigator.canShare({ files: pending.files })
-
-      if (!canNativeShare) {
-        void showAlert('Trình duyệt này chưa hỗ trợ lưu nhiều ảnh trực tiếp vào album. Hãy mở link bằng Safari trên iPhone/iPad hoặc Chrome mới nhất trên Android.')
-        return
-      }
-
-      // Mobile tuyệt đối không đóng ZIP. Web Share API chuyển các file ảnh gốc
-      // sang bảng chia sẻ hệ thống; trên iOS người dùng chọn “Lưu X hình ảnh”.
-      await navigator.share({
-        files: pending.files,
-        title: pending.label,
-      })
-
-      if (pending.remainingItems.length > 0) {
-        const nextBatch = pending.batchNumber + 1
-        const remaining = pending.remainingItems
-        setPendingMobileBatchShare(null)
-        await prepareMobileImageBatch(
-          remaining,
-          pending.label,
-          nextBatch,
-          pending.totalBatches,
-          pending.totalImages
-        )
-      } else {
-        setPendingMobileBatchShare(null)
-        setMobileDownloadProgress('')
-        setDownloadSelectedIds(new Set())
-      }
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      console.error('Lỗi lưu nhiều ảnh:', err)
-      const message = err instanceof Error ? err.message : String(err)
-      void showAlert('Không thể mở trình lưu ảnh: ' + message)
-    }
   }
 
   const handleDownloadMedia = async (item: MediaItem, e?: React.MouseEvent) => {
@@ -2062,54 +1901,70 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  // Album archives read original image/video bytes only from Cloudflare.
+  const startMobileMediaDownload = async (
+    title: string, key: string, getEntries: (signal: AbortSignal) => Promise<DownloadEntry[]>
+  ) => {
+    if (archiveControllerRef.current || isPreparingMobileImages || pendingMobileAlbumShare || mobileAlbumSharingRef.current) return
+    if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') {
+      void showAlert('Hãy mở album bằng Safari trên iPhone/iPad hoặc Chrome trên Android để dùng bảng lưu ảnh của điện thoại.')
+      return
+    }
+    const controller = new AbortController()
+    archiveControllerRef.current = controller
+    setIsFaceFilterOpen(false)
+    setIsPreparingMobileImages(true)
+    setZippingFolderId(key)
+    setArchiveProgress({ title, completed: 0, total: 0, part: 1, status: 'preparing', kind: 'photos' })
+    try {
+      const entries = await getEntries(controller.signal)
+      controller.signal.throwIfAborted()
+      if (!entries.length) throw new Error('Album này không có ảnh hoặc video nào được phép tải.')
+      let lastProgress = 0
+      const prepared = await prepareCloudflareAlbumShare({
+        entries, title, signal: controller.signal,
+        transformImage: activeSetting.enable_watermark ? applyWatermarkToImageBlob : undefined,
+        onProgress: progress => {
+          if (archiveControllerRef.current !== controller || controller.signal.aborted) return
+          const now = performance.now()
+          if (progress.completed < progress.total && now - lastProgress < 200) return
+          lastProgress = now
+          setArchiveProgress({ title, ...progress, kind: 'photos' })
+          setMobileDownloadProgress(`Đã chuẩn bị ${progress.completed}/${progress.total} tệp`)
+        },
+      })
+      if (controller.signal.aborted || !downloadUiMountedRef.current) {
+        await prepared.dispose()
+        throw new DOMException('Đã hủy tải', 'AbortError')
+      }
+      if (prepared.files.length !== entries.length) {
+        await prepared.dispose()
+        throw new Error('Chưa chuẩn bị đủ số tệp đã chọn. Vui lòng thử lại.')
+      }
+      mobileAlbumShareRef.current = prepared
+      setPendingMobileAlbumShare({ files: prepared.files, label: title, imageCount: entries.filter(item => item.type === 'image').length, videoCount: entries.filter(item => item.type === 'video').length, entryIds: entries.map(item => item.id) })
+      setArchiveProgress({ title, completed: entries.length, total: entries.length, part: 1, status: 'ready_album', kind: 'photos' })
+    } catch (error) {
+      if (!downloadUiMountedRef.current) return
+      if (controller.signal.aborted) setArchiveProgress(null)
+      else setArchiveProgress(previous => previous ? { ...previous, status: 'error', error: error instanceof Error ? error.message : String(error) } : null)
+    } finally {
+      if (archiveControllerRef.current === controller) archiveControllerRef.current = null
+      if (downloadUiMountedRef.current) {
+        setIsPreparingMobileImages(false)
+        setMobileDownloadProgress('')
+        setZippingFolderId(null)
+        setZipProgress('')
+      }
+    }
+  }
+
+  // Desktop creates ZIPs; mobile prepares every original for one native sheet.
   const handleDownloadAlbumZip = async (targetInfo?: { id?: string; title: string; driveUrl: string }, e?: React.MouseEvent) => {
     e?.preventDefault()
     e?.stopPropagation()
     const currentFolder = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1] : null
     const target = targetInfo || currentFolder || selectedAlbum
-    if (!target || archiveControllerRef.current || isPreparingMobileImages || pendingMobileBatchShare || pendingMobileAlbumShare || mobileAlbumSharingRef.current) return
-    if (isSharedGuest && isLocked) return
-
-    if (isMobileDevice()) {
-      if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') {
-        void showAlert('Hãy mở album bằng Safari trên iPhone/iPad hoặc Chrome mới nhất trên Android để lưu toàn bộ album vào Ảnh.')
-        return
-      }
-      const controller = new AbortController()
-      archiveControllerRef.current = controller
-      setZippingFolderId(target.id || 'album')
-      setArchiveProgress({ title: target.title, completed: 0, total: 0, part: 1, status: 'preparing', kind: 'photos' })
-      try {
-        const entries = await collectAlbumDownloadEntries([target], controller.signal)
-        controller.signal.throwIfAborted()
-        if (entries.length === 0) throw new Error('Album này không có ảnh hoặc video nào được phép tải.')
-        let lastProgress = 0
-        const prepared = await prepareCloudflareAlbumShare({
-          entries, title: target.title, signal: controller.signal,
-          transformImage: activeSetting.enable_watermark ? applyWatermarkToImageBlob : undefined,
-          onProgress: progress => {
-            if (archiveControllerRef.current !== controller || controller.signal.aborted) return
-            const now = performance.now()
-            if (progress.completed < progress.total && now - lastProgress < 200) return
-            lastProgress = now
-            setArchiveProgress({ title: target.title, ...progress, kind: 'photos' })
-          },
-        })
-        if (controller.signal.aborted) { await prepared.dispose(); controller.signal.throwIfAborted() }
-        mobileAlbumShareRef.current = prepared
-        setPendingMobileAlbumShare({ files: prepared.files, label: target.title, imageCount: entries.filter(item => item.type === 'image').length, videoCount: entries.filter(item => item.type === 'video').length })
-        setArchiveProgress({ title: target.title, completed: entries.length, total: entries.length, part: 1, status: 'ready_album', kind: 'photos' })
-      } catch (error) {
-        if (controller.signal.aborted) setArchiveProgress(null)
-        else setArchiveProgress(previous => previous ? { ...previous, status: 'error', error: error instanceof Error ? error.message : String(error) } : null)
-      } finally {
-        if (archiveControllerRef.current === controller) archiveControllerRef.current = null
-        setZippingFolderId(null)
-        setZipProgress('')
-      }
-      return
-    }
+    if (!target || (isSharedGuest && isLocked)) return
     await startArchiveDownload(target.title, target.id || 'album', signal => collectAlbumDownloadEntries([target], signal))
   }
 
@@ -4440,29 +4295,29 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             {/* MAIN ALBUM CONTROLS */}
             <section className={`mt-3 rounded-[20px] border p-2.5 sm:p-3 ${isDarkMode ? 'border-white/10 bg-[#0a1510]/88' : 'border-gray-200 bg-white/90 shadow-sm'}`}>
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
-                <div className="flex items-center gap-2 overflow-x-auto scrollbar-none">
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:overflow-x-auto sm:scrollbar-none">
                   <button
                     onClick={() => { setStarFilter('all'); setFaceMatchedIds(null); setClearFaceFilterSignal(prev => prev + 1) }}
-                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'all' && faceMatchedIds === null ? 'border-emerald-500 bg-emerald-600 text-white shadow' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                    className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'all' && faceMatchedIds === null ? 'border-emerald-500 bg-emerald-600 text-white shadow' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
                     <ImageIcon className="h-3.5 w-3.5" /> Tất cả ảnh ({mediaFiles.length})
                   </button>
                   <button
                     onClick={() => setStarFilter('selected')}
-                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'selected' ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                    className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'selected' ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
                     <Star className="h-3.5 w-3.5 fill-current" /> Ảnh đã chọn ({displaySelectedImagesList.length})
                   </button>
                   <button
                     onClick={() => setStarFilter(5)}
-                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 5 ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                    className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 5 ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
                     <Star className="h-3.5 w-3.5 fill-current" /> Ảnh 5 sao ({mediaFiles.filter(img => (displayRatings[img.id] || 0) === 5).length})
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsFaceFilterOpen(prev => !prev)}
-                    className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[10px] sm:text-[11px] font-bold transition cursor-pointer ${
+                    className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition cursor-pointer ${
                       isFaceFilterOpen || faceMatchedIds !== null
                         ? 'border-emerald-500 bg-emerald-600 text-white shadow'
                         : isDarkMode
@@ -4513,7 +4368,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
               {/* Bộ lọc sao chi tiết */}
               {mediaFiles.length > 0 && (
-                <div className="mt-2.5 flex items-center gap-1.5 overflow-x-auto border-t pt-2.5 scrollbar-none border-gray-200/70 dark:border-white/8">
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t pt-2.5 border-gray-200/70 dark:border-white/8">
                   <span className={`shrink-0 px-1 text-[10px] font-semibold ${isDarkMode ? 'text-white/35' : 'text-gray-400'}`}>Lọc:</span>
                   <button onClick={() => setStarFilter('all')} className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === 'all' ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>Tất cả</button>
                   {[0,1,2,3,4,5].map((star) => (
@@ -4564,12 +4419,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
             {/* ADMIN ALBUM TOOLS — compact, không chiếm không gian của khách */}
             {!isSharedGuest && (
-              <section className="mt-3 flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-                <button onClick={handleDeleteGuestSelectionsInCurrentAlbum} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-red-500/20 bg-red-500/10 px-3 text-[10px] font-semibold text-red-500"><Trash2 className="h-3.5 w-3.5" /> Xóa ảnh khách chọn</button>
-                <button onClick={handleOpenCurrentFolderSetting} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-500"><Settings className="h-3.5 w-3.5" /> Cài đặt Album</button>
-                <button onClick={() => { fetchComments(); setIsCommentModalOpen(true) }} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 text-[10px] font-semibold text-amber-500"><MessageSquare className="h-3.5 w-3.5" /> Bình luận <span className="rounded-full bg-amber-500/15 px-1.5">{commentedImagesList.length}</span></button>
-                <button onClick={handleOpenVisibilityManager} className={`shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[10px] font-semibold ${isDarkMode ? 'border-white/10 bg-white/5 text-white/60' : 'border-gray-200 bg-gray-50 text-gray-600'}`}><Eye className="h-3.5 w-3.5" /> Ẩn / Hiện mục</button>
-                <button onClick={() => setIsFaceFilterOpen(prev => !prev)} className="shrink-0 inline-flex h-9 items-center gap-1.5 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"><FaceScanIcon className="h-3.5 w-3.5" /> Nhận diện khuôn mặt</button>
+              <section className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                <button onClick={handleDeleteGuestSelectionsInCurrentAlbum} className="min-w-0 justify-center sm:justify-start shrink-0 inline-flex min-h-11 sm:min-h-9 items-center gap-1.5 rounded-xl border border-red-500/20 bg-red-500/10 px-3 text-[10px] font-semibold text-red-500"><Trash2 className="h-3.5 w-3.5" /> Xóa ảnh khách chọn</button>
+                <button onClick={handleOpenCurrentFolderSetting} className="min-w-0 justify-center sm:justify-start shrink-0 inline-flex min-h-11 sm:min-h-9 items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-500"><Settings className="h-3.5 w-3.5" /> Cài đặt Album</button>
+                <button onClick={() => { fetchComments(); setIsCommentModalOpen(true) }} className="min-w-0 justify-center sm:justify-start shrink-0 inline-flex min-h-11 sm:min-h-9 items-center gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 text-[10px] font-semibold text-amber-500"><MessageSquare className="h-3.5 w-3.5" /> Bình luận <span className="rounded-full bg-amber-500/15 px-1.5">{commentedImagesList.length}</span></button>
+                <button onClick={handleOpenVisibilityManager} className={`min-w-0 justify-center sm:justify-start shrink-0 inline-flex min-h-11 sm:min-h-9 items-center gap-1.5 rounded-xl border px-3 text-[10px] font-semibold ${isDarkMode ? 'border-white/10 bg-white/5 text-white/60' : 'border-gray-200 bg-gray-50 text-gray-600'}`}><Eye className="h-3.5 w-3.5" /> Ẩn / Hiện mục</button>
+                <button onClick={() => setIsFaceFilterOpen(prev => !prev)} className="col-span-2 sm:col-span-1 min-w-0 justify-center sm:justify-start shrink-0 inline-flex min-h-11 sm:min-h-9 items-center gap-1.5 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"><FaceScanIcon className="h-3.5 w-3.5" /> Nhận diện khuôn mặt</button>
               </section>
             )}
 
@@ -5233,7 +5088,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             <button
               type="button"
               onClick={handleDownloadAllImagesToPhone}
-              disabled={Boolean(zippingFolderId) || isPreparingMobileImages || Boolean(pendingMobileBatchShare) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum}
+              disabled={Boolean(zippingFolderId) || isPreparingMobileImages || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum}
               className="flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 text-[11px] font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-45"
             >
               {isPreparingMobileImages || zippingFolderId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
@@ -5242,7 +5097,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             <button
               type="button"
               onClick={handleDownloadSelectedImagesToPhone}
-              disabled={selectedDownloadImages.length === 0 || Boolean(zippingFolderId) || isPreparingMobileImages || Boolean(pendingMobileBatchShare) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum}
+              disabled={selectedDownloadImages.length === 0 || Boolean(zippingFolderId) || isPreparingMobileImages || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum}
               className={`flex h-11 items-center justify-center gap-2 rounded-xl border text-[11px] font-bold disabled:opacity-40 ${isDarkMode ? 'border-emerald-400/20 bg-emerald-500/10 text-emerald-300' : 'border-emerald-600/20 bg-emerald-50 text-emerald-700'}`}
             >
               <ClipboardList className="h-4 w-4" />
@@ -5373,40 +5228,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>
       )}
 
-      {pendingMobileBatchShare && (
-        <div className="fixed inset-0 z-[75] bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
-          <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
-            <div className="w-12 h-1 rounded-full bg-emerald-600 mx-auto mb-5" />
-            <h3 className="font-serif font-bold text-lg">
-              {pendingMobileBatchShare.files.length} ảnh đã sẵn sàng
-            </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              Đợt {pendingMobileBatchShare.batchNumber}/{pendingMobileBatchShare.totalBatches} · Tổng {pendingMobileBatchShare.totalImages} ảnh
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 mb-5">
-              Nhấn bên dưới để mở bảng hệ thống, sau đó chọn <strong>Lưu hình ảnh</strong>. Nếu có nhiều ảnh, web sẽ lần lượt chuẩn bị các đợt tiếp theo để tránh đầy bộ nhớ điện thoại.
-            </p>
-            <button
-              type="button"
-              onClick={handleConfirmMobileBatchSave}
-              className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center justify-center gap-2"
-            >
-              <Download className="w-4 h-4" />
-              Lưu {pendingMobileBatchShare.files.length} ảnh vào album
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setPendingMobileBatchShare(null)
-                setMobileDownloadProgress('')
-              }}
-              className="w-full mt-2 py-2.5 rounded-2xl text-sm text-gray-500 dark:text-gray-400"
-            >
-              Hủy tải
-            </button>
-          </div>
-        </div>
-      )}
+
 
       {showGuestNameModal && isSharedGuest && (
         <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
@@ -6237,7 +6059,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-lg font-bold">{archiveProgress.kind === 'photos'
-                  ? archiveProgress.status === 'error' ? 'Chưa thể lưu toàn bộ album' : archiveProgress.status === 'ready_album' ? 'Toàn bộ album đã sẵn sàng' : archiveProgress.status === 'shared_album' ? 'Đã gửi album tới bảng lưu' : 'Đang chuẩn bị toàn bộ album'
+                  ? archiveProgress.status === 'error' ? 'Chưa thể lưu ảnh/video' : archiveProgress.status === 'ready_album' ? 'Toàn bộ album đã sẵn sàng' : archiveProgress.status === 'shared_album' ? 'Đã gửi album tới bảng lưu' : 'Đang chuẩn bị ảnh/video'
                   : archiveProgress.status === 'error' ? 'Không thể chuẩn bị ZIP' : archiveProgress.status === 'ready' ? 'ZIP đã sẵn sàng' : archiveProgress.status === 'download_started' || archiveProgress.status === 'complete' ? 'Đã bắt đầu tải ZIP' : 'Đang chuẩn bị ZIP'}</h2>
                 <p className="mt-1 break-words text-sm text-emerald-950/65">{archiveProgress.title}</p>
               </div>
@@ -6249,7 +6071,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               <div className="mt-5" aria-live="polite">
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   {!['ready', 'ready_album', 'shared_album', 'download_started', 'complete', 'saving'].includes(archiveProgress.status) && <Loader2 className="h-4 w-4 animate-spin" />}
-                  <span>{archiveProgress.status === 'archiving' ? 'Đang đóng gói ZIP: ' : archiveProgress.status === 'fetching' ? 'Đang lấy ảnh: ' : ''}{archiveProgress.total ? `${archiveProgress.completed}/${archiveProgress.total} tệp` : (zipProgress || 'Đang chuẩn bị...')}</span>
+                  <span>{archiveProgress.status === 'materializing' ? 'Đang chuẩn bị bảng lưu: ' : archiveProgress.status === 'archiving' ? 'Đang đóng gói ZIP: ' : archiveProgress.status === 'fetching' ? 'Đang lấy ảnh: ' : ''}{archiveProgress.total ? `${archiveProgress.completed}/${archiveProgress.total} tệp` : (zipProgress || 'Đang chuẩn bị...')}</span>
                 </div>
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100"><div className="h-full bg-emerald-600 transition-all" style={{ width: `${archiveProgress.total ? Math.min(100, archiveProgress.completed / archiveProgress.total * 100) : 0}%` }} /></div>
                 {archiveProgress.fileName && <p className="mt-2 break-all text-xs text-gray-500">{archiveProgress.fileName}</p>}

@@ -11,7 +11,7 @@ export type ArchiveProgress = {
   total: number
   fileName: string
   part: number
-  status: 'fetching' | 'archiving' | 'saving' | 'complete'
+  status: 'fetching' | 'materializing' | 'archiving' | 'saving' | 'complete'
 }
 
 export type ArchivePartContext = {
@@ -423,7 +423,8 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
   signal.addEventListener('abort', onAbort, { once: true })
   if (signal.aborted) onAbort()
   const sizes = new Array<number>(entries.length).fill(0)
-  const prepared = new Array<{ blob: Blob; mime: string }>(entries.length)
+  const prepared = new Array<{ blob: Blob; mime: string; diskSnapshot: boolean }>(entries.length)
+  const preferBrowserBlob = new Set<number>()
   let availableBytes: number | undefined
   let completed = 0
   let fileName = entries[0].name
@@ -495,33 +496,54 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
           sizes[index] = blob.size
           checkSize()
         }
-        if (directory) {
+        const transformedSize = blob?.size
+        const diskSnapshot = Boolean(directory && !preferBrowserBlob.has(index))
+        if (directory && diskSnapshot) {
           const handle = await directory.getFileHandle(`source-${index}`, { create: true })
           writable = await handle.createWritable()
           await (blob ? blob.stream() : body).pipeTo(bufferedPrivateFileWriter(writable), { signal: localSignal })
           writable = undefined
           blob = await handle.getFile()
         } else if (!blob) {
-          blob = await responseToBlob(new Response(body, { headers: response.headers }), entry, localSignal)
+          // Native Blob backing is shareable even on phones with broken OPFS
+          // snapshots; keep the same byte-counting stream and abort handling.
+          blob = await new Response(body, { headers: response.headers }).blob()
         }
-        if (!blob?.size || blob.size !== sizes[index]) throw new Error(`Tệp “${entry.name}” chưa tải đầy đủ.`)
-        prepared[index] = { blob, mime }
+        // Integrity uses the consumed body, not the quota reservation array.
+        // A transformed image has a new byte count independent of its original.
+        const storedSize = transformedSize ?? received
+        if (!blob?.size || !storedSize || blob.size !== storedSize) {
+          throw new Error(`Tệp “${entry.name}” chưa tải đầy đủ (${blob?.size || 0}/${storedSize || 0} byte).`)
+        }
+        sizes[index] = blob.size
+        checkSize()
+        prepared[index] = { blob, mime, diskSnapshot }
         completed++
         fileName = entry.name
         progress('fetching')
       } catch (error) {
         if (response?.body && !response.body.locked) await response.body.cancel(error).catch(() => {})
         if (writable) await writable.abort(error).catch(() => {})
+        if (error instanceof Error && (['NotReadableError', 'InvalidStateError', 'NotSupportedError'].includes(error.name) || error.message.includes('chưa tải đầy đủ'))) preferBrowserBlob.add(index)
         throw error
       }
     }
 
-    const concurrency = transformImage ? 1 : directory ? 4 : 2
+    const concurrency = transformImage ? 1 : directory ? 3 : 2
     const workers = Array.from({ length: Math.min(concurrency, entries.length) }, async () => {
       try {
         while (nextIndex < entries.length) {
           throwIfAborted(localSignal)
-          await prepareEntry(nextIndex++)
+          const index = nextIndex++
+          for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+            try { await prepareEntry(index); break } catch (error) {
+              throwIfAborted(localSignal)
+              if (error instanceof Error && ['QuotaExceededError', 'AlbumShareTooLargeError', 'AbortError'].includes(error.name)) throw error
+              if (attempt === MAX_ATTEMPTS - 1) throw error
+              sizes[index] = 0
+              await waitBeforeRetry(500 * 2 ** attempt, localSignal)
+            }
+          }
         }
       } catch (error) {
         if (failure === undefined) failure = error
@@ -536,8 +558,31 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
     // including changed extensions when an image watermark produced JPEG bytes.
     const names = uniqueArchivePaths(entries.map((entry, index) => ({ ...entry, archivePath: undefined, name: albumShareName(entry, prepared[index].mime) })))
     for (let index = 0; index < entries.length; index++) {
-      const { blob, mime } = prepared[index]
-      files.push(new File([blob], names[index], { type: mime, lastModified: blob instanceof File ? blob.lastModified : Date.now() }))
+      let { blob } = prepared[index]
+      const { mime } = prepared[index]
+      throwIfAborted(localSignal)
+      // iOS cannot reliably pass OPFS File snapshots to its native share sheet.
+      // Read into an independent browser Blob BEFORE the user's save gesture.
+      // Response.blob() lets the browser manage the backing store instead of
+      // retaining JavaScript ArrayBuffers for an entire large album.
+      if (prepared[index].diskSnapshot) {
+        fileName = entries[index].name
+        onProgress?.({ completed: index, total: entries.length, fileName, part: 1, status: 'materializing' })
+        try {
+          blob = await new Response(blob.stream()).blob()
+        } catch {
+          throwIfAborted(localSignal)
+          // Recover a stale/private-disk snapshot from the same Cloudflare
+          // original; never substitute a thumbnail or drop this selected file.
+          blob = await fetchCloudflareMediaBlob(entries[index], { signal: localSignal })
+          if (transformImage && entries[index].type === 'image') blob = await transformImage(blob)
+        }
+        throwIfAborted(localSignal)
+      }
+      if (!blob.size || blob.size !== sizes[index]) throw new Error(`Ảnh “${entries[index].name}” chưa sẵn sàng để lưu. Vui lòng thử lại.`)
+      files.push(new File([blob], names[index], { type: mime, lastModified: Date.now() }))
+      // Release each OPFS snapshot as its independent share file becomes ready.
+      delete prepared[index]
     }
     prepared.length = 0
     progress('complete')

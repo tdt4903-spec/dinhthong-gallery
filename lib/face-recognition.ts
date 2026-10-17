@@ -468,7 +468,28 @@ async function computeDescriptorBatch(faceapi: any, inputs: HTMLCanvasElement[])
   })
 }
 
+// Share one GPU lane between album scans and uploaded/reference images. Running
+// these concurrently creates extra tensors and stalls low-memory mobile GPUs.
+let faceInferenceQueue: Promise<void> = Promise.resolve()
+
 export async function detectFacesFromImageElement(
+  img: HTMLImageElement,
+  imageId: string,
+  imageName: string,
+  maxDimension = FACE_IMAGE_SIZE,
+  shouldCancel?: () => boolean
+): Promise<DetectedFaceRecord[]> {
+  const previous = faceInferenceQueue
+  let release!: () => void
+  faceInferenceQueue = new Promise<void>(resolve => { release = resolve })
+  await previous
+  try {
+    if (shouldCancel?.()) return []
+    return await detectFacesWithGpu(img, imageId, imageName, maxDimension, shouldCancel)
+  } finally { release() }
+}
+
+async function detectFacesWithGpu(
   img: HTMLImageElement,
   imageId: string,
   imageName: string,
@@ -532,7 +553,14 @@ export async function detectFacesFromImageElement(
     }
 
     await detectRegion(workCanvas)
-    if (!shouldCancel?.()) {
+    const primaryFaces = uniqueFaceProposals(proposals)
+    // A clear close portrait already supplies a complete detection. Mirroring
+    // descriptors below still handles pose variation without a second full SSD
+    // pass. Reserve extra detector passes for small, uncertain or missing faces.
+    const needsMirroredDetection = primaryFaces.length === 0 || primaryFaces.some(face =>
+      face.score < 0.8 || Math.min(face.box.width * width, face.box.height * height) < 96
+    )
+    if (!shouldCancel?.() && needsMirroredDetection) {
       const mirroredImage = document.createElement('canvas')
       mirroredImage.width = width
       mirroredImage.height = height
@@ -551,7 +579,10 @@ export async function detectFacesFromImageElement(
     }
     // SSD rescales the entire image internally. Overlapping crops preserve
     // more pixels around distant faces without enlarging a low-resolution image.
-    const needsDetailScan = Math.max(width, height) > 1000
+    const primaryFaceSize = primaryFaces.length ? Math.min(...primaryFaces.map(face => Math.min(face.box.width, face.box.height))) : 0
+    const needsDetailScan = Math.max(width, height) > 1000 && (
+      primaryFaces.length === 0 || primaryFaces.length >= 4 || primaryFaceSize < 0.12
+    )
     const scanTiles = async (tileSize: number) => {
       const tileWidth = Math.min(tileSize, width)
       const tileHeight = Math.min(tileSize, height)
@@ -846,7 +877,7 @@ export async function scanAlbumFaces(options: {
               ? `Đã quét ${completed}/${total} ảnh${failedCount ? `, ${failedCount} ảnh chưa quét được` : ''}`
               : `Đang nhận diện khuôn mặt: ${completed}/${total} ảnh...`,
         },
-        [...allFaces]
+        allFaces
       )
     }
   }
@@ -1036,25 +1067,31 @@ function consolidateFaceViews(clusters: FaceCluster[]): FaceCluster[] {
   for (let i = 0; i < result.length; i++) {
     const root = result[i]
     for (let j = i + 1; j < result.length; j++) {
-      if ((root.referenceFaceIds?.length || 1) >= 3) break
       const other = result[j]
       if (root.imageIds.some(id => other.imageIds.includes(id))) continue
       const anchorDistance = computeEuclideanDistance(root.faces[0].descriptor, other.faces[0].descriptor)
-      if (anchorDistance > 0.54) continue
+      if (anchorDistance > 0.50) continue
       if (other.faces.some(face => computeEuclideanDistance(face.descriptor, root.faces[0].descriptor) > 0.56)) continue
       const left = root.faces.slice(0, 6), right = other.faces.slice(0, 6)
-      const strongSingleView = anchorDistance <= 0.44
+      const strongSingleView = anchorDistance <= 0.42
       if (!strongSingleView) {
         if (left.length < 2 || right.length < 2) continue
-        const leftSupported = left.filter(a => right.some(b => computeEuclideanDistance(a.descriptor, b.descriptor) <= 0.54)).length
-        const rightSupported = right.filter(b => left.some(a => computeEuclideanDistance(a.descriptor, b.descriptor) <= 0.54)).length
+        const leftSupported = left.filter(a => right.some(b => computeEuclideanDistance(a.descriptor, b.descriptor) <= 0.50)).length
+        const rightSupported = right.filter(b => left.some(a => computeEuclideanDistance(a.descriptor, b.descriptor) <= 0.50)).length
         if (leftSupported < 2 || rightSupported < 2) continue
       }
-      // Skip a merge when another person's representative is almost as close.
+      // Three views of one person used to block each other's merge as an
+      // "ambiguous competitor". A co-occurring face is evidence of a DIFFERENT
+      // person; another compatible view is not. Keep stricter distances and
+      // repeated support above, plus this real competitor margin.
       const separation = strongSingleView ? 0.08 : 0.05
+      const rootImages = new Set(root.imageIds)
+      const otherImages = new Set(other.imageIds)
       const ambiguous = result.some((candidate, index) => index !== i && index !== j && (
-        computeEuclideanDistance(root.faces[0].descriptor, candidate.faces[0].descriptor) < anchorDistance + separation ||
-        computeEuclideanDistance(other.faces[0].descriptor, candidate.faces[0].descriptor) < anchorDistance + separation
+        (candidate.imageIds.some(id => rootImages.has(id)) &&
+          computeEuclideanDistance(other.faces[0].descriptor, candidate.faces[0].descriptor) < anchorDistance + separation) ||
+        (candidate.imageIds.some(id => otherImages.has(id)) &&
+          computeEuclideanDistance(root.faces[0].descriptor, candidate.faces[0].descriptor) < anchorDistance + separation)
       ))
       if (ambiguous) continue
       root.faces = [...root.faces, ...other.faces]
