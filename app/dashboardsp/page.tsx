@@ -648,12 +648,17 @@ export default function CustomerProductsDashboard() {
       }
 
       if (editingAlbum) {
-        const { error } = await supabase
+        const { data: savedAlbum, error } = await supabase
           .from('customer_product_albums')
           .update(payload)
           .eq('id', editingAlbum.id)
+          .select('id,cover_url')
+          .single()
 
         if (error) throw error
+        if (!savedAlbum || savedAlbum.cover_url !== payload.cover_url) {
+          throw new Error('Chưa xác nhận được ảnh bìa đã lưu. Vui lòng đăng nhập lại và thử lại.')
+        }
       } else {
         const baseSlug =
           createSlug(title) || 'album'
@@ -669,10 +674,11 @@ export default function CustomerProductsDashboard() {
               ...payload,
               slug,
             })
-            .select('id')
+            .select('id,cover_url')
             .single()
 
         if (error) throw error
+        if (!data || data.cover_url !== payload.cover_url) throw new Error('Chưa xác nhận được ảnh bìa album mới. Vui lòng thử lại.')
 
         albumId = data.id
       }
@@ -1841,7 +1847,7 @@ export default function CustomerProductsDashboard() {
                       setForm(current => ({ ...current, cover_url: '' }))
                     }} className="min-h-11 rounded-xl px-2 text-xs opacity-60 disabled:opacity-30">Bỏ ảnh bìa</button>}
                   </div>
-                  <p className="text-[10px] leading-5 opacity-50">Ảnh từ thiết bị được tối ưu kích thước và lưu trên Cloudflare khi bấm Lưu album.</p>
+                  <p className="text-[10px] leading-5 opacity-50">Bấm “Lưu album” để áp dụng ảnh bìa đã chọn. Ảnh từ thiết bị được lưu trên Cloudflare.</p>
                 </div>
 
                 <FieldLabel>

@@ -252,6 +252,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
 
   const [albumCovers, setAlbumCovers] = useState<Record<string, string>>({})
+  // Persisted folder choices are authoritative; first-image discovery is only
+  // a fallback and must never replace them after navigation or reload.
+  const savedFolderCoversRef = useRef<Record<string, string>>({})
+  const savingAlbumCoverRef = useRef(false)
+  const [isSavingAlbumCover, setIsSavingAlbumCover] = useState(false)
   const [editingFolderSetting, setEditingFolderSetting] = useState<FolderSettings | null>(null)
   const [editingFeatureFlags, setEditingFeatureFlags] = useState({ password: false, selectionLimit: false })
 
@@ -1009,25 +1014,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const subFolders = visibleItems.filter(item => item.type === 'folder')
   const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
 
-  // Quy tắc bìa dứt điểm:
-  // - Thư mục hiện tại có ảnh: luôn hiển thị ảnh bìa.
-  // - Thư mục hiện tại không có ảnh (chỉ chứa thư mục con): mới hiển thị icon folder.
-  // Không bao giờ lấy nhầm cover của selectedAlbum khi đang đứng ở thư mục con.
   const firstCurrentImage = visibleItems.find(item => item.type === 'image')
   const cachedCurrentFolderCover = currentActiveFolderId ? albumCovers[currentActiveFolderId] : ''
   const cachedCoverIsImage = Boolean(cachedCurrentFolderCover && cachedCurrentFolderCover !== 'NO_IMAGE')
-  const currentFolderHasImages = Boolean(firstCurrentImage) || cachedCoverIsImage
-  const rootCustomCover = currentActiveFolderId === selectedAlbum?.id ? (selectedAlbum?.coverUrl || '') : ''
-  const currentFolderCoverUrl = currentFolderHasImages
-    ? String(
-        rootCustomCover ||
-        (cachedCoverIsImage ? cachedCurrentFolderCover : '') ||
-        firstCurrentImage?.coverUrl ||
-        firstCurrentImage?.url ||
-        firstCurrentImage?.fullUrl ||
-        ''
-      )
+  const rootCustomCover = currentActiveFolderId === selectedAlbum?.id
+    ? (albums.find(album => album.id === currentActiveFolderId)?.coverUrl || selectedAlbum?.coverUrl || '')
     : ''
+  const currentFolderCoverUrl = String(
+    rootCustomCover ||
+    (cachedCoverIsImage ? cachedCurrentFolderCover : '') ||
+    firstCurrentImage?.coverUrl || firstCurrentImage?.url || firstCurrentImage?.fullUrl || ''
+  )
   const downloadableImages = useMemo(() => visibleItems.filter(item => item.type === 'image'), [visibleItems])
   const selectedDownloadImages = downloadableImages.filter(item => downloadSelectedIds.has(item.id))
   const areAllDownloadImagesSelected = downloadableImages.length > 0 && selectedDownloadImages.length === downloadableImages.length
@@ -1184,8 +1181,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const fetchCustomCovers = async () => {
     try {
-      const { data } = await supabase.from('custom_covers').select('id, cover_url')
+      const { data, error } = await supabase.from('custom_covers').select('id, cover_url')
+      if (error) throw error
       if (data) {
+        savedFolderCoversRef.current = Object.fromEntries(data.filter((item: any) => item.cover_url).map((item: any) => [item.id, item.cover_url]))
         setAlbumCovers(prev => {
           const next = { ...prev }
           data.forEach((item: any) => { next[item.id] = item.cover_url })
@@ -1471,9 +1470,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const files = Array.isArray(data?.files) ? data.files : []
       const effectiveFolderId = folderId || (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : selectedAlbum?.id || '')
 
-      // Cache bìa THEO CHÍNH THƯ MỤC ĐANG MỞ, không dùng bìa album cha.
-      // Có ảnh => dùng ảnh đầu tiên hợp lệ làm cover. Không có ảnh => đánh dấu NO_IMAGE
-      // để hero chỉ hiện biểu tượng thư mục. Cách này hoạt động ở mọi cấp thư mục con.
+      // Discover a fallback only. A saved choice always wins, including when
+      // this request started before the user selected a different cover.
       if (effectiveFolderId) {
         const firstImage = files.find((f: any) =>
           f && f.type === 'image' && !hiddenItemIds.has(String(f.id || ''))
@@ -1484,7 +1482,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
         setAlbumCovers(prev => ({
           ...prev,
-          [effectiveFolderId]: detectedCover || 'NO_IMAGE',
+          [effectiveFolderId]: savedFolderCoversRef.current[effectiveFolderId] || detectedCover || 'NO_IMAGE',
         }))
       }
 
@@ -1990,29 +1988,40 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const handleSetAsCover = async (targetId: string, imageId: string, e: React.MouseEvent) => {
+    e.preventDefault()
     e.stopPropagation()
-    const formattedCover = `https://lh3.googleusercontent.com/d/${imageId}=w500-h500-p-k-no`
-    const isMasterAlbum = masterFoldersList.some(m => m.id === targetId) || albums.some(a => a.id === targetId && folderHistory.length === 0)
-
-    if (isMasterAlbum) {
-      const { error } = await supabase.from('albums').update({ cover_url: formattedCover }).eq('id', targetId)
-      if (!error) {
-        await fetchAlbumsFromSupabase()
-        void showAlert('Đã cập nhật ảnh bìa Album trang chủ thành công!')
+    if (isSharedGuest || !targetId || !imageId || savingAlbumCoverRef.current) return
+    savingAlbumCoverRef.current = true
+    setIsSavingAlbumCover(true)
+    const formattedCover = `${VIDEO_WORKER_BASE}/thumb?id=${encodeURIComponent(imageId)}&size=640`
+    const rootAlbum = albums.find(album => album.id === targetId)
+    try {
+      if (rootAlbum) {
+        const { data, error } = await supabase.from('albums')
+          .update({ cover_url: formattedCover }).eq('id', rootAlbum.id)
+          .select('id,cover_url').single()
+        if (error) throw error
+        if (!data || data.cover_url !== formattedCover) throw new Error('Chưa xác nhận được ảnh bìa đã lưu. Vui lòng đăng nhập lại và thử lại.')
+        setAlbums(current => current.map(album => album.id === rootAlbum.id ? { ...album, coverUrl: data.cover_url } : album))
+        setSelectedAlbum(current => current && current.id === rootAlbum.id ? { ...current, coverUrl: data.cover_url } : current)
       } else {
-        void showAlert('Lỗi cập nhật ảnh bìa: ' + error.message)
+        // Known/synced folders do not necessarily have a row in albums. Save
+        // their choice here instead of silently updating zero album rows.
+        const { data, error } = await supabase.from('custom_covers')
+          .upsert({ id: targetId, cover_url: formattedCover }, { onConflict: 'id' })
+          .select('id,cover_url').single()
+        if (error) throw error
+        if (!data || data.cover_url !== formattedCover) throw new Error('Chưa xác nhận được ảnh bìa thư mục đã lưu. Vui lòng thử lại.')
+        savedFolderCoversRef.current[targetId] = data.cover_url
       }
-    } else {
-      const { error } = await supabase.from('custom_covers').upsert([
-        { id: targetId, cover_url: formattedCover }
-      ], { onConflict: 'id' })
-
-      if (!error) {
-        setAlbumCovers(prev => ({ ...prev, [targetId]: formattedCover }))
-        void showAlert('Đã đặt ảnh bìa cho thư mục con thành công!')
-      } else {
-        void showAlert('Lỗi lưu ảnh bìa: ' + error.message)
-      }
+      setAlbumCovers(current => ({ ...current, [targetId]: formattedCover }))
+      void showAlert('Đã lưu ảnh bìa album. Ảnh bìa này sẽ được giữ khi tải lại trang.')
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : (error as { message?: string })?.message
+      void showAlert('Chưa lưu được ảnh bìa: ' + (detail || 'Vui lòng thử lại.'), { variant: 'error' })
+    } finally {
+      savingAlbumCoverRef.current = false
+      setIsSavingAlbumCover(false)
     }
   }
 
@@ -2379,10 +2388,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const folderDriveUrl = `https://drive.google.com/drive/folders/${folderItem.id}`
     const displayName = customNames[folderItem.id] || folderItem.name
 
-    // Nếu API danh sách cha đã trả sẵn cover của thư mục con thì dùng ngay,
-    // sau đó fetchAlbumImages sẽ xác nhận/làm mới cover theo nội dung thật bên trong.
+    // Parent folder discovery can fill a missing thumbnail, but saved cover
+    // choices remain authoritative when opening a subfolder.
     if (folderItem.coverUrl) {
-      setAlbumCovers(prev => ({ ...prev, [folderItem.id]: folderItem.coverUrl as string }))
+      setAlbumCovers(prev => ({ ...prev, [folderItem.id]: savedFolderCoversRef.current[folderItem.id] || folderItem.coverUrl as string }))
     }
 
     const nextHistory = [...folderHistory, { id: folderItem.id, title: displayName, driveUrl: folderDriveUrl }]
@@ -3087,12 +3096,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           const data = await res.json()
           const firstImage = data.files?.find((f: MediaItem) => f.type === 'image' && !hiddenItemIds.has(f.id))
           if (firstImage) {
-            setAlbumCovers(prev => ({ ...prev, [album.id]: firstImage.url }))
+            setAlbumCovers(prev => ({ ...prev, [album.id]: savedFolderCoversRef.current[album.id] || firstImage.url }))
           } else {
-            setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
+            setAlbumCovers(prev => ({ ...prev, [album.id]: savedFolderCoversRef.current[album.id] || 'NO_IMAGE' }))
           }
         } catch {
-          setAlbumCovers(prev => ({ ...prev, [album.id]: 'NO_IMAGE' }))
+          setAlbumCovers(prev => ({ ...prev, [album.id]: savedFolderCoversRef.current[album.id] || 'NO_IMAGE' }))
         }
       }
     })
@@ -4983,14 +4992,15 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </>
               )}
 
-              {!isSharedGuest && selectedAlbum && (
+              {!isSharedGuest && selectedAlbum && previewMedia.type === 'image' && (
                 <>
                   <div className="h-4 w-[1px] bg-white/20 mx-1" />
                   <button
+                    disabled={isSavingAlbumCover}
                     onClick={(e) => handleSetAsCover(currentActiveFolderId, previewMedia.id, e)}
                     className="text-[10px] sm:text-xs text-emerald-400 hover:text-emerald-300 font-medium px-2 py-0.5 rounded-full hover:bg-white/10 transition"
                   >
-                    Đặt làm bìa
+                    {isSavingAlbumCover ? 'Đang lưu bìa...' : 'Đặt làm bìa'}
                   </button>
                 </>
               )}
