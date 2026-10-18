@@ -12,6 +12,8 @@ export type ArchiveProgress = {
   fileName: string
   part: number
   status: 'fetching' | 'materializing' | 'archiving' | 'saving' | 'complete'
+  bytesReceived?: number
+  totalBytes?: number
 }
 
 export type ArchivePartContext = {
@@ -24,6 +26,7 @@ export type ArchivePartContext = {
 type FetchMediaOptions = {
   signal?: AbortSignal
   timeoutMs?: number
+  maxAttempts?: number
 }
 
 type FetchBlobOptions = FetchMediaOptions & { maxBytes?: number }
@@ -127,9 +130,10 @@ export const getMediaWorkerUrl = getCloudflareMediaUrl
 /** Media bytes always come from the Cloudflare Worker; there is no origin fallback. */
 export async function fetchCloudflareMedia(entry: DownloadEntry, options: FetchMediaOptions = {}): Promise<Response> {
   const { signal, timeoutMs = REQUEST_TIMEOUT_MS } = options
+  const maxAttempts = Math.min(MAX_ATTEMPTS, Math.max(1, options.maxAttempts ?? MAX_ATTEMPTS))
   let lastError: unknown
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     throwIfAborted(signal)
     const controller = new AbortController()
     const onAbort = () => controller.abort(abortError(signal))
@@ -245,12 +249,12 @@ export async function fetchCloudflareMedia(entry: DownloadEntry, options: FetchM
       return new Response(stream, { status: response.status, headers })
     } catch (error) {
       controller.abort()
-      await reader?.cancel().catch(() => {})
+      void reader?.cancel().catch(() => {})
       cleanup()
       if (signal?.aborted) throw abortError(signal)
       lastError = timedOut ? new Error('Quá thời gian chờ Cloudflare.') : error
       const retryable = timedOut || error instanceof RetryableDownloadError || error instanceof TypeError
-      if (!retryable || attempt === MAX_ATTEMPTS - 1) break
+      if (!retryable || attempt === maxAttempts - 1) break
       await waitBeforeRetry(500 * 2 ** attempt, signal)
     }
   }
@@ -388,6 +392,17 @@ function albumShareName(entry: DownloadEntry, mime: string): string {
   return sanitizeSegment(`${stem || entry.id}.${allowed[0]}`)
 }
 
+function privateStorageDeadline<T>(operation: Promise<T>, timeoutMs = 15_000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const error = new Error('Bộ nhớ tạm phản hồi quá chậm. Vui lòng thử lại.')
+      error.name = 'PrivateStorageTimeoutError'
+      reject(error)
+    }, timeoutMs)
+    operation.then(value => { clearTimeout(timer); resolve(value) }, error => { clearTimeout(timer); reject(error) })
+  })
+}
+
 /**
  * Prepare all album originals for one native file share. Files stay on private
  * browser disk when supported; the memory fallback has one total size ceiling.
@@ -408,7 +423,7 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
     if (disposing) return disposing
     disposing = (async () => {
       if (root && directoryName) {
-        try { await root.removeEntry(directoryName, { recursive: true }) } catch (error) {
+        try { await privateStorageDeadline(root.removeEntry(directoryName, { recursive: true }), 2000) } catch (error) {
           if (!(error instanceof Error && error.name === 'NotFoundError')) throw error
         }
       }
@@ -423,14 +438,21 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
   signal.addEventListener('abort', onAbort, { once: true })
   if (signal.aborted) onAbort()
   const sizes = new Array<number>(entries.length).fill(0)
-  const prepared = new Array<{ blob: Blob; mime: string; diskSnapshot: boolean }>(entries.length)
+  const receivedBytes = new Array<number>(entries.length).fill(0)
+  const directPhotoSet = entries.length <= 8 && entries.every(entry => entry.type === 'image')
+  let lastByteProgress = 0
+  const prepared = new Array<{ blob: Blob; mime: string }>(entries.length)
   const preferBrowserBlob = new Set<number>()
   let availableBytes: number | undefined
   let completed = 0
   let fileName = entries[0].name
   let nextIndex = 0
   let failure: unknown
-  const progress = (status: ArchiveProgress['status']) => onProgress?.({ completed, total: entries.length, fileName, part: 1, status })
+  const progress = (status: ArchiveProgress['status']) => onProgress?.({
+    completed, total: entries.length, fileName, part: 1, status,
+    bytesReceived: receivedBytes.reduce((sum, bytes) => sum + bytes, 0),
+    ...(sizes.every(size => size > 0) ? { totalBytes: sizes.reduce((sum, bytes) => sum + bytes, 0) } : {}),
+  })
   const sizeError = () => {
     const error = new Error(directory
       ? 'Bộ nhớ trống của trình duyệt không đủ để chuẩn bị toàn bộ ảnh/video. Hãy giải phóng dung lượng rồi thử lại.'
@@ -445,27 +467,42 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
   }
 
   try {
-    if (await supportsLocalArchivePreparation()) {
-      root = await localStorageRoot()
-      await removeExpiredLocalArchives(root, 'dinhthong-share')
-      throwIfAborted(localSignal)
-      directoryName = `dinhthong-share-${Date.now()}-${crypto.randomUUID()}`
-      directory = await root.getDirectoryHandle(directoryName, { create: true })
+    // Photos saved individually/small sets go straight into browser-managed
+    // Blobs. Avoid the OPFS probe, write and reread before opening native Photos.
+    if (!directPhotoSet) {
       try {
-        const estimate = await navigator.storage.estimate()
-        if (Number.isFinite(estimate.quota) && Number.isFinite(estimate.usage)) availableBytes = Math.max(0, estimate.quota! - estimate.usage!)
-      } catch {}
+        if (await privateStorageDeadline(supportsLocalArchivePreparation(), 5000).catch(() => false)) {
+          root = await privateStorageDeadline(localStorageRoot(), 5000)
+          // Housekeeping for abandoned jobs must never gate a new download.
+          void removeExpiredLocalArchives(root, 'dinhthong-share').catch(() => {})
+          throwIfAborted(localSignal)
+          directoryName = `dinhthong-share-${Date.now()}-${crypto.randomUUID()}`
+          directory = await privateStorageDeadline(root.getDirectoryHandle(directoryName, { create: true }), 5000)
+          try {
+            const estimate = await privateStorageDeadline(navigator.storage.estimate(), 3000)
+            if (Number.isFinite(estimate.quota) && Number.isFinite(estimate.usage)) availableBytes = Math.max(0, estimate.quota! - estimate.usage!)
+          } catch {}
+        }
+      } catch {
+        throwIfAborted(localSignal)
+        if (root && directoryName) void root.removeEntry(directoryName, { recursive: true }).catch(() => {})
+        root = undefined
+        directory = undefined
+        directoryName = ''
+        // Fall back to bounded browser Blobs when private storage is broken.
+      }
     }
 
     async function prepareEntry(index: number) {
       const entry = entries[index]
       let writable: FileSystemWritableFileStream | undefined
       let response: Response | undefined
+      let downstream: ReadableStream<Uint8Array> | undefined
       try {
         throwIfAborted(localSignal)
         fileName = entry.name
         progress('fetching')
-        response = await fetchCloudflareMedia(entry, { signal: localSignal })
+        response = await fetchCloudflareMedia(entry, { signal: localSignal, timeoutMs: 20_000, maxAttempts: 1 })
         let mime = albumShareMime(entry, response.headers.get('content-type') || '')
         const expectedSize = contentLength(response)
         if (expectedSize !== undefined) {
@@ -477,6 +514,9 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
         const counter = new TransformStream<Uint8Array, Uint8Array>({
           transform(chunk, output) {
             received += chunk.byteLength
+            receivedBytes[index] = received
+            const now = performance.now()
+            if (now - lastByteProgress >= 500) { lastByteProgress = now; progress('fetching') }
             if (expectedSize === undefined) {
               sizes[index] = received
               checkSize()
@@ -485,6 +525,7 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
           },
         })
         const body = response.body.pipeThrough(counter)
+        downstream = body
         let blob: Blob | undefined
         if (transformImage && entry.type === 'image') {
           const original = await responseToBlob(new Response(body, { headers: response.headers }), entry, localSignal)
@@ -499,11 +540,11 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
         const transformedSize = blob?.size
         const diskSnapshot = Boolean(directory && !preferBrowserBlob.has(index))
         if (directory && diskSnapshot) {
-          const handle = await directory.getFileHandle(`source-${index}`, { create: true })
-          writable = await handle.createWritable()
+          const handle = await privateStorageDeadline(directory.getFileHandle(`source-${index}`, { create: true }))
+          writable = await privateStorageDeadline(handle.createWritable())
           await (blob ? blob.stream() : body).pipeTo(bufferedPrivateFileWriter(writable), { signal: localSignal })
           writable = undefined
-          blob = await handle.getFile()
+          blob = await privateStorageDeadline(handle.getFile())
         } else if (!blob) {
           // Native Blob backing is shareable even on phones with broken OPFS
           // snapshots; keep the same byte-counting stream and abort handling.
@@ -517,19 +558,27 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
         }
         sizes[index] = blob.size
         checkSize()
-        prepared[index] = { blob, mime, diskSnapshot }
+        // Materialize during this download lane instead of serially reading
+        // every private file only after all network downloads have finished.
+        if (diskSnapshot) {
+          blob = await privateStorageDeadline(new Response(blob.stream()).blob())
+          throwIfAborted(localSignal)
+          if (blob.size !== storedSize) throw new Error(`Tệp “${entry.name}” chưa tải đầy đủ.`)
+        }
+        prepared[index] = { blob, mime }
         completed++
         fileName = entry.name
         progress('fetching')
       } catch (error) {
-        if (response?.body && !response.body.locked) await response.body.cancel(error).catch(() => {})
-        if (writable) await writable.abort(error).catch(() => {})
-        if (error instanceof Error && (['NotReadableError', 'InvalidStateError', 'NotSupportedError'].includes(error.name) || error.message.includes('chưa tải đầy đủ'))) preferBrowserBlob.add(index)
+        if (downstream && !downstream.locked) void downstream.cancel(error).catch(() => {})
+        if (response?.body && !response.body.locked) void response.body.cancel(error).catch(() => {})
+        if (writable) void writable.abort(error).catch(() => {})
+        if (error instanceof Error && (['NotReadableError', 'InvalidStateError', 'NotSupportedError', 'PrivateStorageTimeoutError'].includes(error.name) || error.message.includes('chưa tải đầy đủ'))) preferBrowserBlob.add(index)
         throw error
       }
     }
 
-    const concurrency = transformImage ? 1 : directory ? 3 : 2
+    const concurrency = transformImage ? 1 : 4
     const workers = Array.from({ length: Math.min(concurrency, entries.length) }, async () => {
       try {
         while (nextIndex < entries.length) {
@@ -541,6 +590,7 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
               if (error instanceof Error && ['QuotaExceededError', 'AlbumShareTooLargeError', 'AbortError'].includes(error.name)) throw error
               if (attempt === MAX_ATTEMPTS - 1) throw error
               sizes[index] = 0
+              receivedBytes[index] = 0
               await waitBeforeRetry(500 * 2 ** attempt, localSignal)
             }
           }
@@ -558,27 +608,10 @@ export async function prepareCloudflareAlbumShare(options: PrepareLocalArchiveOp
     // including changed extensions when an image watermark produced JPEG bytes.
     const names = uniqueArchivePaths(entries.map((entry, index) => ({ ...entry, archivePath: undefined, name: albumShareName(entry, prepared[index].mime) })))
     for (let index = 0; index < entries.length; index++) {
-      let { blob } = prepared[index]
+      const { blob } = prepared[index]
       const { mime } = prepared[index]
       throwIfAborted(localSignal)
-      // iOS cannot reliably pass OPFS File snapshots to its native share sheet.
-      // Read into an independent browser Blob BEFORE the user's save gesture.
-      // Response.blob() lets the browser manage the backing store instead of
-      // retaining JavaScript ArrayBuffers for an entire large album.
-      if (prepared[index].diskSnapshot) {
-        fileName = entries[index].name
-        onProgress?.({ completed: index, total: entries.length, fileName, part: 1, status: 'materializing' })
-        try {
-          blob = await new Response(blob.stream()).blob()
-        } catch {
-          throwIfAborted(localSignal)
-          // Recover a stale/private-disk snapshot from the same Cloudflare
-          // original; never substitute a thumbnail or drop this selected file.
-          blob = await fetchCloudflareMediaBlob(entries[index], { signal: localSignal })
-          if (transformImage && entries[index].type === 'image') blob = await transformImage(blob)
-        }
-        throwIfAborted(localSignal)
-      }
+      // Each lane already creates a native-shareable Blob. No serial reread.
       if (!blob.size || blob.size !== sizes[index]) throw new Error(`Ảnh “${entries[index].name}” chưa sẵn sàng để lưu. Vui lòng thử lại.`)
       files.push(new File([blob], names[index], { type: mime, lastModified: Date.now() }))
       // Release each OPFS snapshot as its independent share file becomes ready.
@@ -614,11 +647,11 @@ function bufferedPrivateFileWriter(file: FileSystemWritableFileStream): Writable
     buffered = 0
     buffer = new Uint8Array(0)
     if (released) return
-    try { await writer.abort(reason) } catch {} finally { release() }
+    try { await privateStorageDeadline(writer.abort(reason), 1000) } catch {} finally { release() }
   }
   const flush = async () => {
     if (!buffered) return
-    await writer.write(buffer.subarray(0, buffered))
+    await privateStorageDeadline(writer.write(buffer.subarray(0, buffered)))
     buffered = 0
   }
   return new WritableStream<Uint8Array>({
@@ -640,7 +673,7 @@ function bufferedPrivateFileWriter(file: FileSystemWritableFileStream): Writable
     async close() {
       try {
         await flush()
-        await writer.close()
+        await privateStorageDeadline(writer.close())
         buffer = new Uint8Array(0)
       } catch (error) {
         await abort(error)

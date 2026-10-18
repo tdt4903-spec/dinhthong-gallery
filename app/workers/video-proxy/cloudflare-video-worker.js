@@ -22,7 +22,7 @@ function withCors(response) {
   headers.set('Access-Control-Allow-Headers', 'Range, Authorization, Content-Type')
   headers.set(
     'Access-Control-Expose-Headers',
-    'Content-Length, Content-Disposition, Content-Range, Accept-Ranges, Retry-After'
+    'Content-Length, Content-Disposition, Content-Range, Accept-Ranges, Retry-After, X-Media-Cache'
   )
   return new Response(response.body, {
     status: response.status,
@@ -294,7 +294,7 @@ async function albumCover(request, env, url) {
   return new Response(request.method === 'HEAD' ? null : response.body, response)
 }
 
-async function handleRequest(request, env) {
+async function handleRequest(request, env, ctx) {
     const url = new URL(request.url)
 
     if (request.method === 'OPTIONS') {
@@ -375,22 +375,28 @@ async function handleRequest(request, env) {
 
     metadataUrl.searchParams.set(
       'fields',
-      'id,name,mimeType,size,capabilities(canDownload),resourceKey'
+      'id,name,mimeType,size,version,capabilities(canDownload),resourceKey'
     )
 
     metadataUrl.searchParams.set('supportsAllDrives', 'true')
     metadataUrl.searchParams.set('key', apiKey)
 
-    const metadataRes = await fetch(metadataUrl.toString(), {
-      headers: {
-        Accept: 'application/json',
-      },
-
-      cf: {
-        cacheEverything: true,
-        cacheTtl: 300,
-      },
-    })
+    // Cache metadata separately from names supplied by each viewer. Recheck
+    // download permission on this same five-minute schedule, even on an image hit.
+    const metadataCacheKey = new Request(new URL(`/_internal/download-metadata-v2/${fileId}`, url.origin))
+    let metadataRes = await caches.default.match(metadataCacheKey)
+    if (!metadataRes) {
+      metadataRes = await fetch(metadataUrl.toString(), {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(12_000),
+        cf: { cacheEverything: true, cacheTtl: 300, cacheTtlByStatus: { '200-299': 300, '400-599': 0 } },
+      })
+      if (metadataRes.ok) {
+        const cacheHeaders = new Headers(metadataRes.headers)
+        cacheHeaders.set('Cache-Control', 'public, max-age=300')
+        ctx.waitUntil(caches.default.put(metadataCacheKey, new Response(metadataRes.clone().body, { headers: cacheHeaders })).catch(() => {}))
+      }
+    }
 
     if (!metadataRes.ok) {
       const errorText = await metadataRes.text().catch(() => '')
@@ -436,6 +442,21 @@ async function handleRequest(request, env) {
       metadata.name || `file-${fileId}`
     )
 
+    const range = request.headers.get('range')
+    const originalCacheUrl = new URL(`/_internal/original-image-v2/${fileId}`, url.origin)
+    originalCacheUrl.searchParams.set('version', String(metadata.version || 'current'))
+    const originalCacheKey = new Request(originalCacheUrl)
+    if (isImage && !range) {
+      const cached = await caches.default.match(originalCacheKey)
+      if (cached) {
+        const cachedHeaders = new Headers(cached.headers)
+        cachedHeaders.set('Content-Disposition', contentDisposition(fileName))
+        cachedHeaders.set('Cache-Control', 'public, max-age=0, must-revalidate')
+        cachedHeaders.set('X-Media-Cache', 'HIT')
+        return new Response(request.method === 'HEAD' ? null : cached.body, { status: cached.status, headers: cachedHeaders })
+      }
+    }
+
     /*
      * ============================================================
      * 2. GOOGLE DRIVE MEDIA URL
@@ -468,7 +489,7 @@ async function handleRequest(request, env) {
 
     const upstreamHeaders = new Headers()
 
-    const range = request.headers.get('range')
+    upstreamHeaders.set('Accept-Encoding', 'identity')
 
     if (metadata.resourceKey) {
       upstreamHeaders.set(
@@ -495,17 +516,20 @@ async function handleRequest(request, env) {
      * Không cache.
      */
 
-    const upstream = await fetch(mediaUrl.toString(), {
-      headers: upstreamHeaders,
-      redirect: 'follow',
-
-      cf: range
-        ? undefined
-        : {
-            cacheEverything: true,
-            cacheTtl: CACHE_TTL,
-          },
-    })
+    const upstreamController = new AbortController()
+    const upstreamTimer = setTimeout(() => upstreamController.abort(), 20_000)
+    let upstream
+    try {
+      upstream = await fetch(mediaUrl.toString(), {
+        headers: upstreamHeaders,
+        redirect: 'follow',
+        signal: upstreamController.signal,
+        cf: range ? undefined : isImage ? { cacheTtl: 0 } : {
+          cacheEverything: true,
+          cacheTtl: CACHE_TTL,
+        },
+      })
+    } finally { clearTimeout(upstreamTimer) }
 
     if (!upstream.ok && upstream.status !== 206) {
       const errorText = await upstream.text().catch(() => '')
@@ -625,21 +649,24 @@ async function handleRequest(request, env) {
      * Stream trực tiếp từ Google Drive -> Cloudflare -> browser.
      */
 
-    return new Response(
-      request.method === 'HEAD'
-        ? null
-        : upstream.body,
-      {
-        status: upstream.status,
-        headers,
-      }
-    )
+    headers.set('X-Media-Cache', 'MISS')
+    const response = new Response(request.method === 'HEAD' ? null : upstream.body, { status: upstream.status, headers })
+    // Original images up to 32 MB are cached at the edge. Versioned keys retain
+    // new edits; per-request filenames never fragment the media cache.
+    const fullSize = Number(contentLength || metadata.size || 0)
+    if (isImage && !range && request.method === 'GET' && upstream.status === 200 &&
+        metadata.mimeType?.startsWith('image/') && !/^(?:text\/|application\/json)/i.test(upstream.headers.get('content-type') || '') && fullSize > 0 && fullSize <= 32 * 1024 * 1024) {
+      const cachedHeaders = new Headers(headers)
+      cachedHeaders.set('Cache-Control', 'public, max-age=3600')
+      ctx.waitUntil(caches.default.put(originalCacheKey, new Response(response.clone().body, { headers: cachedHeaders })).catch(() => {}))
+    }
+    return response
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
-      return withCors(await handleRequest(request, env))
+      return withCors(await handleRequest(request, env, ctx))
     } catch {
       return withCors(Response.json(
         { error: new URL(request.url).pathname.startsWith('/album-covers') ? 'Không thể xử lý ảnh bìa trên Cloudflare. Vui lòng thử lại.' : 'Unable to fetch from Google Drive. Please retry.' },

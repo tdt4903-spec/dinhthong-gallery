@@ -513,18 +513,47 @@ function uniqueFaceProposals(proposals: FaceDetectionProposal[]): FaceDetectionP
   return kept
 }
 
+const descriptorBatchSupport = new WeakMap<object, boolean>()
+
+function validatedDescriptor(descriptor: unknown): number[] {
+  if (!(descriptor instanceof Float32Array) && !Array.isArray(descriptor)) {
+    throw new Error('Mẫu nhận diện khuôn mặt không hợp lệ.')
+  }
+  const values = Array.from(descriptor as ArrayLike<number>)
+  if (values.length !== 128 || !values.every(Number.isFinite)) {
+    throw new Error('Mẫu nhận diện khuôn mặt không hợp lệ.')
+  }
+  return values
+}
+
 async function computeDescriptorBatch(faceapi: any, inputs: HTMLCanvasElement[]): Promise<number[][]> {
-  if (inputs.length === 0) return []
-  // Keep the model's single-chip tensor shape warm. Tensor batches with new
-  // sizes compile separate WebGL shaders, adding seconds on the first scan.
-  const result = await Promise.all(inputs.map(input => faceapi.computeFaceDescriptor(input)))
-  return result.map((descriptor: Float32Array) => {
-    const values = Array.from(descriptor)
-    if (values.length !== 128 || !values.every(Number.isFinite)) {
-      throw new Error('Mẫu nhận diện khuôn mặt không hợp lệ.')
+  const descriptors: number[][] = []
+  // The pinned face-api accepts an array and runs one recognition forward pass
+  // for it. Two chips bound mobile GPU memory and reuse only batch shapes 1/2;
+  // a single portrait never pays for padded or duplicated face chips.
+  for (let start = 0; start < inputs.length; start += 2) {
+    const batch = inputs.slice(start, start + 2)
+    if (batch.length === 2 && descriptorBatchSupport.get(faceapi) !== false) {
+      try {
+        const result = await faceapi.computeFaceDescriptor(batch)
+        if (!Array.isArray(result) || result.length !== batch.length) {
+          throw new Error('Không thể phân tích đầy đủ các khuôn mặt.')
+        }
+        const values = result.map(validatedDescriptor)
+        descriptorBatchSupport.set(faceapi, true)
+        descriptors.push(...values)
+        continue
+      } catch {
+        // Some browser backends cannot run batched tensors. Remember this for
+        // the loaded API and retry each chip without another failed batch.
+        descriptorBatchSupport.set(faceapi, false)
+      }
     }
-    return values
-  })
+    for (const input of batch) {
+      descriptors.push(validatedDescriptor(await faceapi.computeFaceDescriptor(input)))
+    }
+  }
+  return descriptors
 }
 
 // Share one GPU lane between album scans and uploaded/reference images. Running

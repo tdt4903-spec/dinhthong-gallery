@@ -334,7 +334,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const partResolverRef = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null)
   const [archiveProgress, setArchiveProgress] = useState<{
     title: string; completed: number; total: number; part: number
-    status: string; fileName?: string; error?: string; kind?: 'photos'
+    status: string; fileName?: string; error?: string; kind?: 'photos'; bytesReceived?: number; totalBytes?: number
   } | null>(null)
   const [pendingArchivePart, setPendingArchivePart] = useState<{
     blob: Blob; name: string; part: number; hasMore: boolean
@@ -1882,7 +1882,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         onProgress: progress => {
           if (archiveControllerRef.current !== controller || controller.signal.aborted) return
           const now = performance.now()
-          if (progress.completed < progress.total && now - lastProgress < 200) return
+          if (progress.completed < progress.total && now - lastProgress < 500) return
           lastProgress = now
           setArchiveProgress({ title, ...progress, kind: 'photos' })
           setMobileDownloadProgress(`Đã chuẩn bị ${progress.completed}/${progress.total} tệp`)
@@ -2284,7 +2284,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       }
 
       if (folderHistory.length === 0 && selectedAlbum?.id === editingFolderSetting.id) {
-        const { error: albumError } = await supabase.from('albums').update({ ...payload, title: newTitle || selectedAlbum.title }).eq('id', editingFolderSetting.id)
+        // folder_settings owns all sharing options. The legacy albums table only
+        // mirrors these columns; collect_customer_info and max_viewers do not
+        // exist there and must not make an otherwise valid settings save fail.
+        const { error: albumError } = await supabase.from('albums').update({
+          title: newTitle || selectedAlbum.title,
+          password: payload.password,
+          max_select: payload.max_select,
+          allow_comments: payload.allow_comments,
+          enable_watermark: payload.enable_watermark,
+        }).eq('id', editingFolderSetting.id)
         if (albumError) throw albumError
         await fetchAlbumsFromSupabase()
       }
@@ -6014,6 +6023,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   <span>{archiveProgress.status === 'materializing' ? 'Đang chuẩn bị bảng lưu: ' : archiveProgress.status === 'archiving' ? 'Đang đóng gói ZIP: ' : archiveProgress.status === 'fetching' ? 'Đang lấy ảnh: ' : ''}{archiveProgress.total ? `${archiveProgress.completed}/${archiveProgress.total} tệp` : (zipProgress || 'Đang chuẩn bị...')}</span>
                 </div>
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100"><div className="h-full bg-emerald-600 transition-all" style={{ width: `${archiveProgress.total ? Math.min(100, archiveProgress.completed / archiveProgress.total * 100) : 0}%` }} /></div>
+                {typeof archiveProgress.bytesReceived === 'number' && archiveProgress.bytesReceived > 0 && (
+                  <p className="mt-2 text-xs font-semibold text-emerald-700">Đã nhận {(archiveProgress.bytesReceived / (1024 * 1024)).toFixed(1)} MB{archiveProgress.totalBytes ? ` / ${(archiveProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB` : ''} qua Cloudflare</p>
+                )}
                 {archiveProgress.fileName && <p className="mt-2 break-all text-xs text-gray-500">{archiveProgress.fileName}</p>}
               </div>
             )}
