@@ -51,7 +51,7 @@ const FACE_API_MODEL_URLS = [
 ]
 
 const DB_NAME = 'dinhthong_face_cache_v1'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE_NAME = 'image_faces'
 export const FACE_SCAN_VERSION = 'multiview-aligned-v4'
 const FACE_IMAGE_SIZE = 1600
@@ -69,6 +69,31 @@ function isValidFaceRecord(value: unknown): value is DetectedFaceRecord {
     face.descriptor.every(Number.isFinite) && Number.isFinite(face.score) &&
     Boolean(face.box) && [face.box.x, face.box.y, face.box.width, face.box.height].every(Number.isFinite) &&
     face.box.width > 0 && face.box.height > 0
+}
+
+function readCachedImageFaces(value: unknown, imageId: string): DetectedFaceRecord[] | null {
+  if (!value || typeof value !== 'object') return null
+  const row = value as { imageId?: unknown; scanVersion?: unknown; faces?: unknown }
+  if (row.imageId !== imageId || row.scanVersion !== FACE_SCAN_VERSION || !Array.isArray(row.faces)) return null
+  return row.faces.every((face: unknown) =>
+    isValidFaceRecord(face) && face.imageId === imageId && face.descriptor.length === 128
+  ) ? row.faces as DetectedFaceRecord[] : null
+}
+
+function newestCachedImageFaces(rows: unknown[], imageId: string): DetectedFaceRecord[] | null {
+  let faces: DetectedFaceRecord[] | null = null
+  let newestScannedAt = -Infinity
+  for (const row of rows) {
+    const candidate = readCachedImageFaces(row, imageId)
+    if (candidate === null) continue
+    const value = (row as { scannedAt?: unknown }).scannedAt
+    const scannedAt = typeof value === 'number' && Number.isFinite(value) ? value : 0
+    if (faces === null || scannedAt > newestScannedAt) {
+      faces = candidate
+      newestScannedAt = scannedAt
+    }
+  }
+  return faces
 }
 
 function getGlobalFaceApi(): any {
@@ -184,21 +209,42 @@ function openFaceCacheDb(): Promise<IDBDatabase | null> {
   cacheDbPromise = new Promise((resolve) => {
     try {
       const request = window.indexedDB.open(DB_NAME, DB_VERSION)
+      let blocked = false
+      request.onblocked = () => {
+        if (blocked) return
+        blocked = true
+        // A suspended older tab may keep its connection open indefinitely.
+        // Continue recognition without cache rather than waiting for that tab.
+        // Keep this null result until the queued open finishes: opening again
+        // now would queue behind it without firing another blocked event.
+        resolve(null)
+      }
       request.onupgradeneeded = () => {
         const db = request.result
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          const store = db.createObjectStore(STORE_NAME, { keyPath: 'key' })
-          store.createIndex('folderId', 'folderId', { unique: false })
-        }
+        const store = db.objectStoreNames.contains(STORE_NAME)
+          ? request.transaction!.objectStore(STORE_NAME)
+          : db.createObjectStore(STORE_NAME, { keyPath: 'key' })
+        if (!store.indexNames.contains('folderId')) store.createIndex('folderId', 'folderId', { unique: false })
+        // An image already analysed through an admin folder or a shared album
+        // can reuse the same result without storing another copy of its faces.
+        if (!store.indexNames.contains('imageId')) store.createIndex('imageId', 'imageId', { unique: false })
       }
       request.onsuccess = () => {
+        if (blocked) {
+          request.result.close()
+          cacheDbPromise = null
+          return
+        }
         request.result.onversionchange = () => {
           request.result.close()
           cacheDbPromise = null
         }
         resolve(request.result)
       }
-      request.onerror = () => resolve(null)
+      request.onerror = () => {
+        if (blocked) cacheDbPromise = null
+        resolve(null)
+      }
     } catch {
       resolve(null)
     }
@@ -219,15 +265,17 @@ async function getCachedFacesForImage(
       const store = tx.objectStore(STORE_NAME)
       const req = store.get(`${folderId}::${imageId}`)
       req.onsuccess = () => {
-        const result = req.result
-        if (result?.scanVersion === FACE_SCAN_VERSION && Array.isArray(result.faces) &&
-          result.faces.every((face: unknown) => isValidFaceRecord(face) && face.imageId === imageId && face.descriptor.length === 128)) {
-          resolve(result.faces as DetectedFaceRecord[])
-        } else {
-          resolve(null)
+        const localFaces = readCachedImageFaces(req.result, imageId)
+        if (localFaces !== null) {
+          resolve(localFaces)
+          return
         }
+        const shared = store.index('imageId').getAll(imageId)
+        shared.onsuccess = () => resolve(newestCachedImageFaces(shared.result || [], imageId))
+        shared.onerror = () => resolve(null)
       }
       req.onerror = () => resolve(null)
+      tx.onabort = () => resolve(null)
     } catch {
       resolve(null)
     }
@@ -245,19 +293,30 @@ async function getCachedFolderFacesByImage(
   const requestedIds = new Set(items.map(item => item.id))
   return new Promise(resolve => {
     try {
-      // One folder read replaces hundreds of separately opened transactions.
+      // Read the current folder first, then look up only missing Drive IDs.
+      // Every lookup uses the imageId index in this same transaction; there is
+      // no full-cache scan or duplicated persistence for a second album route.
       const tx = db.transaction(STORE_NAME, 'readonly')
-      const request = tx.objectStore(STORE_NAME).index('folderId').getAll(folderId)
+      const store = tx.objectStore(STORE_NAME)
+      const cached = new Map<string, DetectedFaceRecord[]>()
+      const request = store.index('folderId').getAll(folderId)
       request.onsuccess = () => {
-        const cached = new Map<string, DetectedFaceRecord[]>()
         for (const row of request.result || []) {
-          if (!requestedIds.has(row?.imageId) || row.scanVersion !== FACE_SCAN_VERSION || !Array.isArray(row.faces)) continue
-          if (row.faces.every((face: unknown) => isValidFaceRecord(face) && face.imageId === row.imageId && face.descriptor.length === 128)) {
-            cached.set(row.imageId, row.faces)
+          if (!requestedIds.has(row?.imageId)) continue
+          const faces = readCachedImageFaces(row, row.imageId)
+          if (faces !== null) cached.set(row.imageId, faces)
+        }
+        const imageIndex = store.index('imageId')
+        for (const imageId of requestedIds) {
+          if (cached.has(imageId)) continue
+          const shared = imageIndex.getAll(imageId)
+          shared.onsuccess = () => {
+            const faces = newestCachedImageFaces(shared.result || [], imageId)
+            if (faces !== null) cached.set(imageId, faces)
           }
         }
-        resolve(cached)
       }
+      tx.oncomplete = () => resolve(cached)
       request.onerror = () => resolve(empty)
       tx.onabort = () => resolve(empty)
     } catch {
@@ -750,10 +809,8 @@ export async function detectFacesInDriveImage(
   item: ScannableMediaItem,
   folderId?: string
 ): Promise<DetectedFaceRecord[]> {
-  if (folderId) {
-    const cached = await getCachedFacesForImage(folderId, item.id)
-    if (cached !== null) return deduplicateDetectedFaces(cached)
-  }
+  const cached = await getCachedFacesForImage(folderId || '', item.id)
+  if (cached !== null) return deduplicateDetectedFaces(cached)
   const img = await loadDriveThumbnailForCanvas(item)
   const detected = await detectFacesFromImageElement(img, item.id, item.name)
   if (folderId) {

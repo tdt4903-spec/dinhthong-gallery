@@ -397,7 +397,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       void album?.dispose().catch(() => {})
     }
   }, [])
-  const [pendingMobileShare, setPendingMobileShare] = useState<{ blob: Blob; fileName: string } | null>(null)
 
   // Một vùng tick duy nhất dành cho TẢI ẢNH trên cả desktop và mobile.
   // Desktop: ảnh đã tick được nén ZIP. Mobile: ảnh đã tick được chuyển sang
@@ -1773,40 +1772,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
   )
 
-  const sharePreparedMobileImage = async (prepared: { blob: Blob; fileName: string }) => {
-    const mimeType = prepared.blob.type && prepared.blob.type.startsWith('image/')
-      ? prepared.blob.type
-      : 'image/jpeg'
-    const fileObj = new File([prepared.blob], prepared.fileName, { type: mimeType })
-
-    if (
-      typeof navigator.share !== 'function' ||
-      typeof navigator.canShare !== 'function' ||
-      !navigator.canShare({ files: [fileObj] })
-    ) {
-      void showAlert('Trình duyệt này chưa hỗ trợ lưu ảnh trực tiếp vào Ảnh. Hãy mở bằng Safari/Chrome mới nhất trên điện thoại.')
-      return false
-    }
-
-    try {
-      await navigator.share({ files: [fileObj], title: prepared.fileName })
-      return true
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return false
-      console.warn('Web Share chưa mở được:', err)
-      return false
-    }
-  }
-
-  const handleConfirmMobileSave = async () => {
-    if (!pendingMobileShare) return
-    // Hàm này được gọi trực tiếp từ một lần bấm của người dùng, vì vậy
-    // navigator.share() luôn có user activation mới trên iOS.
-    const prepared = pendingMobileShare
-    const ok = await sharePreparedMobileImage(prepared)
-    if (ok) setPendingMobileShare(null)
-  }
-
   const toggleMobileDownloadSelection = (itemId: string, e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -1857,6 +1822,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       e.stopPropagation()
     }
     if (downloadingId || item.type === 'folder') return
+    if (isMobileDevice()) {
+      // One fresh gesture after preparation opens the native sheet. This shared
+      // portal stays above the lightbox and uses the original MIME/extension.
+      await startMobileMediaDownload(customNames[item.id] || item.name, 'download_single_media', async () => [toDownloadEntry(item)])
+      return
+    }
 
     setDownloadingId(item.id)
 
@@ -1874,19 +1845,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       let blob = await fetchCloudflareMediaBlob({ id: item.id, name: exactFileName, type: 'image' })
       if (activeSetting.enable_watermark) {
         blob = await applyWatermarkToImageBlob(blob)
-      }
-
-      if (isMobileDevice()) {
-        const prepared = { blob, fileName: exactFileName }
-
-        // Thử mở Share Sheet ngay. Trên một số bản iOS, thời gian fetch có thể
-        // làm mất transient user activation. Nếu vậy, KHÔNG tải file kiểu browser;
-        // thay vào đó hiện nút xác nhận để tạo một user gesture mới rồi share lại.
-        const shared = await sharePreparedMobileImage(prepared)
-        if (!shared) {
-          setPendingMobileShare(prepared)
-        }
-        return
       }
 
       // Desktop giữ nguyên: tải file trực tiếp về máy.
@@ -4707,7 +4665,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                               </div>
 
                               <div className={`px-2 py-2 sm:px-2.5 sm:py-2.5 border-t ${isDarkMode ? 'border-white/8 bg-[#0d1712]' : 'border-gray-100 bg-white'}`}>
-                                <div className={`flex items-center justify-between gap-1 ${!isSharedGuest ? 'flex-wrap' : ''}`}>
+                                <div className="flex flex-wrap items-center justify-between gap-1">
                                   <div className="flex min-w-0 items-center gap-0 sm:gap-0.5">
                                     {[1,2,3,4,5].map((star) => (
                                       <button
@@ -4727,8 +4685,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                     <button
                                       type="button"
                                       onClick={(e) => handleDownloadMedia(item, e)}
-                                      disabled={Boolean(downloadingId)}
-                                      className={`hidden sm:flex h-7 w-7 items-center justify-center rounded-lg transition disabled:opacity-50 ${isDarkMode ? 'text-white/55 hover:bg-white/8 hover:text-emerald-300' : 'text-gray-400 hover:bg-gray-100 hover:text-emerald-600'}`}
+                                      disabled={Boolean(downloadingId) || Boolean(zippingFolderId) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum}
+                                      className={`flex h-8 w-8 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-lg transition disabled:opacity-50 ${isDarkMode ? 'text-white/55 hover:bg-white/8 hover:text-emerald-300' : 'text-gray-400 hover:bg-gray-100 hover:text-emerald-600'}`}
                                       title="Tải ảnh"
                                     >
                                       {isThisDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
@@ -4762,7 +4720,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               <BackIcon className="h-5 w-5" />
             </button>
             <div className="text-center text-xs font-semibold">{currentIndex + 1} / {previewSourceList.length}</div>
-            <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md disabled:opacity-50" aria-label={previewMedia.type === 'video' ? 'Tải video' : 'Tải ảnh'}>
+            <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId) || Boolean(zippingFolderId) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md disabled:opacity-50" aria-label={previewMedia.type === 'video' ? 'Tải video' : 'Tải ảnh'}>
               {downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </button>
           </div>
@@ -4808,7 +4766,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
               <button
                 onClick={(e) => handleDownloadMedia(previewMedia, e)}
-                disabled={Boolean(downloadingId)}
+                disabled={Boolean(downloadingId) || Boolean(zippingFolderId) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum}
                 className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
                 title="Tải về máy"
               >
@@ -4928,7 +4886,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     <span>Tìm mặt này</span>
                   </button>
                 )}
-                <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId)} className="flex h-10 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 text-[10px] font-bold text-white disabled:opacity-50">
+                <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId) || Boolean(zippingFolderId) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum} className="flex h-10 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 text-[10px] font-bold text-white disabled:opacity-50">
                   {downloadingId === previewMedia.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                   {previewMedia.type === 'video' ? 'Tải video' : 'Tải ảnh'}
                 </button>
@@ -5212,34 +5170,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       )}
 
       {/* MODAL YÊU CẦU NHẬP TÊN CHO KHÁCH */}
-      {pendingMobileShare && (
-        <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
-          <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border text-center ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
-            <div className="w-12 h-1 rounded-full bg-emerald-600 mx-auto mb-5" />
-            <h3 className="font-serif font-bold text-lg">Ảnh đã sẵn sàng</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 mb-5">
-              Nhấn nút bên dưới để mở bảng hệ thống, sau đó chọn <strong>Lưu hình ảnh</strong>.
-            </p>
-            <button
-              type="button"
-              onClick={handleConfirmMobileSave}
-              className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
-            >
-              Lưu hình ảnh
-            </button>
-            <button
-              type="button"
-              onClick={() => setPendingMobileShare(null)}
-              className="w-full mt-2 py-2.5 rounded-2xl text-sm text-gray-500 dark:text-gray-400"
-            >
-              Hủy
-            </button>
-          </div>
-        </div>
-      )}
-
-
-
       {showGuestNameModal && isSharedGuest && (
         <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
           <div className={`w-full max-w-sm rounded-3xl p-6 shadow-2xl border ${isDarkMode ? 'bg-[#181a20] border-white/10 text-white' : 'bg-white border-gray-100 text-gray-900'}`}>
@@ -6069,7 +5999,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-lg font-bold">{archiveProgress.kind === 'photos'
-                  ? archiveProgress.status === 'error' ? 'Chưa thể lưu ảnh/video' : archiveProgress.status === 'ready_album' ? 'Toàn bộ album đã sẵn sàng' : archiveProgress.status === 'shared_album' ? 'Đã gửi album tới bảng lưu' : 'Đang chuẩn bị ảnh/video'
+                  ? archiveProgress.status === 'error' ? 'Chưa thể lưu ảnh/video' : archiveProgress.status === 'ready_album' ? 'Ảnh/video đã sẵn sàng' : archiveProgress.status === 'shared_album' ? 'Đã gửi tới bảng lưu' : 'Đang chuẩn bị ảnh/video'
                   : archiveProgress.status === 'error' ? 'Không thể chuẩn bị ZIP' : archiveProgress.status === 'ready' ? 'ZIP đã sẵn sàng' : archiveProgress.status === 'download_started' || archiveProgress.status === 'complete' ? 'Đã bắt đầu tải ZIP' : 'Đang chuẩn bị ZIP'}</h2>
                 <p className="mt-1 break-words text-sm text-emerald-950/65">{archiveProgress.title}</p>
               </div>
@@ -6094,7 +6024,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </p>
                 <p className="mt-2 text-sm leading-6">Nhấn nút bên dưới, rồi chọn “Lưu hình ảnh” hoặc “Lưu vào Ảnh” trong bảng của điện thoại để lưu toàn bộ cùng một lượt.</p>
                 <button type="button" onClick={saveWholeAlbumToPhotos} disabled={isSharingMobileAlbum} className="mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-60">
-                  {isSharingMobileAlbum ? <><Loader2 className="h-4 w-4 shrink-0 animate-spin" /> Đang mở bảng lưu...</> : `Lưu toàn bộ ${pendingMobileAlbumShare.files.length} ${pendingMobileAlbumShare.videoCount > 0 ? 'mục' : 'ảnh'} vào Ảnh`}
+                  {isSharingMobileAlbum ? <><Loader2 className="h-4 w-4 shrink-0 animate-spin" /> Đang mở bảng lưu...</> : `Lưu ${pendingMobileAlbumShare.files.length > 1 ? 'toàn bộ ' : ''}${pendingMobileAlbumShare.files.length} ${pendingMobileAlbumShare.videoCount > 0 ? 'mục' : 'ảnh'} vào Ảnh`}
                 </button>
               </div>
             )}

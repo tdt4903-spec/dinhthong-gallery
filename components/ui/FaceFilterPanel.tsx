@@ -88,6 +88,8 @@ export default function FaceFilterPanel({
     message: '',
   })
   const [scanError, setScanError] = useState('')
+  const [isGroupingFaces, setIsGroupingFaces] = useState(false)
+  const [groupedFaces, setGroupedFaces] = useState<{ source: DetectedFaceRecord[]; clusters: FaceCluster[] } | null>(null)
   const [hydratedCacheKey, setHydratedCacheKey] = useState('')
   const cacheKey = useMemo(() => JSON.stringify([folderId, images.map(image => image.id)]), [folderId, images])
 
@@ -318,10 +320,53 @@ export default function FaceFilterPanel({
     }
   }, [inspectImageItem, folderId, startAlbumScan, onClearInspectImageItem])
 
-  // Gom nhóm khuôn mặt tự động từ kết quả quét album
+  // Keep numerical clustering off the phone's UI thread. Preserve the same
+  // grouping rules and retain original face/descriptor objects for filtering.
+  useEffect(() => {
+    let active = true
+    let worker: Worker | undefined
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined
+    const finish = (clusters: FaceCluster[]) => {
+      if (!active) return
+      setGroupedFaces({ source: detectedFaces, clusters })
+      setIsGroupingFaces(false)
+    }
+    if (!detectedFaces.length) {
+      finish([])
+      return
+    }
+    setIsGroupingFaces(true)
+    const fallback = () => {
+      worker?.terminate()
+      if (!active || fallbackTimer !== undefined) return
+      fallbackTimer = setTimeout(() => {
+        if (active) finish(clusterDetectedFaces(detectedFaces))
+      }, 0)
+    }
+    try {
+      worker = new Worker(new URL('../../lib/face-cluster.worker.ts', import.meta.url), { type: 'module' })
+      worker.onmessage = event => {
+        if (!active) return
+        if (!Array.isArray(event.data?.clusters)) { fallback(); return }
+        const byId = new Map(detectedFaces.map(face => [face.faceId, face]))
+        type GroupResult = Omit<FaceCluster, 'faces' | 'avatarDataUrl'> & { faceIds: string[] }
+        const clusters: FaceCluster[] = (event.data.clusters as GroupResult[]).map(({ faceIds, ...cluster }) => {
+          const faces = faceIds.map(id => byId.get(id)).filter((face): face is DetectedFaceRecord => Boolean(face))
+          return { ...cluster, faces, avatarDataUrl: faces[0]?.avatarDataUrl || '' }
+        })
+        finish(clusters)
+        worker?.terminate()
+      }
+      worker.onerror = event => { event.preventDefault(); fallback() }
+      worker.postMessage(detectedFaces.map(face => ({ ...face, avatarDataUrl: '' })))
+    } catch { fallback() }
+    return () => { active = false; worker?.terminate(); clearTimeout(fallbackTimer) }
+  }, [detectedFaces])
+
   const faceClusters: FaceCluster[] = useMemo(() => {
-    return applyConfirmedFaceGroups(clusterDetectedFaces(detectedFaces), confirmedGroups)
-  }, [detectedFaces, confirmedGroups])
+    const clusters = groupedFaces?.source === detectedFaces ? groupedFaces.clusters : []
+    return applyConfirmedFaceGroups(clusters, confirmedGroups)
+  }, [detectedFaces, groupedFaces, confirmedGroups])
   const faceClusterImageIds = useMemo(() => {
     return new Map(faceClusters.map(cluster => [
       cluster.id,
@@ -639,16 +684,16 @@ export default function FaceFilterPanel({
           ) : (
             <button
               type="button"
-              onClick={() => void startAlbumScan(scannedCount >= images.length)}
+              onClick={() => void startAlbumScan(false)}
               className={`inline-flex min-h-11 items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition cursor-pointer ${
                 isDarkMode
                   ? 'border-white/10 bg-white/5 text-white/75 hover:bg-white/10'
                   : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
               }`}
-              title={scannedCount >= images.length ? 'Quét lại toàn bộ ảnh trong album' : 'Tiếp tục quét khuôn mặt'}
+              title="Dùng kết quả đã lưu và chỉ phân tích những ảnh chưa có kết quả"
             >
               <RefreshCw className="h-3.5 w-3.5" />
-              <span>{scannedCount >= images.length ? 'Quét lại' : 'Quét album'}</span>
+              <span>{scannedCount >= images.length ? 'Cập nhật kết quả' : 'Quét album'}</span>
             </button>
           )}
 
@@ -656,6 +701,14 @@ export default function FaceFilterPanel({
       <p className={`mt-3 text-xs leading-relaxed ${isDarkMode ? 'text-white/55' : 'text-gray-500'}`}>
         Có thể chọn nhiều khuôn mặt cùng lúc. Kết quả gồm ảnh có ít nhất một mặt đã chọn; bấm lại để bỏ chọn. Nếu mặt nghiêng bị tách, dùng “Gộp mặt trùng”.
       </p>
+
+      {!isScanning && !isGroupingFaces && scannedCount > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+          <span className={isDarkMode ? 'text-white/45' : 'text-gray-500'}>Ảnh đã phân tích được dùng lại trên thiết bị này; chỉ quét thêm ảnh mới.</span>
+          <button type="button" onClick={() => void startAlbumScan(true)} className="min-h-11 text-xs underline underline-offset-2 opacity-60">Phân tích lại từ đầu</button>
+        </div>
+      )}
+      {isGroupingFaces && <p role="status" className="mt-3 flex items-center gap-2 text-xs text-emerald-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Đang gom các khuôn mặt trùng nhau...</p>}
 
       {/* THANH TIẾN TRÌNH QUÉT */}
       {isScanning && (
