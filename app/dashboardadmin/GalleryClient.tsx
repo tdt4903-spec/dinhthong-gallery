@@ -13,6 +13,7 @@ import { fetchCloudflareMediaBlob, prepareCloudflareAlbumShare, prepareCloudflar
 import { fetchCloudflareFolderPage } from '@/lib/cloudflare-folder'
 import { SITE_BANNER_URL } from '@/lib/site-assets'
 import { DEFAULT_ALBUM_FEATURES, normalizeAlbumFeatures, resolveAlbumFeatures } from '@/lib/album-features'
+import { useImageZoom } from '@/lib/use-image-zoom'
 import { 
   Search, Sun, Moon, Plus, Camera, 
   Trash2, LogOut, User as UserIcon,
@@ -245,6 +246,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const [loadingImages, setLoadingImages] = useState(false)
   const [previewMedia, setPreviewMedia] = useState<MediaItem | null>(null)
+  const isPreviewOpen = previewMedia !== null
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [newAlbumFeatures, setNewAlbumFeatures] = useState({ passwordEnabled: false, password: '', selectionLimitEnabled: false, selectionLimit: '', watermark: false })
 
@@ -264,10 +266,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [comments, setComments] = useState<Record<string, string>>({})
   const [currentCommentInput, setCurrentCommentInput] = useState('')
   const [isSavingComment, setIsSavingComment] = useState(false)
-
-  const [zoomScale, setZoomScale] = useState(1)
-  const [panPosition, setPanPosition] = useState({ x: 0, y: 0 })
-  const lastTapRef = useRef<number>(0)
 
   const [starFilter, setStarFilter] = useState<number | 'all' | 'selected'>('all')
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
@@ -342,11 +340,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [preparedArchive, setPreparedArchive] = useState<{ blob: Blob; name: string } | null>(null)
   const archiveDialogRef = useRef<HTMLDivElement | null>(null)
   const archiveDialogOpen = archiveProgress !== null
+  const isMediaDialogOpen = isPreviewOpen || archiveDialogOpen
   useEffect(() => {
     if (!archiveDialogOpen) return
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
     archiveDialogRef.current?.focus({ preventScroll: true })
     const onKeyDown = (event: KeyboardEvent) => {
       const dialog = archiveDialogRef.current
@@ -378,7 +375,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
     document.addEventListener('keydown', onKeyDown)
     return () => {
-      document.body.style.overflow = previousOverflow
       document.removeEventListener('keydown', onKeyDown)
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
     }
@@ -427,8 +423,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [useFileExtension, setUseFileExtension] = useState(false)
 
   const thumbnailRef = useRef<HTMLDivElement>(null)
-  const touchStartX = useRef<number | null>(null)
-  const touchEndX = useRef<number | null>(null)
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -2070,8 +2064,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
     setDownloadingId(null)
     setPreviewMedia(null)
-    setZoomScale(1)
-    setPanPosition({ x: 0, y: 0 })
+    imageZoom.reset()
   }
 
   const handleClearAllSelections = async () => {
@@ -2493,58 +2486,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
   }
 
-  const handleTouchStart = (e: React.TouchEvent) => { 
-    if (e.touches.length === 1) {
-      touchStartX.current = e.targetTouches[0].clientX 
-    }
-  }
-  const handleTouchMove = (e: React.TouchEvent) => { 
-    if (e.touches.length === 1) {
-      touchEndX.current = e.targetTouches[0].clientX 
-    }
-  }
-  const handleTouchEnd = () => {
-    if (zoomScale > 1) return
-    if (!touchStartX.current || !touchEndX.current) return
-    const distance = touchStartX.current - touchEndX.current
-    if (distance > 45) handleNextImage()
-    if (distance < -45) handlePrevImage()
-    touchStartX.current = null
-    touchEndX.current = null
-  }
-
-  const handleZoomIn = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    setZoomScale(prev => Math.min(prev + 0.4, 4))
-  }
-
-  const handleZoomOut = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    setZoomScale(prev => {
-      const next = Math.max(prev - 0.4, 1)
-      if (next === 1) setPanPosition({ x: 0, y: 0 })
-      return next
-    })
-  }
-
-  const handleResetZoom = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation()
-    setZoomScale(1)
-    setPanPosition({ x: 0, y: 0 })
-  }
-
-  const handleDoubleTap = (e: React.TouchEvent | React.MouseEvent) => {
-    const now = Date.now()
-    if (now - lastTapRef.current < 300) {
-      if (zoomScale > 1) {
-        handleResetZoom()
-      } else {
-        setZoomScale(2.2)
-      }
-    }
-    lastTapRef.current = now
-  }
-
   const handlePrevImage = useCallback(() => {
     if (previewSourceList.length === 0) return
     if (currentIndex > 0) setPreviewMedia(previewSourceList[currentIndex - 1])
@@ -2556,6 +2497,26 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     if (currentIndex < previewSourceList.length - 1) setPreviewMedia(previewSourceList[currentIndex + 1])
     else setPreviewMedia(previewSourceList[0])
   }, [currentIndex, previewSourceList])
+
+  const imageZoom = useImageZoom({
+    mediaKey: previewMedia?.id,
+    enabled: previewMedia?.type === 'image',
+    onSwipeLeft: handleNextImage,
+    onSwipeRight: handlePrevImage,
+  })
+  const zoomScale = imageZoom.scale
+  const handleZoomIn = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    imageZoom.zoomIn()
+  }
+  const handleZoomOut = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    imageZoom.zoomOut()
+  }
+  const handleResetZoom = (e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    imageZoom.reset()
+  }
 
   const handleGenerateKey = async () => {
     if (!customerName.trim()) { void showAlert('Vui lòng nhập Tên khách hàng!'); return; }
@@ -3042,8 +3003,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       const fileName = customNames[previewMedia.id] || previewMedia.name
       document.title = `${fileName} - Dinh Thong Gallery`
       setCurrentCommentInput(comments[previewMedia.id] || '')
-      setZoomScale(1)
-      setPanPosition({ x: 0, y: 0 })
     } else if (folderHistory.length > 0) {
       const currentFolder = folderHistory[folderHistory.length - 1]
       document.title = (customNames[currentFolder.id] || currentFolder.title || 'DinhThong Gallery').trim()
@@ -3104,8 +3063,22 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }, [currentIndex, previewSourceList])
 
   useEffect(() => {
+    if (!isMediaDialogOpen) return
+    const bodyOverflow = document.body.style.overflow
+    const htmlOverflow = document.documentElement.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = bodyOverflow
+      document.documentElement.style.overflow = htmlOverflow
+    }
+  }, [isMediaDialogOpen])
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!previewMedia) return
+      if (!previewMedia || archiveDialogOpen) return
+      const target = e.target
+      if (e.key !== 'Escape' && target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
       if (e.key === 'ArrowLeft') handlePrevImage()
       if (e.key === 'ArrowRight') handleNextImage()
       if (e.key === 'Escape') handleClosePreview()
@@ -3115,7 +3088,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [previewMedia, handlePrevImage, handleNextImage, zoomScale])
+  }, [previewMedia, handlePrevImage, handleNextImage, zoomScale, archiveDialogOpen])
 
   const rootSetting = getFolderSettingFromState(guestRootAlbumId)
   const isCollectEnabled = Boolean(rootSetting.collect_customer_info ?? selectedAlbum?.collect_customer_info)
@@ -4719,16 +4692,25 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       {/* MODAL LIGHTBOX */}
       {previewMedia && (
         <div 
-          className="fixed inset-x-0 top-0 z-[100] flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-black/95 p-2 pt-[max(8px,env(safe-area-inset-top))] backdrop-blur-md select-none touch-pan-y sm:p-4"
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewMedia.type === 'video' ? 'Xem video' : 'Xem ảnh'}
+          className="fixed inset-x-0 top-0 z-[100] flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-black/95 p-2 pt-[max(8px,env(safe-area-inset-top))] backdrop-blur-md select-none sm:p-4"
         >
           <div className="sm:hidden grid shrink-0 grid-cols-[42px_1fr_42px] items-center px-1 py-2 text-white z-30">
             <button onClick={handleClosePreview} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md" aria-label={previewMedia.type === 'video' ? 'Đóng video' : 'Đóng ảnh'}>
               <BackIcon className="h-5 w-5" />
             </button>
-            <div className="text-center text-xs font-semibold">{currentIndex + 1} / {previewSourceList.length}</div>
+            <div className="flex h-12 flex-col items-center justify-center text-center">
+              <div className="text-xs font-semibold">{currentIndex + 1} / {previewSourceList.length}</div>
+              {previewMedia.type === 'image' && (
+                zoomScale > 1 ? (
+                  <button type="button" onClick={handleResetZoom} className="mt-1 rounded-full px-3 py-1 text-[10px] text-emerald-300" aria-label="Đưa ảnh về kích thước ban đầu">
+                    {Math.round(zoomScale * 100)}% · Đặt lại
+                  </button>
+                ) : <span className="mt-1 block text-[9px] font-normal text-white/50">Chụm 2 ngón để phóng to</span>
+              )}
+            </div>
             <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId) || Boolean(zippingFolderId) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md disabled:opacity-50" aria-label={previewMedia.type === 'video' ? 'Tải video' : 'Tải ảnh'}>
               {downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </button>
@@ -4791,10 +4773,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             </div>
           </div>
 
-          <div 
-            className={`relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden p-2 ${previewMedia.type === 'image' ? 'cursor-grab active:cursor-grabbing' : ''}`}
-            onClick={previewMedia.type === 'image' ? handleDoubleTap : undefined}
-          >
+          <div className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden">
             {previewMedia.type === 'video' ? (
               <AlbumVideoPreview
                 key={previewMedia.id}
@@ -4803,39 +4782,48 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 nativeControls={isMobileDevice()}
               />
             ) : (
-              <div 
-                className="relative flex h-full min-h-0 w-full items-center justify-center transition-transform duration-100 ease-out"
-                style={{
-                  transform: `scale(${zoomScale}) translate(${panPosition.x}px, ${panPosition.y}px)`
-                }}
+              <div
+                ref={imageZoom.viewportRef}
+                {...imageZoom.viewportProps}
+                className="absolute inset-0 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing"
               >
-                <img 
-                  src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
-                  alt={previewMedia.name}
-                  className="max-h-full max-w-full object-contain rounded-lg shadow-2xl transition-all duration-150 pointer-events-none"
-                />
+                <div ref={imageZoom.transformRef} className="relative flex h-full min-h-0 w-full items-center justify-center" style={imageZoom.transformStyle}>
+                  <img
+                    key={previewMedia.id}
+                    ref={imageZoom.imageRef}
+                    onLoad={imageZoom.onImageLoad}
+                    src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
+                    alt={previewMedia.name}
+                    draggable={false}
+                    className="max-h-full max-w-full select-none object-contain rounded-lg shadow-2xl pointer-events-none"
+                  />
 
-                {activeSetting.enable_watermark && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-35 select-none">
-                    <span className="font-serif font-black text-white text-2xl sm:text-4xl tracking-widest uppercase -rotate-12 border-2 border-white/60 px-6 py-2 rounded-2xl shadow-2xl">
-                      DINHTHONG GALLERY
-                    </span>
-                  </div>
-                )}
+                  {activeSetting.enable_watermark && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-35 select-none">
+                      <span className="font-serif font-black text-white text-2xl sm:text-4xl tracking-widest uppercase -rotate-12 border-2 border-white/60 px-6 py-2 rounded-2xl shadow-2xl">
+                        DINHTHONG GALLERY
+                      </span>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
-            {zoomScale === 1 && (
+            {previewSourceList.length > 1 && (
               <>
                 <button
+                  type="button"
+                  aria-label="Ảnh trước"
                   onClick={(e) => { e.stopPropagation(); handlePrevImage(); }}
-                  className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block z-20"
+                  className="absolute left-1 sm:left-4 top-1/2 -translate-y-1/2 flex h-11 w-11 sm:h-12 sm:w-12 items-center justify-center rounded-full border border-white/10 bg-black/50 hover:bg-black/80 text-white/90 hover:text-white transition cursor-pointer z-20 touch-manipulation"
                 >
                   <ChevronLeft className="w-6 h-6" />
                 </button>
                 <button
+                  type="button"
+                  aria-label="Ảnh sau"
                   onClick={(e) => { e.stopPropagation(); handleNextImage(); }}
-                  className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 p-2 sm:p-3 rounded-full bg-black/50 hover:bg-black/80 text-white/80 hover:text-white transition cursor-pointer hidden sm:block z-20"
+                  className="absolute right-1 sm:right-4 top-1/2 -translate-y-1/2 flex h-11 w-11 sm:h-12 sm:w-12 items-center justify-center rounded-full border border-white/10 bg-black/50 hover:bg-black/80 text-white/90 hover:text-white transition cursor-pointer z-20 touch-manipulation"
                 >
                   <ChevronRight className="w-6 h-6" />
                 </button>

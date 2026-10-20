@@ -15,6 +15,7 @@ import {
 import { getCustomerProductsSupabase } from '@/lib/customer-products'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { getPublicCategoryPath } from '@/lib/public-gallery-paths'
+import { useImageZoom } from '@/lib/use-image-zoom'
 
 type DriveItem = {
   id: string
@@ -117,6 +118,13 @@ export default function PublicAlbumPage() {
       images[nextIndex]
     )
   }
+
+  const imageZoom = useImageZoom({
+    mediaKey: preview?.id,
+    enabled: Boolean(preview),
+    onSwipeLeft: showNextImage,
+    onSwipeRight: showPreviousImage,
+  })
 
   useEffect(() => {
     if (!preview) {
@@ -346,21 +354,21 @@ export default function PublicAlbumPage() {
     }
   }, [albumSlug, supabase])
 
+  const isPreviewOpen = Boolean(preview)
+
   useEffect(() => {
-    if (!preview) return
+    if (!isPreviewOpen) return
 
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setPreview(null)
-      }
-    }
-
-    window.addEventListener('keydown', onKey)
+    const previousBodyOverflow = document.body.style.overflow
+    const previousRootOverflow = document.documentElement.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.documentElement.style.overflow = 'hidden'
 
     return () => {
-      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = previousBodyOverflow
+      document.documentElement.style.overflow = previousRootOverflow
     }
-  }, [preview])
+  }, [isPreviewOpen])
 
   useEffect(() => {
     if (!album?.title) return
@@ -608,20 +616,64 @@ export default function PublicAlbumPage() {
 
       {preview && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 p-3 sm:p-6"
-          onClick={() => setPreview(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Xem ảnh ${preview.name}`}
+          className="fixed inset-0 z-[100] flex h-[100dvh] flex-col overflow-hidden bg-black/95 text-white"
         >
-          <button
-            type="button"
-            aria-label="Đóng ảnh"
-            onClick={(event) => {
-              event.stopPropagation()
-              setPreview(null)
-            }}
-            className="absolute right-4 top-4 z-30 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-md transition hover:bg-white/20 sm:right-5 sm:top-5"
+          <div
+            className="flex shrink-0 items-center justify-between gap-3 px-4 pb-3 sm:px-6"
+            style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
           >
-            <X className="h-5 w-5" />
-          </button>
+            <div className="text-xs font-medium text-white/75" aria-live="polite">
+              {Math.max(
+                1,
+                images.findIndex(item => item.id === preview.id) + 1
+              )}
+              {' / '}
+              {images.length}
+            </div>
+
+            <div className="flex items-center gap-3">
+              {imageZoom.scale > 1.01 && (
+                <button
+                  type="button"
+                  onClick={imageZoom.reset}
+                  className="min-h-11 rounded-full bg-white/10 px-4 text-xs font-medium backdrop-blur-md transition hover:bg-white/20"
+                >
+                  {Math.round(imageZoom.scale * 100)}% · Thu về
+                </button>
+              )}
+
+              <button
+                type="button"
+                aria-label="Đóng ảnh"
+                onClick={() => setPreview(null)}
+                className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-md transition hover:bg-white/20"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          <div
+            ref={imageZoom.viewportRef}
+            {...imageZoom.viewportProps}
+            className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <img
+              ref={imageZoom.imageRef}
+              src={publicImageUrl(preview.id)}
+              alt={preview.name}
+              draggable={false}
+              onLoad={imageZoom.onImageLoad}
+              onDragStart={(event) => event.preventDefault()}
+              onContextMenu={(event) => event.preventDefault()}
+              style={imageZoom.transformStyle}
+              className="pointer-events-none h-auto max-h-full w-auto max-w-full select-none object-contain"
+            />
+          </div>
 
           {images.length > 1 && (
             <>
@@ -677,41 +729,12 @@ export default function PublicAlbumPage() {
             </>
           )}
 
-          <div
-            className="flex h-full w-full items-center justify-center"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
+          <p
+            className="shrink-0 px-4 pt-3 text-center text-[11px] leading-5 text-white/60 sm:hidden"
+            style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
           >
-            <img
-              src={publicImageUrl(preview.id)}
-              alt={preview.name}
-              draggable={false}
-              onDragStart={(event) =>
-                event.preventDefault()
-              }
-              onContextMenu={(event) =>
-                event.preventDefault()
-              }
-              className="pointer-events-none max-h-[90vh] max-w-[96vw] select-none object-contain"
-            />
-          </div>
-
-          {images.length > 1 && (
-            <div
-              className="pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/40 px-3 py-1.5 text-[10px] font-medium text-white/75 backdrop-blur-md"
-            >
-              {Math.max(
-                1,
-                images.findIndex(
-                  item =>
-                    item.id === preview.id
-                ) + 1
-              )}
-              {' / '}
-              {images.length}
-            </div>
-          )}
+            Chụm hai ngón để phóng/thu · Kéo để di chuyển
+          </p>
         </div>
       )}
     </main>
