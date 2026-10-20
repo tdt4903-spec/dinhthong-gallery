@@ -619,13 +619,13 @@ export default function PublicAlbumPage() {
           role="dialog"
           aria-modal="true"
           aria-label={`Xem ảnh ${preview.name}`}
-          className="fixed inset-0 z-[100] flex h-[100dvh] flex-col overflow-hidden bg-black/95 text-white"
+          data-media-viewer="true"
+          className="media-viewer fixed inset-0 z-[100] flex h-[100dvh] flex-col overflow-hidden bg-black text-white"
         >
           <div
-            className="flex shrink-0 items-center justify-between gap-3 px-4 pb-3 sm:px-6"
-            style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
+            className="media-viewer-header grid min-h-14 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-2 sm:px-6"
           >
-            <div className="text-xs font-medium text-white/75" aria-live="polite">
+            <div className="min-w-0 whitespace-nowrap text-xs font-medium tabular-nums text-white/75" aria-live="polite">
               {Math.max(
                 1,
                 images.findIndex(item => item.id === preview.id) + 1
@@ -634,104 +634,107 @@ export default function PublicAlbumPage() {
               {images.length}
             </div>
 
-            <div className="flex items-center gap-3">
-              {imageZoom.scale > 1.01 && (
-                <button
-                  type="button"
-                  onClick={imageZoom.reset}
-                  className="min-h-11 rounded-full bg-white/10 px-4 text-xs font-medium backdrop-blur-md transition hover:bg-white/20"
-                >
-                  {Math.round(imageZoom.scale * 100)}% · Thu về
-                </button>
-              )}
+            <button
+              type="button"
+              onClick={imageZoom.reset}
+              disabled={imageZoom.scale <= 1.01}
+              tabIndex={imageZoom.scale > 1.01 ? 0 : -1}
+              aria-hidden={imageZoom.scale <= 1.01}
+              className={`media-viewer-zoom-reset min-h-11 whitespace-nowrap rounded-full bg-white/10 px-3 text-xs font-medium tabular-nums backdrop-blur-md transition hover:bg-white/20 ${imageZoom.scale <= 1.01 ? 'invisible' : ''}`}
+            >
+              {Math.round(imageZoom.scale * 100)}% · Thu về
+            </button>
 
+            <div className="flex justify-end">
               <button
                 type="button"
                 aria-label="Đóng ảnh"
                 onClick={() => setPreview(null)}
-                className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-md transition hover:bg-white/20"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-md transition hover:bg-white/20"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
           </div>
 
-          <div
-            ref={imageZoom.viewportRef}
-            {...imageZoom.viewportProps}
-            className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <img
-              ref={imageZoom.imageRef}
-              src={publicImageUrl(preview.id)}
-              alt={preview.name}
-              draggable={false}
-              onLoad={imageZoom.onImageLoad}
-              onDragStart={(event) => event.preventDefault()}
-              onContextMenu={(event) => event.preventDefault()}
-              style={imageZoom.transformStyle}
-              className="pointer-events-none h-auto max-h-full w-auto max-w-full select-none object-contain"
-            />
+          <div className="media-viewer-stage relative min-h-0 min-w-0 w-full flex-1 overflow-hidden">
+            <div
+              ref={imageZoom.viewportRef}
+              {...imageZoom.viewportProps}
+              className="media-viewer-viewport absolute inset-0 overflow-hidden"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <img
+                key={preview.id}
+                ref={imageZoom.imageRef}
+                src={publicImageUrl(preview.id)}
+                alt={preview.name}
+                draggable={false}
+                onLoad={imageZoom.onImageLoad}
+                onDragStart={(event) => event.preventDefault()}
+                onContextMenu={(event) => event.preventDefault()}
+                style={imageZoom.transformStyle}
+                className="media-viewer-image pointer-events-none absolute inset-0 h-full w-full select-none object-contain"
+              />
+            </div>
+
+            {images.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Ảnh trước"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    showPreviousImage()
+                  }}
+                  className="absolute left-2 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-md transition hover:bg-white/20 sm:left-5 sm:h-12 sm:w-12"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    className="h-6 w-6"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M15 18L9 12L15 6"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  aria-label="Ảnh sau"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    showNextImage()
+                  }}
+                  className="absolute right-2 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-md transition hover:bg-white/20 sm:right-5 sm:h-12 sm:w-12"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    className="h-6 w-6"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M9 6L15 12L9 18"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </>
+            )}
           </div>
 
-          {images.length > 1 && (
-            <>
-              <button
-                type="button"
-                aria-label="Ảnh trước"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  showPreviousImage()
-                }}
-                className="absolute left-2 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-md transition hover:bg-white/20 sm:left-5 sm:h-12 sm:w-12"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="h-6 w-6"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M15 18L9 12L15 6"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-
-              <button
-                type="button"
-                aria-label="Ảnh sau"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  showNextImage()
-                }}
-                className="absolute right-2 top-1/2 z-30 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur-md transition hover:bg-white/20 sm:right-5 sm:h-12 sm:w-12"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  className="h-6 w-6"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M9 6L15 12L9 18"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
-            </>
-          )}
-
           <p
-            className="shrink-0 px-4 pt-3 text-center text-[11px] leading-5 text-white/60 sm:hidden"
-            style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+            className="media-viewer-footer shrink-0 px-3 py-2 text-center text-[10px] leading-4 text-white/60 sm:hidden"
           >
             Chụm hai ngón để phóng/thu · Kéo để di chuyển
           </p>

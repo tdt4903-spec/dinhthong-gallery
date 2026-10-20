@@ -4693,30 +4693,29 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       {previewMedia && (
         <div 
           role="dialog"
+          data-media-viewer="true"
           aria-modal="true"
           aria-label={previewMedia.type === 'video' ? 'Xem video' : 'Xem ảnh'}
-          className="fixed inset-x-0 top-0 z-[100] flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-black/95 p-2 pt-[max(8px,env(safe-area-inset-top))] backdrop-blur-md select-none sm:p-4"
+          className="media-viewer fixed inset-0 z-[100] flex min-h-0 flex-col overflow-hidden bg-black select-none"
         >
-          <div className="sm:hidden grid shrink-0 grid-cols-[42px_1fr_42px] items-center px-1 py-2 text-white z-30">
-            <button onClick={handleClosePreview} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md" aria-label={previewMedia.type === 'video' ? 'Đóng video' : 'Đóng ảnh'}>
+          <div className="media-viewer-mobile-header sm:hidden grid shrink-0 grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2 px-1 py-1 text-white z-30">
+            <button onClick={handleClosePreview} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 backdrop-blur-md" aria-label={previewMedia.type === 'video' ? 'Đóng video' : 'Đóng ảnh'}>
               <BackIcon className="h-5 w-5" />
             </button>
-            <div className="flex h-12 flex-col items-center justify-center text-center">
+            <div className="media-viewer-mobile-counter flex h-12 min-w-0 flex-col items-center justify-center text-center">
               <div className="text-xs font-semibold">{currentIndex + 1} / {previewSourceList.length}</div>
               {previewMedia.type === 'image' && (
-                zoomScale > 1 ? (
-                  <button type="button" onClick={handleResetZoom} className="mt-1 rounded-full px-3 py-1 text-[10px] text-emerald-300" aria-label="Đưa ảnh về kích thước ban đầu">
-                    {Math.round(zoomScale * 100)}% · Đặt lại
-                  </button>
-                ) : <span className="mt-1 block text-[9px] font-normal text-white/50">Chụm 2 ngón để phóng to</span>
+                <span className="media-viewer-hint mt-1 block text-[10px] font-normal text-white/50">
+                  {zoomScale > 1 ? `${Math.round(zoomScale * 100)}% · Kéo để di chuyển` : 'Chụm/tách 2 ngón để zoom'}
+                </span>
               )}
             </div>
-            <button onClick={(e) => handleDownloadMedia(previewMedia, e)} disabled={Boolean(downloadingId) || Boolean(zippingFolderId) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 backdrop-blur-md disabled:opacity-50" aria-label={previewMedia.type === 'video' ? 'Tải video' : 'Tải ảnh'}>
-              {downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            <button onClick={(e) => previewMedia.type === 'image' && zoomScale > 1 ? handleResetZoom(e) : handleDownloadMedia(previewMedia, e)} disabled={zoomScale <= 1 && (Boolean(downloadingId) || Boolean(zippingFolderId) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum)} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 backdrop-blur-md disabled:opacity-50" aria-label={previewMedia.type === 'image' && zoomScale > 1 ? 'Đưa ảnh về kích thước ban đầu' : previewMedia.type === 'video' ? 'Tải video' : 'Tải ảnh'}>
+              {previewMedia.type === 'image' && zoomScale > 1 ? <RotateCcw className="h-4 w-4" /> : downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </button>
           </div>
 
-          <div className="hidden sm:flex items-center justify-between px-3 py-2 text-white/90 z-30">
+          <div className="media-viewer-desktop-header hidden sm:flex items-center justify-between px-3 py-2 text-white/90 z-30">
             <div className="truncate max-w-[50vw]">
               <h4 className="text-xs sm:text-sm font-medium truncate">
                 {customNames[previewMedia.id] || previewMedia.name}
@@ -4773,7 +4772,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             </div>
           </div>
 
-          <div className="relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden">
+          <div className="media-viewer-stage relative flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden">
             {previewMedia.type === 'video' ? (
               <AlbumVideoPreview
                 key={previewMedia.id}
@@ -4785,7 +4784,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               <div
                 ref={imageZoom.viewportRef}
                 {...imageZoom.viewportProps}
-                className="absolute inset-0 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing"
+                className="media-viewer-viewport absolute inset-0 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing"
               >
                 <div ref={imageZoom.transformRef} className="relative flex h-full min-h-0 w-full items-center justify-center" style={imageZoom.transformStyle}>
                   <img
@@ -4795,7 +4794,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
                     alt={previewMedia.name}
                     draggable={false}
-                    className="max-h-full max-w-full select-none object-contain rounded-lg shadow-2xl pointer-events-none"
+                    className="media-viewer-image max-h-full max-w-full select-none object-contain pointer-events-none"
                   />
 
                   {activeSetting.enable_watermark && (
@@ -4831,7 +4830,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             )}
           </div>
 
-          <div className="sm:hidden z-30 max-h-[40dvh] w-full shrink-0 overflow-y-auto px-1 pb-[max(8px,env(safe-area-inset-bottom))]">
+          <div className="media-viewer-mobile-footer sm:hidden z-30 max-h-[40dvh] w-full shrink-0 overflow-y-auto px-1 pt-2">
             <div className="rounded-2xl border border-white/12 bg-black/72 p-2.5 shadow-2xl backdrop-blur-xl">
               {activeSetting.allow_comments && (
                 <div className="mb-2 flex items-center gap-2 rounded-xl border border-white/10 bg-white/6 px-2.5 py-2">
@@ -4843,7 +4842,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     placeholder="Ghi chú yêu cầu sửa ảnh..."
                     className="min-w-0 flex-1 bg-transparent text-base text-white outline-none placeholder:text-white/35"
                   />
-                  <button onClick={() => handleSaveComment(previewMedia.id)} disabled={isSavingComment} className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-600 text-white disabled:opacity-50">
+                  <button onClick={() => handleSaveComment(previewMedia.id)} disabled={isSavingComment} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white disabled:opacity-50" aria-label="Lưu bình luận">
                     {isSavingComment ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
                   </button>
                 </div>
@@ -4891,7 +4890,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             </div>
           </div>
 
-          <div className="hidden sm:flex flex-col items-center gap-2 pb-2 z-30 max-w-xl mx-auto w-full px-2">
+          <div className="media-viewer-desktop-footer hidden sm:flex flex-col items-center gap-2 pb-2 z-30 max-w-xl mx-auto w-full px-2">
             {activeSetting.allow_comments && (
               <div className="w-full flex items-center gap-2 bg-black/80 px-3 py-2 rounded-2xl backdrop-blur-md border border-white/15 shadow-xl">
                 <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />

@@ -443,7 +443,7 @@ textarea {
      MODAL
   ------------------------------------------------ */
 
-  [role="dialog"] {
+  [role="dialog"]:not([data-media-viewer]) {
     max-width: calc(100vw - 24px);
     max-height: calc(100dvh - 24px);
   }
@@ -510,3 +510,74 @@ textarea {
 }
 
 /* ===== DINHTHONG MOBILE RESPONSIVE END ===== */
+
+/* Photo viewers fill the screen; ordinary popups keep their mobile margins. */
+.media-viewer[role="dialog"] {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  overscroll-behavior: none;
+  background: #050505;
+  padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+}
+
+.media-viewer .media-viewer-stage,
+.media-viewer .media-viewer-viewport {
+  min-width: 0;
+  min-height: 0;
+}
+
+.media-viewer .media-viewer-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.media-viewer .media-viewer-mobile-footer {
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 639px), (max-height: 500px) and (pointer: coarse) {
+  .media-viewer .media-viewer-mobile-header {
+    display: grid;
+  }
+
+  .media-viewer .media-viewer-mobile-footer {
+    display: block;
+  }
+
+  .media-viewer .media-viewer-desktop-header,
+  .media-viewer .media-viewer-desktop-footer {
+    display: none;
+  }
+}
+
+@media (max-height: 500px) and (pointer: coarse) {
+  .media-viewer .media-viewer-header {
+    min-height: 44px;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .media-viewer .media-viewer-mobile-counter {
+    height: 40px;
+  }
+
+  .media-viewer .media-viewer-hint,
+  .media-viewer .media-viewer-footer {
+    display: none;
+  }
+
+  .media-viewer .media-viewer-mobile-footer {
+    max-height: 30dvh;
+  }
+}
