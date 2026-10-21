@@ -51,6 +51,7 @@ export function useImageZoom({ mediaKey, enabled = true, onSwipeLeft, onSwipeRig
   const lastTouchAt = useRef(-Infinity);
   const lastMouseDragAt = useRef(-Infinity);
   const frame = useRef<number | null>(null);
+  const wheelEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scalePublishedAt = useRef(0);
   const [scale, setScale] = useState(1);
 
@@ -120,17 +121,19 @@ export function useImageZoom({ mediaKey, enabled = true, onSwipeLeft, onSwipeRig
     }
     if (frame.current !== null) cancelAnimationFrame(frame.current);
     frame.current = null;
+    if (wheelEndTimer.current !== null) clearTimeout(wheelEndTimer.current);
+    wheelEndTimer.current = null;
     transform.current = { ...IDENTITY };
     paint();
     setScale(1);
   }, [paint]);
 
-  const zoomAt = useCallback((nextScale: number, point: Point = { x: 0, y: 0 }) => {
+  const zoomAt = useCallback((nextScale: number, point: Point = { x: 0, y: 0 }, publishImmediately = true) => {
     if (!optionsRef.current.enabled) return;
     const current = transform.current;
     const targetScale = clamp(nextScale, 1, MAX_SCALE);
     const factor = targetScale / current.scale;
-    update({ scale: targetScale, x: point.x - (point.x - current.x) * factor, y: point.y - (point.y - current.y) * factor }, true);
+    update({ scale: targetScale, x: point.x - (point.x - current.x) * factor, y: point.y - (point.y - current.y) * factor }, publishImmediately);
     if (pointers.current.size) zoomedDuringGesture.current = true;
     lastTap.current = null;
   }, [update]);
@@ -239,6 +242,28 @@ export function useImageZoom({ mediaKey, enabled = true, onSwipeLeft, onSwipeRig
     zoomAt(transform.current.scale > 1.001 ? 1 : DOUBLE_TAP_SCALE, localPoint({ x: event.clientX, y: event.clientY }));
   }, [localPoint, zoomAt]);
 
+  const onWheel = useCallback((event: WheelEvent) => {
+    if (!optionsRef.current.enabled || !Number.isFinite(event.deltaY) || event.deltaY === 0 || pointers.current.size > 1) return;
+    if (event.target instanceof Element && event.target.closest('button, a, input, textarea, select, video, [data-no-image-gesture]')) return;
+    // A native non-passive listener prevents scrolling/zooming the page while
+    // the wheel controls this image, including at its minimum/maximum scale.
+    event.preventDefault();
+    event.stopPropagation();
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewportRef.current?.clientHeight || 800 : 1;
+    const delta = clamp(event.deltaY * unit, -120, 120);
+    zoomAt(transform.current.scale * Math.exp(-delta * 0.002), localPoint({ x: event.clientX, y: event.clientY }), false);
+    // Keep dragging continuous if the user rolls the wheel with the button held.
+    if (gesture.current.kind === 'single') {
+      const point = [...pointers.current.values()][0];
+      if (point) gesture.current = { ...gesture.current, start: { x: point.x, y: point.y }, origin: { ...transform.current } };
+    }
+    if (wheelEndTimer.current !== null) clearTimeout(wheelEndTimer.current);
+    wheelEndTimer.current = setTimeout(() => {
+      wheelEndTimer.current = null;
+      queuePaint(true);
+    }, 120);
+  }, [localPoint, queuePaint, zoomAt]);
+
   useEffect(() => {
     reset();
     const viewport = viewportRef.current;
@@ -254,10 +279,12 @@ export function useImageZoom({ mediaKey, enabled = true, onSwipeLeft, onSwipeRig
       }
     }) : null;
     if (viewport) observer?.observe(viewport);
+    viewport?.addEventListener('wheel', onWheel, { passive: false });
     window.addEventListener('resize', reset);
     window.addEventListener('orientationchange', reset);
     return () => {
       observer?.disconnect();
+      viewport?.removeEventListener('wheel', onWheel);
       window.removeEventListener('resize', reset);
       window.removeEventListener('orientationchange', reset);
       const pointerIds = [...pointers.current.keys()];
@@ -268,8 +295,10 @@ export function useImageZoom({ mediaKey, enabled = true, onSwipeLeft, onSwipeRig
       }
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       frame.current = null;
+      if (wheelEndTimer.current !== null) clearTimeout(wheelEndTimer.current);
+      wheelEndTimer.current = null;
     };
-  }, [mediaKey, enabled, reset]);
+  }, [mediaKey, enabled, reset, onWheel]);
 
   const transformStyle = useMemo<CSSProperties>(() => ({
     transform: 'translate3d(0px, 0px, 0) scale(1)', transformOrigin: 'center center',
