@@ -7,6 +7,7 @@ import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import dynamic from 'next/dynamic'
 import { FaceScanIcon } from '../../components/ui/FaceScanIcon'
 import AlbumVideoPreview from '../../components/ui/AlbumVideoPreview'
+import GuestContactButton from '../../components/ui/GuestContactButton'
 import { createBrowserClient } from '@supabase/ssr'
 import { saveAs } from 'file-saver'
 import { fetchCloudflareMediaBlob, prepareCloudflareAlbumShare, prepareCloudflareArchiveLocally, supportsLocalArchivePreparation, UnsupportedLocalArchiveError, runCloudflareArchive, type DownloadEntry } from '@/lib/cloudflare-download'
@@ -6051,6 +6052,14 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         </div>, document.body
       )}
       <AppPopupHost popup={popup} onResolve={resolvePopup} />
+
+      {isSharedGuest && !isMediaDialogOpen && !isFaceFilterOpen && !showGuestNameModal && !guestAccessDenied && !popup.open && (
+        <GuestContactButton
+          isDarkMode={isDarkMode}
+          hasMobileToolbar={Boolean(selectedAlbum && !isLocked && downloadableImages.length > 0)}
+          desktopToolbarCount={Number(currentSelectionCount > 0) + Number(Boolean(selectedAlbum && selectedDownloadImages.length > 0))}
+        />
+      )}
 
       {/* Footer */}
       <footer className={`border-t py-6 sm:py-8 text-xs transition-colors ${
