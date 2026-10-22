@@ -68,12 +68,12 @@ export default function GuestContactButton({ isDarkMode, hasMobileToolbar, deskt
               rel="noopener noreferrer"
               onClick={closeAndFocus}
               className={`flex min-h-14 items-center gap-3 rounded-2xl border p-3 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 ${isDarkMode ? 'border-sky-400/20 bg-sky-400/10 hover:bg-sky-400/20' : 'border-sky-100 bg-sky-50 hover:bg-sky-100'}`}
-              aria-label="Liên hệ Zalo DinhThong, số 0838040903, mở trong tab mới"
+              aria-label="Liên hệ Zalo DinhThong, mở trong tab mới"
             >
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0068ff] text-[11px] font-extrabold text-white" aria-hidden="true">Zalo</span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-bold">Zalo</span>
-                <span className={`mt-0.5 block text-xs ${isDarkMode ? 'text-white/60' : 'text-slate-500'}`}>0838 040 903</span>
+                <span className={`mt-0.5 block text-xs ${isDarkMode ? 'text-white/60' : 'text-slate-500'}`}>DinhThong</span>
               </span>
               <ArrowUpRight className="h-4 w-4 shrink-0 text-sky-500" aria-hidden="true" />
             </a>
