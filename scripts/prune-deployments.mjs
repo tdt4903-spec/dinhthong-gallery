@@ -127,24 +127,34 @@ async function vercel(token) {
     return { deployments, protectedIds, productionId: production.id }
   }
 
-  const before = await snapshot()
-  const candidates = before.deployments.filter(item => !before.protectedIds.has(item.uid))
-  console.log(`Vercel: ${before.deployments.length} deployments; ${candidates.length} older deployments ${apply ? 'to remove' : 'would be removed'}.`)
-  if (!apply) return
-  for (const candidate of candidates.reverse()) {
-    // Re-read before every mutation so concurrent deploys/promotions are protected.
-    const fresh = await snapshot()
-    if (fresh.protectedIds.has(candidate.uid)) continue
-    const detail = await api(`/v13/deployments/${candidate.uid}?${scope}`)
-    if (detail.projectId !== VERCEL_PROJECT) throw new Error('Deployment does not belong to the expected Vercel project')
-    const projectNow = await getProject()
-    if (Object.values(projectNow.targets || {}).some(target => target?.id === candidate.uid)) continue
-    await api(`/v13/deployments/${candidate.uid}?${scope}`, 'DELETE')
-    console.log(`Vercel: removed ${candidate.uid}.`)
+  for (let pass = 1; pass <= 3; pass++) {
+    const before = await snapshot()
+    const candidates = before.deployments.filter(item => !before.protectedIds.has(item.uid))
+    console.log(`Vercel: pass ${pass}, ${before.deployments.length} deployments; ${candidates.length} older deployments ${apply ? 'to remove' : 'would be removed'}.`)
+    if (!apply) return
+    for (const candidate of candidates.reverse()) {
+      // Re-read before every mutation so concurrent deploys/promotions are protected.
+      const fresh = await snapshot()
+      if (fresh.protectedIds.has(candidate.uid)) continue
+      const detail = await api(`/v13/deployments/${candidate.uid}?${scope}`)
+      if (detail.projectId !== VERCEL_PROJECT) throw new Error('Deployment does not belong to the expected Vercel project')
+      const projectNow = await getProject()
+      if (Object.values(projectNow.targets || {}).some(target => target?.id === candidate.uid)) continue
+      await api(`/v13/deployments/${candidate.uid}?${scope}`, 'DELETE')
+      console.log(`Vercel: removed ${candidate.uid}.`)
+    }
+    const after = await snapshot()
+    if (!after.deployments.some(item => item.uid === after.productionId)) throw new Error('Could not verify Vercel production after cleanup')
+    const remainingCandidates = after.deployments.filter(item => !after.protectedIds.has(item.uid))
+    if (!remainingCandidates.length) {
+      const protectedExtras = Math.max(0, after.deployments.length - KEEP)
+      console.log(`Vercel: verified ${after.deployments.length} deployments remain; production preserved.${protectedExtras ? ` ${protectedExtras} older live target(s) are additionally protected.` : ''}`)
+      return
+    }
+    if (pass === 3) throw new Error(`Vercel retention did not converge: ${remainingCandidates.length} unprotected older deployment(s) remain; retry cleanup after deployments settle`)
+    console.log('Vercel: deployment history changed during cleanup; refreshing the deletion plan.')
+    await new Promise(resolve => setTimeout(resolve, 2000))
   }
-  const after = await snapshot()
-  if (!after.deployments.some(item => item.uid === after.productionId)) throw new Error('Could not verify Vercel production after cleanup')
-  console.log(`Vercel: ${after.deployments.length} deployments remain; production preserved.`)
 }
 
 async function cloudflare(token) {
@@ -166,6 +176,7 @@ async function cloudflare(token) {
       if (info?.total_pages ? page >= info.total_pages : items.length < 100) {
         const deployments = sortedUnique(all, 'id', 'created_on')
         if (!activeId || !deployments.some(item => item.id === activeId)) throw new Error('Cloudflare active deployment unavailable')
+        if (deployments[0].id !== activeId) throw new Error('Unexpected Cloudflare deployment order; refusing cleanup')
         return {
           deployments,
           activeId,
@@ -176,18 +187,29 @@ async function cloudflare(token) {
     throw new Error('Cloudflare pagination limit reached')
   }
 
-  const before = await snapshot()
-  const candidates = before.deployments.filter(item => !before.protectedIds.has(item.id))
-  console.log(`Cloudflare: ${before.deployments.length} deployments; ${candidates.length} older deployments ${apply ? 'to remove' : 'would be removed'}.`)
-  if (!apply) return
-  for (const candidate of candidates.reverse()) {
-    const fresh = await snapshot()
-    if (fresh.protectedIds.has(candidate.id)) continue
-    await api(`${basePath}/${candidate.id}`, 'DELETE')
-    console.log(`Cloudflare: removed ${candidate.id}.`)
+  for (let pass = 1; pass <= 3; pass++) {
+    const before = await snapshot()
+    const candidates = before.deployments.filter(item => !before.protectedIds.has(item.id))
+    console.log(`Cloudflare: pass ${pass}, ${before.deployments.length} deployments; ${candidates.length} older deployments ${apply ? 'to remove' : 'would be removed'}.`)
+    if (!apply) return
+    for (const candidate of candidates.reverse()) {
+      const fresh = await snapshot()
+      if (fresh.protectedIds.has(candidate.id)) continue
+      await api(`${basePath}/${candidate.id}`, 'DELETE')
+      console.log(`Cloudflare: removed ${candidate.id}.`)
+    }
+    const after = await snapshot()
+    if (!after.deployments.some(item => item.id === before.activeId)) throw new Error('Could not verify Cloudflare active deployment after cleanup')
+    const remainingCandidates = after.deployments.filter(item => !after.protectedIds.has(item.id))
+    if (!remainingCandidates.length) {
+      const protectedExtras = Math.max(0, after.deployments.length - KEEP)
+      console.log(`Cloudflare: verified ${after.deployments.length} deployments remain; active deployment preserved.${protectedExtras ? ` ${protectedExtras} older live deployment(s) are additionally protected.` : ''}`)
+      return
+    }
+    if (pass === 3) throw new Error(`Cloudflare retention did not converge: ${remainingCandidates.length} unprotected older deployment(s) remain; retry cleanup after deployments settle`)
+    console.log('Cloudflare: deployment history changed during cleanup; refreshing the deletion plan.')
+    await new Promise(resolve => setTimeout(resolve, 2000))
   }
-  const after = await snapshot()
-  console.log(`Cloudflare: ${after.deployments.length} deployments remain; active deployment preserved.`)
 }
 
 let failed = false

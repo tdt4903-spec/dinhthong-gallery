@@ -45,7 +45,10 @@ rotating local OAuth tokens must not be copied into CI secrets.
 
 The cleanup reads all API pages, checks the current production deployment before
 each deletion, and postpones Vercel cleanup while a deployment is building or when
-the newest deployment failed. API errors stop cleanup for that provider.
+the newest deployment failed. If another deployment arrives during cleanup, it
+refreshes the plan for up to three passes. It reports a failure if unprotected old
+deployments remain, and explicitly reports any older live targets retained for
+safety. API errors stop cleanup for that provider.
 
 ## Deployments made outside these commands
 
