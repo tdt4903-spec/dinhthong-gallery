@@ -1,4 +1,6 @@
-export type CloudflareFolderItem = {
+import type { AlbumPhotoTimeMetadata } from './album-photo-sort'
+
+export type CloudflareFolderItem = AlbumPhotoTimeMetadata & {
   id: string
   name: string
   type: 'image' | 'video' | 'folder'
@@ -47,7 +49,7 @@ function waitForRetry(delay: number, signal?: AbortSignal): Promise<void> {
 
 function parsePage(data: unknown): CloudflareFolderPage {
   if (!data || typeof data !== 'object' || !('files' in data) || !Array.isArray(data.files)) {
-    throw new Error('Cloudflare trả về danh sách thư mục không hợp lệ.')
+    throw new Error('Máy chủ trả về danh sách thư mục không hợp lệ.')
   }
   const files = data.files.map((item: unknown): CloudflareFolderItem => {
     if (!item || typeof item !== 'object') throw new Error('Danh sách tệp không hợp lệ.')
@@ -66,12 +68,15 @@ function parsePage(data: unknown): CloudflareFolderPage {
       url: file.url,
       fullUrl: file.fullUrl,
       downloadUrl: file.downloadUrl,
+      ...(typeof file.capturedTime === 'string' ? { capturedTime: file.capturedTime } : {}),
+      ...(typeof file.createdTime === 'string' ? { createdTime: file.createdTime } : {}),
+      ...(typeof file.modifiedTime === 'string' ? { modifiedTime: file.modifiedTime } : {}),
       ...(typeof file.canDownload === 'boolean' ? { canDownload: file.canDownload } : {}),
     }
   })
   const token = (data as { nextPageToken?: unknown }).nextPageToken
   if (token !== undefined && (typeof token !== 'string' || token.length > 4096)) {
-    throw new Error('Cloudflare trả về mã trang không hợp lệ.')
+    throw new Error('Máy chủ trả về mã trang không hợp lệ.')
   }
   return { files, ...(token ? { nextPageToken: token } : {}) }
 }
@@ -112,7 +117,7 @@ export async function fetchCloudflareFolderPage(
       })
       if (!response.ok) {
         void response.body?.cancel().catch(() => {})
-        const message = `Cloudflare trả về HTTP ${response.status}.`
+        const message = `Máy chủ phản hồi HTTP ${response.status}.`
         if (response.status === 429 || response.status >= 500) throw new Error(message)
         throw new FolderHttpError(message)
       }
@@ -121,7 +126,7 @@ export async function fetchCloudflareFolderPage(
       return page
     } catch (error) {
       throwIfAborted(signal)
-      lastError = timedOut ? new Error('Cloudflare không phản hồi trong 60 giây.') : error
+      lastError = timedOut ? new Error('Máy chủ không phản hồi trong 60 giây.') : error
       if (error instanceof FolderHttpError || attempt === MAX_ATTEMPTS - 1) break
     } finally {
       clearTimeout(timer)
@@ -131,7 +136,7 @@ export async function fetchCloudflareFolderPage(
   }
 
   const detail = lastError instanceof Error ? lastError.message : 'Lỗi kết nối.'
-  const error = new Error(`Không thể tải danh sách thư mục từ Cloudflare: ${detail}`)
+  const error = new Error(`Không thể tải danh sách thư mục: ${detail}`)
   error.name = 'CloudflareFolderError'
   throw error
 }

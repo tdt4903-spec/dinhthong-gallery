@@ -15,15 +15,16 @@ import { fetchCloudflareFolderPage } from '@/lib/cloudflare-folder'
 import { SITE_BANNER_URL } from '@/lib/site-assets'
 import { DEFAULT_ALBUM_FEATURES, normalizeAlbumFeatures, resolveAlbumFeatures } from '@/lib/album-features'
 import { useImageZoom } from '@/lib/use-image-zoom'
+import { ALBUM_PHOTO_SORT_OPTIONS, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
 import { 
   Search, Sun, Moon, Plus, Camera, 
   Trash2, LogOut, User as UserIcon,
-  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, Lock as LockIcon, ZoomIn, ZoomOut, RotateCcw, Send, Bell
+  Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, Heart, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, Lock as LockIcon, ZoomIn, ZoomOut, RotateCcw, Send, Bell
 } from 'lucide-react'
 
 const FaceFilterPanel = dynamic(() => import('../../components/ui/FaceFilterPanel'), { ssr: false })
 
-interface MediaItem {
+interface MediaItem extends AlbumPhotoTimeMetadata {
   id: string
   name: string
   type: 'image' | 'video' | 'folder'
@@ -268,7 +269,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [currentCommentInput, setCurrentCommentInput] = useState('')
   const [isSavingComment, setIsSavingComment] = useState(false)
 
-  const [starFilter, setStarFilter] = useState<number | 'all' | 'selected'>('all')
+  const [selectionFilter, setSelectionFilter] = useState<'all' | 'selected' | 'unselected'>('all')
+  const [photoSort, setPhotoSort] = useState<AlbumPhotoSort>('default')
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false)
   const [isCommentModalOpen, setIsCommentModalOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -397,7 +399,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   // Một vùng tick duy nhất dành cho TẢI ẢNH trên cả desktop và mobile.
   // Desktop: ảnh đã tick được nén ZIP. Mobile: ảnh đã tick được chuyển sang
-  // bảng lưu/chia sẻ hệ thống để lưu vào Photos. Danh sách TXT chỉ dựa trên ratings (số sao).
+  // bảng lưu/chia sẻ hệ thống để lưu vào Photos. Danh sách TXT dựa trên ảnh đã thả tim.
   const [downloadSelectedIds, setDownloadSelectedIds] = useState<Set<string>>(new Set())
   const [isPreparingMobileImages, setIsPreparingMobileImages] = useState(false)
   const [mobileDownloadProgress, setMobileDownloadProgress] = useState('')
@@ -1006,7 +1008,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const visibleItems = useMemo(() => (items || []).filter(item => item && !hiddenItemIds.has(item.id)), [items, hiddenItemIds])
   const subFolders = visibleItems.filter(item => item.type === 'folder')
-  const mediaFiles = visibleItems.filter(item => item.type !== 'folder')
+  const mediaFiles = useMemo(() => sortAlbumPhotos(visibleItems.filter(item => item.type !== 'folder'), photoSort), [visibleItems, photoSort])
 
   const firstCurrentImage = visibleItems.find(item => item.type === 'image')
   const cachedCurrentFolderCover = currentActiveFolderId ? albumCovers[currentActiveFolderId] : ''
@@ -1036,15 +1038,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     : {}
   const hasLatestGuestSelections = Object.values(latestGuestRatings).some(stars => Number(stars) > 0)
   const displayRatings = !isSharedGuest && hasLatestGuestSelections ? latestGuestRatings : ratings
+  const isGuestSelectionReview = !isSharedGuest && hasLatestGuestSelections
 
   const filteredMediaFiles = mediaFiles.filter(img => {
+    if (!(customNames[img.id] || img.name).toLocaleLowerCase('vi').includes(searchTerm.toLocaleLowerCase('vi'))) return false
     if (faceMatchedIds !== null) {
       if (img.type !== 'image' || !faceMatchedIds.has(img.id)) return false
     }
-    if (starFilter === 'all') return true
-    const imgStar = displayRatings[img.id] || 0
-    if (starFilter === 'selected') return imgStar > 0
-    return imgStar === starFilter
+    if (selectionFilter === 'all') return true
+    const isFavorite = (displayRatings[img.id] || 0) > 0
+    return selectionFilter === 'selected' ? isFavorite : !isFavorite
   })
 
   const guestSelectedImagesList = hasLatestGuestSelections
@@ -1083,6 +1086,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const currentSelectionCount = selectedAlbum ? selectedItemIds.size : selectedAlbumIds.size
 
   const previewSourceList = filteredMediaFiles
+  useEffect(() => {
+    if (previewMedia && !previewSourceList.some(item => item.id === previewMedia.id)) setPreviewMedia(null)
+  }, [previewMedia, previewSourceList])
   const currentIndex = previewSourceList.findIndex(img => img.id === previewMedia?.id)
 
   const durationOptions = [
@@ -1447,7 +1453,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setLoadingImages(true)
     // Xóa nội dung thư mục cũ ngay khi chuyển thư mục để header không nháy nhầm ảnh bìa.
     setItems([])
-    setStarFilter('all')
+    setSelectionFilter('all')
     setFaceMatchedIds(null)
     setIsFaceFilterOpen(false)
     setInspectFaceImageItem(null)
@@ -2130,7 +2136,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     })
   }
 
-  const handleRateImage = async (imageId: string, stars: number) => {
+  const handleToggleFavorite = async (imageId: string) => {
     if (isSharedGuest && !guestCanSelect) {
       void showAlert(activeSetting.collect_customer_info ? 'Vui lòng nhập tên để bắt đầu chọn ảnh.' : 'Vui lòng chờ xác thực quyền truy cập.')
       return
@@ -2138,6 +2144,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
     const maxSel = isSharedGuest ? Number(activeSetting?.max_select || 0) : 0
     const isCurrentlyRated = (ratings[imageId] || 0) > 0
+    const stars = isCurrentlyRated ? 0 : 1
 
     if (isSharedGuest && stars > 0 && !isCurrentlyRated) {
       const currentMediaIds = new Set(mediaFiles.map(item => item.id))
@@ -3377,7 +3384,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   {[
                     { label: 'Bộ sưu tập', value: masterFoldersList.length, note: 'Quản lý các bộ sưu tập ảnh', icon: FolderSync, tone: 'emerald' },
                     { label: 'Album', value: albums.length, note: 'Tổng số album', icon: ImageIcon, tone: 'cyan' },
-                    { label: 'Ảnh khách chọn', value: adminTotalGuestSelections, note: 'Ảnh đã chấm sao', icon: Star, tone: 'rose' },
+                    { label: 'Ảnh khách chọn', value: adminTotalGuestSelections, note: 'Ảnh đã thả tim', icon: Heart, tone: 'rose' },
                     { label: 'Người xem', value: adminTotalViewers, note: 'Lượt khách đã ghi nhận', icon: Eye, tone: 'slate' },
                   ].map(({ label, value, note, icon: Icon, tone }) => (
                     <div key={label} className={`rounded-2xl border px-3.5 py-3.5 sm:px-4 sm:py-4 backdrop-blur-xl ${isDarkMode ? 'border-white/10 bg-[#0a2218]/72' : 'border-white/70 bg-white/78 shadow-sm'}`}>
@@ -4247,22 +4254,22 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
                 <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:overflow-x-auto sm:scrollbar-none">
                   <button
-                    onClick={() => { setStarFilter('all'); setFaceMatchedIds(null); setClearFaceFilterSignal(prev => prev + 1) }}
-                    className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'all' && faceMatchedIds === null ? 'border-emerald-500 bg-emerald-600 text-white shadow' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                    onClick={() => { setSelectionFilter('all'); setFaceMatchedIds(null); setClearFaceFilterSignal(prev => prev + 1) }}
+                    className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${selectionFilter === 'all' && faceMatchedIds === null ? 'border-emerald-500 bg-emerald-600 text-white shadow' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
                     <ImageIcon className="h-3.5 w-3.5" /> Tất cả ảnh ({mediaFiles.length})
                   </button>
                   <button
-                    onClick={() => setStarFilter('selected')}
-                    className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 'selected' ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                    onClick={() => setSelectionFilter('selected')}
+                    className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${selectionFilter === 'selected' ? 'border-rose-400/40 bg-rose-500/15 text-rose-500' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
-                    <Star className="h-3.5 w-3.5 fill-current" /> Ảnh đã chọn ({displaySelectedImagesList.length})
+                    <Heart className="h-3.5 w-3.5 fill-current" /> Ảnh đã chọn ({displaySelectedImagesList.length})
                   </button>
                   <button
-                    onClick={() => setStarFilter(5)}
-                    className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${starFilter === 5 ? 'border-amber-400/40 bg-amber-500/15 text-amber-400' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
+                    onClick={() => setSelectionFilter('unselected')}
+                    className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition ${selectionFilter === 'unselected' ? 'border-emerald-500 bg-emerald-600 text-white' : isDarkMode ? 'border-white/10 bg-white/5 text-white/68' : 'border-gray-200 bg-gray-50 text-gray-600'}`}
                   >
-                    <Star className="h-3.5 w-3.5 fill-current" /> Ảnh 5 sao ({mediaFiles.filter(img => (displayRatings[img.id] || 0) === 5).length})
+                    <Heart className="h-3.5 w-3.5" /> Chưa chọn ({mediaFiles.length - displaySelectedImagesList.length})
                   </button>
                   <button
                     type="button"
@@ -4316,32 +4323,20 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </div>
               </div>
 
-              {/* Bộ lọc sao chi tiết */}
               {mediaFiles.length > 0 && (
-                <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t pt-2.5 border-gray-200/70 dark:border-white/8">
-                  <span className={`shrink-0 px-1 text-[10px] font-semibold ${isDarkMode ? 'text-white/35' : 'text-gray-400'}`}>Lọc:</span>
-                  <button onClick={() => setStarFilter('all')} className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === 'all' ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>Tất cả</button>
-                  {[0,1,2,3,4,5].map((star) => (
-                    <button key={star} onClick={() => setStarFilter(star)} className={`shrink-0 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${starFilter === star ? 'bg-emerald-600 text-white' : isDarkMode ? 'bg-white/5 text-white/55' : 'bg-gray-100 text-gray-500'}`}>
-                      <Star className="h-3 w-3 fill-current text-emerald-400" /> {star}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setIsFaceFilterOpen(prev => !prev)}
-                    className={`shrink-0 inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition cursor-pointer ${
-                      isFaceFilterOpen || faceMatchedIds !== null
-                        ? 'bg-emerald-600 text-white'
-                        : isDarkMode
-                        ? 'bg-emerald-500/15 text-emerald-300'
-                        : 'bg-emerald-50 text-emerald-700 border border-emerald-600/20'
-                    }`}
-                  >
-                    <FaceScanIcon className="h-3 w-3" />
-                    <span>{faceMatchedIds !== null ? `Khuôn mặt (${faceMatchedIds.size})` : 'Khuôn mặt'}</span>
-                  </button>
-                  {selectedImagesList.length > 0 && (
-                    <button onClick={handleClearAllSelections} className="ml-auto shrink-0 inline-flex items-center gap-1 rounded-lg border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-red-500"><Trash2 className="h-3 w-3" /> Xóa sao ({selectedImagesList.length})</button>
+                <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-gray-200/70 pt-2.5 dark:border-white/8">
+                  <label className={`flex min-w-0 flex-1 items-center gap-2 text-[11px] font-semibold sm:flex-none ${isDarkMode ? 'text-white/60' : 'text-gray-600'}`}>
+                    <span className="shrink-0">Sắp xếp:</span>
+                    <select
+                      value={photoSort}
+                      onChange={event => setPhotoSort(event.target.value as AlbumPhotoSort)}
+                      className={`min-h-10 min-w-0 flex-1 rounded-xl border px-2 py-2 text-base sm:min-h-9 sm:flex-none sm:text-xs ${isDarkMode ? 'border-white/10 bg-[#10231a] text-white' : 'border-gray-200 bg-white text-gray-800'}`}
+                    >
+                      {ALBUM_PHOTO_SORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  {displaySelectedImagesList.length > 0 && (
+                    <button onClick={handleClearAllSelections} className="sm:ml-auto shrink-0 inline-flex min-h-10 items-center gap-1 rounded-xl border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-red-500"><Trash2 className="h-3 w-3" /> Bỏ chọn tất cả ({displaySelectedImagesList.length})</button>
                   )}
                 </div>
               )}
@@ -4378,7 +4373,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               </section>
             )}
 
-            {/* MOBILE DOWNLOAD ACTIONS — tick chỉ dùng tải ảnh; sao mới dùng TXT */}
+            {/* MOBILE DOWNLOAD ACTIONS — tick dùng tải ảnh; trái tim dùng danh sách TXT */}
             {downloadableImages.length > 0 && (
               <section className={`sm:hidden mt-3 rounded-[18px] border p-2.5 ${isDarkMode ? 'border-white/10 bg-[#0a1510]' : 'border-gray-200 bg-white shadow-sm'}`}>
                 <div className="flex items-center justify-between gap-2">
@@ -4541,10 +4536,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     )}
 
                     <div className={`grid gap-2.5 sm:gap-3 ${!isSharedGuest ? 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8' : gridDensity === 'compact' ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}`}>
-                      {filteredMediaFiles
-                        .filter(item => item.name.toLowerCase().includes(searchTerm.toLowerCase()))
-                        .map((item) => {
-                          const currentStar = displayRatings[item.id] || 0
+                      {filteredMediaFiles.map((item) => {
+                          const isFavorite = (displayRatings[item.id] || 0) > 0
                           const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`
                           const displayName = customNames[item.id] || item.name
                           const isDownloadChecked = downloadSelectedIds.has(item.id)
@@ -4639,29 +4632,26 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   </button>
                                 )}
 
-                                {currentStar > 0 && (
-                                  <div className="absolute top-2 right-2 bg-emerald-600 text-white px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-md z-20">
-                                    <Star className="w-3 h-3 fill-current" />
-                                    <span>{currentStar}</span>
+                                {isFavorite && (
+                                  <div className="absolute top-2 right-2 rounded-full bg-rose-500 p-1.5 text-white shadow-md z-20" aria-label="Ảnh đã chọn">
+                                    <Heart className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
                                   </div>
                                 )}
                               </div>
 
                               <div className={`px-2 py-2 sm:px-2.5 sm:py-2.5 border-t ${isDarkMode ? 'border-white/8 bg-[#0d1712]' : 'border-gray-100 bg-white'}`}>
                                 <div className="flex flex-wrap items-center justify-between gap-1">
-                                  <div className="flex min-w-0 items-center gap-0 sm:gap-0.5">
-                                    {[1,2,3,4,5].map((star) => (
-                                      <button
-                                        key={star}
-                                        type="button"
-                                        onClick={(e) => { e.stopPropagation(); handleRateImage(item.id, currentStar === star ? 0 : star) }}
-                                        className="p-0.5 transition hover:scale-110"
-                                        title={`${star} sao`}
-                                      >
-                                        <Star className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${currentStar >= star ? 'fill-amber-400 text-amber-400' : isDarkMode ? 'text-white/28' : 'text-gray-300'}`} />
-                                      </button>
-                                    ))}
-                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={event => { event.stopPropagation(); void handleToggleFavorite(item.id) }}
+                                    disabled={isGuestSelectionReview}
+                                    aria-pressed={isFavorite}
+                                    aria-label={isGuestSelectionReview ? (isFavorite ? 'Ảnh khách đã chọn' : 'Ảnh khách chưa chọn') : isFavorite ? 'Bỏ chọn ảnh' : 'Thả tim chọn ảnh'}
+                                    title={isGuestSelectionReview ? 'Lựa chọn của khách' : isFavorite ? 'Bỏ chọn ảnh' : 'Thả tim chọn ảnh'}
+                                    className={`flex h-10 w-10 items-center justify-center rounded-xl transition active:scale-95 disabled:cursor-default ${isFavorite ? 'bg-rose-500/10 text-rose-500' : isDarkMode ? 'text-white/40 hover:bg-white/5 hover:text-rose-400' : 'text-gray-400 hover:bg-rose-50 hover:text-rose-500'}`}
+                                  >
+                                    <Heart className={`h-5 w-5 ${isFavorite ? 'fill-current' : ''}`} aria-hidden="true" />
+                                  </button>
                                   <div className="flex shrink-0 items-center gap-1">
                                     {comments[item.id] && <MessageSquare className="h-3.5 w-3.5 text-amber-400" />}
                                     <button type="button" onClick={(e) => { e.stopPropagation(); setPreviewMedia(item) }} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${isDarkMode ? 'text-white/55 hover:bg-white/8 hover:text-white' : 'text-gray-400 hover:bg-gray-100 hover:text-emerald-600'}`} title="Xem lớn"><ZoomIn className="h-3.5 w-3.5" /></button>
@@ -4849,12 +4839,17 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </div>
               )}
 
-              <div className="flex items-center justify-center gap-1 border-b border-white/10 pb-2">
-                {[1,2,3,4,5].map((star) => (
-                  <button key={star} onClick={() => handleRateImage(previewMedia.id, (ratings[previewMedia.id] || 0) === star ? 0 : star)} className="p-1.5">
-                    <Star className={`h-5 w-5 ${(ratings[previewMedia.id] || 0) >= star ? 'fill-amber-400 text-amber-400' : 'text-white/35'}`} />
-                  </button>
-                ))}
+              <div className="flex items-center justify-center border-b border-white/10 pb-2">
+                <button
+                  type="button"
+                  onClick={() => void handleToggleFavorite(previewMedia.id)}
+                  disabled={isGuestSelectionReview}
+                  aria-pressed={(displayRatings[previewMedia.id] || 0) > 0}
+                  className={`flex min-h-11 items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold transition disabled:cursor-default ${(displayRatings[previewMedia.id] || 0) > 0 ? 'bg-rose-500/15 text-rose-400' : 'text-white/70 hover:bg-white/10'}`}
+                >
+                  <Heart className={`h-5 w-5 ${(displayRatings[previewMedia.id] || 0) > 0 ? 'fill-current' : ''}`} aria-hidden="true" />
+                  {isGuestSelectionReview ? ((displayRatings[previewMedia.id] || 0) > 0 ? 'Khách đã chọn' : 'Khách chưa chọn') : (displayRatings[previewMedia.id] || 0) > 0 ? 'Đã chọn ảnh' : 'Thả tim chọn ảnh'}
+                </button>
               </div>
 
               <div className={`mt-2 grid ${previewMedia.type === 'image' ? 'grid-cols-3' : 'grid-cols-1'} gap-2`}>
@@ -4914,18 +4909,16 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             )}
 
             <div className="flex items-center gap-1.5 bg-black/60 px-4 py-2 rounded-full backdrop-blur-md border border-white/10">
-              <span className="text-[11px] text-white/70 mr-1">Đánh giá:</span>
-              {[1, 2, 3, 4, 5].map((star) => (
-                <button
-                  key={star}
-                  onClick={() => handleRateImage(previewMedia.id, (ratings[previewMedia.id] || 0) === star ? 0 : star)}
-                  className="p-1 text-white hover:scale-110 transition cursor-pointer"
-                >
-                  <Star className={`w-4 h-4 sm:w-5 sm:h-5 ${
-                    (ratings[previewMedia.id] || 0) >= star ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'
-                  }`} />
-                </button>
-              ))}
+              <button
+                type="button"
+                onClick={() => void handleToggleFavorite(previewMedia.id)}
+                disabled={isGuestSelectionReview}
+                aria-pressed={(displayRatings[previewMedia.id] || 0) > 0}
+                className={`inline-flex min-h-11 items-center gap-2 rounded-full px-2 py-1 text-xs font-semibold transition disabled:cursor-default ${(displayRatings[previewMedia.id] || 0) > 0 ? 'text-rose-400' : 'text-white/70 hover:text-rose-400'}`}
+              >
+                <Heart className={`h-5 w-5 ${(displayRatings[previewMedia.id] || 0) > 0 ? 'fill-current' : ''}`} aria-hidden="true" />
+                {isGuestSelectionReview ? ((displayRatings[previewMedia.id] || 0) > 0 ? 'Khách đã chọn' : 'Khách chưa chọn') : (displayRatings[previewMedia.id] || 0) > 0 ? 'Đã chọn ảnh' : 'Thả tim chọn ảnh'}
+              </button>
 
               {previewMedia.type === 'image' && (
                 <>
@@ -5263,7 +5256,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 className={`w-full p-3 rounded-2xl text-xs font-mono border outline-none ${
                   isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-gray-50 border-gray-200 text-gray-800'
                 }`}
-                placeholder="Chưa có ảnh nào được đánh giá sao..."
+                placeholder="Chưa có ảnh nào được thả tim..."
               />
             </div>
 
@@ -6012,7 +6005,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </div>
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-emerald-100"><div className="h-full bg-emerald-600 transition-all" style={{ width: `${archiveProgress.total ? Math.min(100, archiveProgress.completed / archiveProgress.total * 100) : 0}%` }} /></div>
                 {typeof archiveProgress.bytesReceived === 'number' && archiveProgress.bytesReceived > 0 && (
-                  <p className="mt-2 text-xs font-semibold text-emerald-700">Đã nhận {(archiveProgress.bytesReceived / (1024 * 1024)).toFixed(1)} MB{archiveProgress.totalBytes ? ` / ${(archiveProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB` : ''} qua Cloudflare</p>
+                  <p className="mt-2 text-xs font-semibold text-emerald-700">Đã nhận {(archiveProgress.bytesReceived / (1024 * 1024)).toFixed(1)} MB{archiveProgress.totalBytes ? ` / ${(archiveProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB` : ''}</p>
                 )}
                 {archiveProgress.fileName && <p className="mt-2 break-all text-xs text-gray-500">{archiveProgress.fileName}</p>}
               </div>

@@ -160,18 +160,18 @@ export async function fetchCloudflareMedia(entry: DownloadEntry, options: FetchM
       if (!response.ok) {
         void response.body?.cancel().catch(() => {})
         if (response.status === 429 || response.status >= 500) {
-          throw new RetryableDownloadError(`Cloudflare trả về HTTP ${response.status}.`)
+          throw new RetryableDownloadError(`Máy chủ phản hồi HTTP ${response.status}.`)
         }
-        throw new Error(`Cloudflare trả về HTTP ${response.status}.`)
+        throw new Error(`Máy chủ phản hồi HTTP ${response.status}.`)
       }
       if (response.status === 206) {
         void response.body?.cancel().catch(() => {})
-        throw new RetryableDownloadError('Cloudflare chỉ trả về một phần tệp.')
+        throw new RetryableDownloadError('Máy chủ chỉ trả về một phần tệp.')
       }
       const expectedSize = contentLength(response)
       if (!response.body || expectedSize === 0 || forbiddenMediaType(response.headers.get('content-type') || '')) {
         void response.body?.cancel().catch(() => {})
-        throw new RetryableDownloadError('Cloudflare chưa trả về nội dung ảnh/video hợp lệ.')
+        throw new RetryableDownloadError('Máy chủ chưa trả về nội dung ảnh/video hợp lệ.')
       }
 
       reader = response.body.getReader()
@@ -190,7 +190,7 @@ export async function fetchCloudflareMedia(entry: DownloadEntry, options: FetchM
         }
       }
       if (firstBytes === 0 || looksLikeHtml(firstChunks)) {
-        throw new RetryableDownloadError('Cloudflare trả về trang lỗi hoặc tệp rỗng.')
+        throw new RetryableDownloadError('Máy chủ trả về trang lỗi hoặc tệp rỗng.')
       }
       if (expectedSize !== undefined && (firstBytes > expectedSize || (sourceDone && firstBytes !== expectedSize))) {
         throw new RetryableDownloadError('Tệp tải xuống chưa đầy đủ.')
@@ -235,7 +235,7 @@ export async function fetchCloudflareMedia(entry: DownloadEntry, options: FetchM
             controller.abort()
             cleanup()
             const detail = error instanceof Error ? error.message : 'Đường truyền bị gián đoạn.'
-            destination.error(signal?.aborted ? abortError(signal) : timedOut ? new Error(`Tải “${entry.name}” quá thời gian chờ. Vui lòng thử lại.`) : new Error(`Không tải được “${entry.name}” qua Cloudflare: ${detail}`))
+            destination.error(signal?.aborted ? abortError(signal) : timedOut ? new Error(`Tải “${entry.name}” quá thời gian chờ. Vui lòng thử lại.`) : new Error(`Không tải được “${entry.name}”: ${detail}`))
           }
         },
         async cancel(reason) {
@@ -252,7 +252,7 @@ export async function fetchCloudflareMedia(entry: DownloadEntry, options: FetchM
       void reader?.cancel().catch(() => {})
       cleanup()
       if (signal?.aborted) throw abortError(signal)
-      lastError = timedOut ? new Error('Quá thời gian chờ Cloudflare.') : error
+      lastError = timedOut ? new Error('Quá thời gian chờ tải về.') : error
       const retryable = timedOut || error instanceof RetryableDownloadError || error instanceof TypeError
       if (!retryable || attempt === maxAttempts - 1) break
       await waitBeforeRetry(500 * 2 ** attempt, signal)
@@ -260,7 +260,7 @@ export async function fetchCloudflareMedia(entry: DownloadEntry, options: FetchM
   }
 
   const detail = lastError instanceof Error ? lastError.message : 'Không nhận được dữ liệu.'
-  throw new Error(`Không tải được “${entry.name}” qua Cloudflare: ${detail}`)
+  throw new Error(`Không tải được “${entry.name}”: ${detail}`)
 }
 
 async function responseToBlob(response: Response, entry: DownloadEntry, signal?: AbortSignal, maxBytes = BLOB_MAX_BYTES): Promise<Blob> {

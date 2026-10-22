@@ -6,6 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "deploy:cloudflare": "node scripts/deploy-cloudflare.mjs",
+    "deploy:vercel:complete": "node scripts/after-vercel-deploy.mjs",
+    "deploy:prune": "node scripts/prune-deployments.mjs --local-auth --apply",
     "lint": "eslint"
   },
   "dependencies": {

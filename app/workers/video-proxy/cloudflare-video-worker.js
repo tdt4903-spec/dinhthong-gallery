@@ -184,7 +184,7 @@ async function listFolder(request, env, url) {
 
   const upstreamUrl = new URL(DRIVE_API_BASE)
   upstreamUrl.searchParams.set('q', `'${folderId}' in parents and trashed = false`)
-  upstreamUrl.searchParams.set('fields', 'nextPageToken,files(id,name,mimeType,size,modifiedTime,resourceKey,capabilities(canDownload))')
+  upstreamUrl.searchParams.set('fields', 'nextPageToken,files(id,name,mimeType,size,createdTime,modifiedTime,imageMediaMetadata(time),resourceKey,capabilities(canDownload))')
   upstreamUrl.searchParams.set('pageSize', '1000')
   upstreamUrl.searchParams.set('orderBy', 'folder,name')
   upstreamUrl.searchParams.set('supportsAllDrives', 'true')
@@ -221,6 +221,8 @@ async function listFolder(request, env, url) {
       type,
       mimeType: file.mimeType,
       size: file.size,
+      capturedTime: file.imageMediaMetadata?.time,
+      createdTime: file.createdTime,
       modifiedTime: file.modifiedTime,
       canDownload: file.capabilities?.canDownload !== false,
       url: isFolder ? '' : `https://lh3.googleusercontent.com/d/${encodeURIComponent(file.id)}=w1000`,

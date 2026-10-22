@@ -194,8 +194,8 @@ export async function GET(request: NextRequest) {
 
   try {
     const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`)
-    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=nextPageToken,files(id,name,mimeType,resourceKey)&pageSize=1000&orderBy=folder,name&key=${apiKey}`
-    const rawFiles: { id: string; name: string; mimeType: string; resourceKey?: string }[] = []
+    const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=nextPageToken,files(id,name,mimeType,resourceKey,createdTime,modifiedTime,imageMediaMetadata(time))&pageSize=1000&orderBy=folder,name&key=${apiKey}`
+    const rawFiles: { id: string; name: string; mimeType: string; resourceKey?: string; createdTime?: string; modifiedTime?: string; imageMediaMetadata?: { time?: string } }[] = []
     let pageToken = ''
 
     do {
@@ -240,6 +240,9 @@ export async function GET(request: NextRequest) {
         id: f.id,
         name: f.name,
         type,
+        capturedTime: f.imageMediaMetadata?.time,
+        createdTime: f.createdTime,
+        modifiedTime: f.modifiedTime,
         coverUrl,
         url: isFolder ? '' : `https://lh3.googleusercontent.com/d/${f.id}=w1000`,
         fullUrl: isFolder ? '' : `https://lh3.googleusercontent.com/d/${f.id}=s0`,

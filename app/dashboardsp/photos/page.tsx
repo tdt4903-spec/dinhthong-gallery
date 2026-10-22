@@ -19,6 +19,7 @@ import {
 
 import { getCustomerProductsSupabase } from '@/lib/customer-products'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
+import { ALBUM_PHOTO_SORT_OPTIONS, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
 
 type Album = {
   id: string
@@ -29,7 +30,7 @@ type Album = {
   is_public: boolean
 }
 
-type DriveItem = {
+type DriveItem = AlbumPhotoTimeMetadata & {
   id: string
   name: string
   type: 'image' | 'video' | 'folder'
@@ -55,6 +56,7 @@ export default function CustomerProductPhotosPage() {
   const [albums, setAlbums] = useState<Album[]>([])
   const [selectedAlbumId, setSelectedAlbumId] = useState('')
   const [driveItems, setDriveItems] = useState<DriveItem[]>([])
+  const [photoSort, setPhotoSort] = useState<AlbumPhotoSort>('default')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(
     new Set()
   )
@@ -67,9 +69,8 @@ export default function CustomerProductPhotosPage() {
   const selectedAlbum =
     albums.find((album) => album.id === selectedAlbumId) || null
 
-  const images = driveItems.filter(
-    (item) => item.type === 'image'
-  )
+  const albumImages = useMemo(() => driveItems.filter((item) => item.type === 'image'), [driveItems])
+  const images = useMemo(() => sortAlbumPhotos(albumImages, photoSort), [albumImages, photoSort])
 
   useEffect(() => {
     let active = true
@@ -119,6 +120,7 @@ export default function CustomerProductPhotosPage() {
   }, [router, supabase])
 
   useEffect(() => {
+    setPhotoSort('default')
     if (!selectedAlbum) {
       setDriveItems([])
       setSelectedIds(new Set())
@@ -237,7 +239,8 @@ export default function CustomerProductPhotosPage() {
 
       if (deleteError) throw deleteError
 
-      const rows = images
+      // Sorting is a viewing preference; saving selection uses the unsorted album order.
+      const rows = albumImages
         .filter((item) => selectedIds.has(item.id))
         .map((item, index) => ({
           album_id: selectedAlbum.id,
@@ -514,6 +517,30 @@ export default function CustomerProductPhotosPage() {
               </button>
             </div>
           </div>
+
+          {images.length > 0 && (
+            <div className="mb-4 flex flex-col items-stretch gap-2 sm:items-end">
+              <label className="flex flex-col gap-2 text-xs font-medium sm:flex-row sm:items-center sm:gap-3">
+                Sắp xếp ảnh
+                <select
+                  value={photoSort}
+                  onChange={(event) => setPhotoSort(event.target.value as AlbumPhotoSort)}
+                  className={`min-h-11 w-full rounded-xl border px-3 py-2 text-base sm:w-auto sm:text-sm ${
+                    isDarkMode
+                      ? 'border-white/15 bg-[#0b2118] text-white'
+                      : 'border-black/15 bg-white text-[#1c1d21]'
+                  }`}
+                >
+                  {ALBUM_PHOTO_SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              {photoSort.startsWith('captured-') && (
+                <p className="text-xs opacity-55">Ảnh không có thời gian chụp được xếp cuối.</p>
+              )}
+            </div>
+          )}
 
           {loadingDrive ? (
             <div
