@@ -22,18 +22,18 @@ import {
   type ScannableMediaItem,
   FACE_SCAN_VERSION,
   clusterDetectedFaces,
-  computeEuclideanDistance,
   deduplicateDetectedFaces,
   detectFacesInDriveImage,
   detectFacesInUploadedFile,
   loadCachedFolderFaces,
-  matchFacesByDescriptors,
+  matchReferenceFace,
   matchFaceCluster,
   scanAlbumFaces,
 } from '@/lib/face-recognition'
 import {
   type ConfirmedFaceGroup,
   applyConfirmedFaceGroups,
+  getFaceIdentityKey,
   loadConfirmedFaceGroups,
   mergeConfirmedFaceGroups,
   saveConfirmedFaceGroups,
@@ -102,7 +102,6 @@ export default function FaceFilterPanel({
   imagesRef.current = images
 
   const [threshold, setThreshold] = useState<number>(0.38)
-  const [selectedClusterIds, setSelectedClusterIds] = useState<Set<string>>(new Set())
   const [selectedClusterFaces, setSelectedClusterFaces] = useState<Map<string, DetectedFaceRecord>>(new Map())
   const [confirmedGroups, setConfirmedGroups] = useState<ConfirmedFaceGroup[]>([])
   const [isMergeMode, setIsMergeMode] = useState(false)
@@ -177,7 +176,7 @@ export default function FaceFilterPanel({
     setDetectedFaces([])
     setScannedCount(0)
     setHydratedCacheKey('')
-    setSelectedClusterIds(new Set())
+    setGroupedFaces(null)
     setSelectedClusterFaces(new Map())
     setConfirmedGroups(loadConfirmedFaceGroups(folderId))
     setIsMergeMode(false)
@@ -207,7 +206,6 @@ export default function FaceFilterPanel({
 
   useEffect(() => {
     if (clearSignal > 0) {
-      setSelectedClusterIds(new Set())
       setSelectedClusterFaces(new Map())
       setSelectedReferenceFaceIds(new Set())
     }
@@ -216,7 +214,7 @@ export default function FaceFilterPanel({
   // Tải kết quả đã cache trong IndexedDB (nếu trước đó đã quét)
   useEffect(() => {
     let active = true
-    if (!isOpen || !folderId || images.length === 0) return
+    if (!isOpen || !folderId || images.length === 0 || hydratedCacheKey === cacheKey) return
 
     loadCachedFolderFaces(folderId, imagesRef.current).then(({ faces, scannedCount: cachedCount }) => {
       if (!active) return
@@ -246,7 +244,6 @@ export default function FaceFilterPanel({
 
       if (forceRescan) {
         setDetectedFaces([])
-        setSelectedClusterIds(new Set())
         setSelectedClusterFaces(new Map())
         setIsMergeMode(false)
         setMergeSelection(new Set())
@@ -255,25 +252,34 @@ export default function FaceFilterPanel({
 
       let lastProgressUpdate = 0
       let lastProgressStage = ''
+      let lastFacesUpdate = performance.now()
+      let lastPublishedCompleted = 0
       try {
         const finalFaces = await scanAlbumFaces({
           folderId: folderId || 'default_album',
           items: scanImages,
           forceRescan,
           shouldCancel: () => run.cancelled || activeScanRef.current !== run,
-          onProgress: (info) => {
+          onProgress: (info, partialFaces) => {
             if (run.cancelled || activeScanRef.current !== run) return
             const now = performance.now()
-            if (info.stage === lastProgressStage && info.stage === 'scanning' && now - lastProgressUpdate < 150) return
+            if (info.stage === lastProgressStage && info.stage === 'scanning' && now - lastProgressUpdate < 500) return
             lastProgressUpdate = now
             lastProgressStage = info.stage
             setScanProgress(info)
             setScannedCount(info.completed)
+            // Publish a bounded snapshot, not one regroup per image. People
+            // can start filtering without waiting for the last album photo.
+            if (info.completed - lastPublishedCompleted >= 16 && now - lastFacesUpdate >= 5000) {
+              lastFacesUpdate = now
+              lastPublishedCompleted = info.completed
+              setDetectedFaces([...partialFaces])
+            }
             if (info.failedCount) setScanError(`${info.failedCount} ảnh chưa quét được. Bấm Quét album để thử lại các ảnh này.`)
           },
         })
-        // Group the scan once, keeping GPU time available during recognition.
-        // A stopped scan also returns its completed images for immediate use.
+        // Finalize the last snapshot. A stopped scan also returns its completed
+        // images; partial snapshots remain usable while inference continues.
         if (activeScanRef.current === run) {
           setDetectedFaces(finalFaces)
         }
@@ -359,7 +365,7 @@ export default function FaceFilterPanel({
       worker?.terminate()
       if (!active || fallbackTimer !== undefined) return
       fallbackTimer = setTimeout(() => {
-        if (active) finish(clusterDetectedFaces(detectedFaces))
+        if (active) finish(clusterDetectedFaces(detectedFaces, threshold))
       }, 0)
     }
     try {
@@ -377,13 +383,15 @@ export default function FaceFilterPanel({
         worker?.terminate()
       }
       worker.onerror = event => { event.preventDefault(); fallback() }
-      worker.postMessage(detectedFaces.map(face => ({ ...face, avatarDataUrl: '' })))
+      worker.postMessage({ faces: detectedFaces.map(face => ({ ...face, avatarDataUrl: '' })), threshold })
     } catch { fallback() }
     return () => { active = false; worker?.terminate(); clearTimeout(fallbackTimer) }
-  }, [detectedFaces])
+  }, [detectedFaces, threshold])
 
   const faceClusters: FaceCluster[] = useMemo(() => {
-    const clusters = groupedFaces?.source === detectedFaces ? groupedFaces.clusters : []
+    // Keep the last usable index while a new grouping runs. Clearing it made
+    // the first click/reopening briefly publish an empty filter to the gallery.
+    const clusters = groupedFaces?.clusters || []
     return applyConfirmedFaceGroups(clusters, confirmedGroups)
   }, [detectedFaces, groupedFaces, confirmedGroups])
   const faceClusterImageIds = useMemo(() => {
@@ -392,6 +400,20 @@ export default function FaceFilterPanel({
       matchFaceCluster(cluster, threshold),
     ]))
   }, [faceClusters, threshold])
+  const clusterByFaceKey = useMemo(() => {
+    const index = new Map<string, FaceCluster>()
+    for (const cluster of faceClusters) for (const face of cluster.faces) index.set(getFaceIdentityKey(face), cluster)
+    return index
+  }, [faceClusters])
+  const selectedClusters = useMemo(() => {
+    const selected = new Map<string, FaceCluster>()
+    for (const face of selectedClusterFaces.values()) {
+      const cluster = clusterByFaceKey.get(getFaceIdentityKey(face))
+      if (cluster) selected.set(cluster.id, cluster)
+    }
+    return selected
+  }, [selectedClusterFaces, clusterByFaceKey])
+  const selectedClusterIds = new Set(selectedClusters.keys())
   const uniqueReferenceFaces = useMemo(() => deduplicateDetectedFaces(referenceFaces), [referenceFaces])
 
   // Tính toán danh sách ID ảnh khớp với khuôn mặt đang chọn
@@ -404,12 +426,9 @@ export default function FaceFilterPanel({
     }
 
     const resultIds = new Set<string>()
-    const targetDescriptors: number[][] = []
 
     if (hasClusterSelection) {
-      for (const clusterId of selectedClusterFaces.keys()) {
-        const cluster = faceClusters.find(candidate => candidate.id === clusterId)
-        if (!cluster) continue
+      for (const clusterId of selectedClusters.keys()) {
         const matches = faceClusterImageIds.get(clusterId)
         matches?.forEach(id => resultIds.add(id))
       }
@@ -418,7 +437,7 @@ export default function FaceFilterPanel({
     if (hasRefSelection) {
       for (const refFace of uniqueReferenceFaces) {
         if (selectedReferenceFaceIds.has(refFace.faceId) && refFace.descriptor.length > 0) {
-          targetDescriptors.push(refFace.descriptor)
+          matchReferenceFace(faceClusters, refFace, threshold).forEach(id => resultIds.add(id))
           if (images.some((img) => img.id === refFace.imageId)) {
             resultIds.add(refFace.imageId)
           }
@@ -426,29 +445,8 @@ export default function FaceFilterPanel({
       }
     }
 
-    // Rank each selected reference independently. Ranking all selected people
-    // together would only keep the closest person and silently drop the rest.
-    for (const target of targetDescriptors) {
-      const ranked = faceClusters.map(cluster => {
-        const references = new Set(cluster.referenceFaceIds || [cluster.faces[0]?.faceId])
-        let distance = Infinity
-        for (const face of cluster.faces) {
-          if (!references.has(face.faceId)) continue
-          distance = Math.min(distance, computeEuclideanDistance(face.descriptor, target))
-        }
-        return { cluster, distance }
-      }).sort((a, b) => a.distance - b.distance)
-      const best = ranked[0]
-      if (best && best.distance <= threshold && (!ranked[1] || ranked[1].distance - best.distance >= 0.05)) {
-        faceClusterImageIds.get(best.cluster.id)?.forEach(id => resultIds.add(id))
-      } else {
-        const { matchedImageIds: descriptorMatched } = matchFacesByDescriptors(detectedFaces, [target], threshold)
-        descriptorMatched.forEach(id => resultIds.add(id))
-      }
-    }
-
     return resultIds
-  }, [selectedClusterFaces, selectedReferenceFaceIds, faceClusters, faceClusterImageIds, uniqueReferenceFaces, detectedFaces, threshold, images])
+  }, [selectedClusterFaces, selectedClusters, selectedReferenceFaceIds, faceClusters, faceClusterImageIds, uniqueReferenceFaces, threshold, images])
 
   useEffect(() => {
     onFaceFilterChange(matchedImageIds)
@@ -480,14 +478,11 @@ export default function FaceFilterPanel({
     if (!representative) return
     setSelectedClusterFaces(prev => {
       const next = new Map(prev)
-      if (next.has(clusterId)) next.delete(clusterId)
-      else next.set(clusterId, representative)
-      return next
-    })
-    setSelectedClusterIds(prev => {
-      const next = new Set(prev)
-      if (next.has(clusterId)) next.delete(clusterId)
-      else next.add(clusterId)
+      if (selectedClusters.has(clusterId)) {
+        for (const [key, face] of next) {
+          if (clusterByFaceKey.get(getFaceIdentityKey(face))?.id === clusterId) next.delete(key)
+        }
+      } else next.set(getFaceIdentityKey(representative), representative)
       return next
     })
   }
@@ -556,7 +551,6 @@ export default function FaceFilterPanel({
   }
 
   const handleClearFaceFilter = () => {
-    setSelectedClusterIds(new Set())
     setSelectedClusterFaces(new Map())
     setSelectedReferenceFaceIds(new Set())
   }
@@ -569,7 +563,14 @@ export default function FaceFilterPanel({
       return
     }
     setConfirmedGroups(next)
-    handleClearFaceFilter()
+    const merged = applyConfirmedFaceGroups(faceClusters, next).find(cluster =>
+      selected.some(candidate => cluster.faces.some(face => face.faceId === candidate.faces[0]?.faceId))
+    )
+    if (merged?.faces[0]) {
+      const representative = merged.faces[0]
+      setSelectedClusterFaces(new Map([[getFaceIdentityKey(representative), representative]]))
+      setSelectedReferenceFaceIds(new Set())
+    }
     setMergeSelection(new Set())
     setIsMergeMode(false)
     if (!saveConfirmedFaceGroups(folderId, next)) {
@@ -860,7 +861,6 @@ export default function FaceFilterPanel({
                 <button
                   key={cluster.id}
                   type="button"
-                  disabled={isScanning}
                   aria-pressed={isSelected}
                   onClick={() => toggleClusterSelection(cluster.id)}
                   className={`group relative flex flex-col items-center shrink-0 rounded-2xl p-1.5 border transition cursor-pointer ${

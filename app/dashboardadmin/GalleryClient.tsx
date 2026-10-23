@@ -16,6 +16,7 @@ import { SITE_BANNER_URL } from '@/lib/site-assets'
 import { DEFAULT_ALBUM_FEATURES, normalizeAlbumFeatures, resolveAlbumFeatures } from '@/lib/album-features'
 import { useImageZoom } from '@/lib/use-image-zoom'
 import { ALBUM_PHOTO_SORT_OPTIONS, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
+import { usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
 import { 
   Search, Sun, Moon, Plus, Camera, 
   Trash2, LogOut, User as UserIcon,
@@ -428,7 +429,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const [inspectFaceImageItem, setInspectFaceImageItem] = useState<MediaItem | null>(null)
   const [clearFaceFilterSignal, setClearFaceFilterSignal] = useState(0)
   const handleFaceFilterChange = useCallback((matchedIds: Set<string> | null) => {
-    setFaceMatchedIds(matchedIds)
+    setFaceMatchedIds(previous => previous === matchedIds || (previous !== null && matchedIds !== null &&
+      previous.size === matchedIds.size && [...previous].every(id => matchedIds.has(id))) ? previous : matchedIds)
+    if (matchedIds !== null) {
+      setSelectionFilter('all')
+      setSearchTerm('')
+    }
   }, [])
   const handleClearInspectFaceImage = useCallback(() => setInspectFaceImageItem(null), [])
 
@@ -1022,7 +1028,9 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const visibleItems = useMemo(() => (items || []).filter(item => item && !hiddenItemIds.has(item.id)), [items, hiddenItemIds])
   const subFolders = visibleItems.filter(item => item.type === 'folder')
-  const mediaFiles = useMemo(() => sortAlbumPhotos(visibleItems.filter(item => item.type !== 'folder'), photoSort), [visibleItems, photoSort])
+  const { items: timedItems, loading: loadingCaptureTimes } = usePhotoCaptureTimes(visibleItems, photoSort.startsWith('captured-'))
+  const mediaFiles = useMemo(() => sortAlbumPhotos(timedItems.filter(item => item.type !== 'folder'), photoSort,
+    item => customNames[item.id] || item.name), [timedItems, photoSort, customNames])
 
   const firstCurrentImage = visibleItems.find(item => item.type === 'image')
   const cachedCurrentFolderCover = currentActiveFolderId ? albumCovers[currentActiveFolderId] : ''
@@ -4363,6 +4371,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       {ALBUM_PHOTO_SORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </label>
+                  {photoSort.startsWith('captured-') && <span className={`text-[11px] ${isDarkMode ? 'text-white/50' : 'text-gray-500'}`}>{loadingCaptureTimes ? 'Đang đọc ngày chụp…' : 'Ảnh không có ngày chụp được xếp cuối.'}</span>}
                   {displaySelectedImagesList.length > 0 && (
                     <button onClick={handleClearAllSelections} className="sm:ml-auto shrink-0 inline-flex min-h-10 items-center gap-1 rounded-xl border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-red-500"><Trash2 className="h-3 w-3" /> Bỏ chọn tất cả ({displaySelectedImagesList.length})</button>
                   )}

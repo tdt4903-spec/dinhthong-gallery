@@ -17,6 +17,7 @@ import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { getPublicCategoryPath } from '@/lib/public-gallery-paths'
 import { useImageZoom } from '@/lib/use-image-zoom'
 import { ALBUM_PHOTO_SORT_OPTIONS, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
+import { usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
 
 type DriveItem = AlbumPhotoTimeMetadata & {
   id: string
@@ -56,7 +57,8 @@ export default function PublicAlbumPage() {
   const [album, setAlbum] = useState<any>(null)
   const [albumImages, setImages] = useState<DriveItem[]>([])
   const [photoSort, setPhotoSort] = useState<AlbumPhotoSort>('default')
-  const images = useMemo(() => sortAlbumPhotos(albumImages, photoSort), [albumImages, photoSort])
+  const { items: timedImages, loading: loadingCaptureTimes } = usePhotoCaptureTimes(albumImages, photoSort.startsWith('captured-'))
+  const images = useMemo(() => sortAlbumPhotos(timedImages, photoSort), [timedImages, photoSort])
   const [loading, setLoading] = useState(true)
   const [errorText, setErrorText] = useState('')
   const [preview, setPreview] = useState<DriveItem | null>(
@@ -574,7 +576,7 @@ export default function PublicAlbumPage() {
               </select>
             </label>
             {photoSort.startsWith('captured-') && (
-              <p className="text-xs opacity-55">Ảnh không có thời gian chụp được xếp cuối.</p>
+              <p className="text-xs opacity-55">{loadingCaptureTimes ? 'Đang đọc ngày chụp…' : 'Ảnh không có thời gian chụp được xếp cuối.'}</p>
             )}
           </div>
         )}
@@ -599,7 +601,7 @@ export default function PublicAlbumPage() {
             </div>
           </div>
         ) : (
-          <div className="columns-2 gap-2 sm:columns-2 sm:gap-3 lg:columns-3 lg:gap-4">
+          <div className={photoSort === 'default' ? 'columns-2 gap-2 sm:columns-2 sm:gap-3 lg:columns-3 lg:gap-4' : 'grid grid-cols-2 items-start gap-2 sm:gap-3 lg:grid-cols-3 lg:gap-4'}>
             {images.map((image, index) => (
               <button
                 key={image.id}

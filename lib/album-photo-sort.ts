@@ -42,19 +42,21 @@ export function getPhotoCaptureTimestamp(value?: string): number | null {
 export function sortAlbumPhotos<T extends AlbumPhotoTimeMetadata & { name: string }>(
   items: readonly T[],
   sort: AlbumPhotoSort,
+  getName: (item: T) => string = item => item.name,
 ): T[] {
   if (sort === 'default') return [...items]
 
   return items
     .map((item, index) => ({ item, index, capturedAt: getPhotoCaptureTimestamp(item.capturedTime) }))
     .sort((a, b) => {
-      if (sort === 'name-asc') return nameCollator.compare(a.item.name, b.item.name) || a.index - b.index
+      const byName = () => nameCollator.compare(getName(a.item).trim().normalize('NFC'), getName(b.item).trim().normalize('NFC')) || a.index - b.index
+      if (sort === 'name-asc') return byName()
       // Upload/edit times are not capture times. Missing or invalid EXIF stays last in both directions.
       if (a.capturedAt === null || b.capturedAt === null) {
-        return a.capturedAt === b.capturedAt ? a.index - b.index : a.capturedAt === null ? 1 : -1
+        return a.capturedAt === b.capturedAt ? byName() : a.capturedAt === null ? 1 : -1
       }
       const difference = a.capturedAt - b.capturedAt
-      return (sort === 'captured-desc' ? -difference : difference) || a.index - b.index
+      return (sort === 'captured-desc' ? -difference : difference) || byName()
     })
     .map(({ item }) => item)
 }

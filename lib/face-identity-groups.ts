@@ -32,11 +32,16 @@ function fingerprint(value: string): string {
 
 // Detector indexes can change after a rescan. Persist the actual detection,
 // including its descriptor and location, rather than its temporary faceId.
+const identityKeys = new WeakMap<DetectedFaceRecord, string>()
 export function getFaceIdentityKey(face: DetectedFaceRecord): string {
+  const existing = identityKeys.get(face)
+  if (existing) return existing
   const location = [face.box.x, face.box.y, face.box.width, face.box.height]
     .map(value => value.toFixed(4)).join(',')
   const descriptor = face.descriptor.map(value => value.toFixed(6)).join(',')
-  return `${encodeURIComponent(face.imageId)}:${location}:${fingerprint(descriptor)}`
+  const key = `${encodeURIComponent(face.imageId)}:${location}:${fingerprint(descriptor)}`
+  identityKeys.set(face, key)
+  return key
 }
 
 function normalizeGroups(value: unknown): ConfirmedFaceGroup[] {

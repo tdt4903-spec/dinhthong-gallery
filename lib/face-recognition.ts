@@ -188,6 +188,13 @@ export async function ensureFaceModelsLoaded(): Promise<any> {
     // Let TensorFlow select and initialize the supported device backend before
     // loading weights. Keep its precision and model settings unchanged.
     if (typeof faceapi.tf?.ready === 'function') await faceapi.tf.ready()
+    // A restored tab can leave TF on its CPU fallback. Prefer the registered
+    // WebGL backend, without changing model precision or descriptor space.
+    if (faceapi.tf?.getBackend?.() === 'cpu' && faceapi.tf?.findBackendFactory?.('webgl')) {
+      try { await faceapi.tf.setBackend('webgl'); await faceapi.tf.ready() } catch {
+        await faceapi.tf.setBackend('cpu')
+      }
+    }
 
     for (const modelBaseUrl of FACE_API_MODEL_URLS) {
       try {
@@ -535,6 +542,7 @@ function uniqueFaceProposals(proposals: FaceDetectionProposal[]): FaceDetectionP
 }
 
 const descriptorBatchSupport = new WeakMap<object, boolean>()
+const landmarkBatchSupport = new WeakMap<object, boolean>()
 const imageInferenceInFlight = new Map<string, Promise<DetectedFaceRecord[]>>()
 const recentImageResults = new Map<string, DetectedFaceRecord[]>()
 
@@ -619,6 +627,43 @@ async function computeDescriptorBatch(faceapi: any, inputs: HTMLCanvasElement[])
     }
   }
   return descriptors
+}
+
+function inferenceBatchSize(): number {
+  const device = typeof navigator === 'undefined' ? undefined : navigator as Navigator & { deviceMemory?: number }
+  const mobile = Boolean(device && (/Android|iPhone|iPad|iPod/i.test(device.userAgent) || (device.platform === 'MacIntel' && device.maxTouchPoints > 1)))
+  return device?.deviceMemory !== undefined && device.deviceMemory <= 4 ? 2 : mobile ? 4 : 8
+}
+
+// face-api's convenience task launches one landmark inference per face. Its
+// underlying net accepts a batch, keeping exactly the same landmark model.
+async function computeLandmarkBatch(faceapi: any, chips: HTMLCanvasElement[]): Promise<any[]> {
+  const net = faceapi.nets.faceLandmark68Net
+  if (chips.length > 1 && landmarkBatchSupport.get(faceapi) !== false) {
+    try {
+      const result = await net.detectLandmarks(chips)
+      if (!Array.isArray(result) || result.length !== chips.length || result.some(value => !value?.positions?.length)) {
+        throw new Error('Không thể căn chỉnh đầy đủ các khuôn mặt.')
+      }
+      landmarkBatchSupport.set(faceapi, true)
+      return result
+    } catch { landmarkBatchSupport.set(faceapi, false) }
+  }
+  const result = []
+  for (const chip of chips) result.push(await net.detectLandmarks(chip))
+  return result
+}
+
+function extractFaceChips(canvas: HTMLCanvasElement, boxes: any[]): HTMLCanvasElement[] {
+  // drawImage avoids a getImageData/putImageData GPU readback for every crop.
+  return boxes.map(box => {
+    const rect = box.clipAtImageBorders(canvas.width, canvas.height)
+    const chip = document.createElement('canvas')
+    chip.width = Math.max(1, Math.trunc(rect.width))
+    chip.height = Math.max(1, Math.trunc(rect.height))
+    chip.getContext('2d')!.drawImage(canvas, Math.trunc(rect.x), Math.trunc(rect.y), chip.width, chip.height, 0, 0, chip.width, chip.height)
+    return chip
+  })
 }
 
 // Share one GPU lane between album scans and uploaded/reference images. Running
@@ -727,7 +772,7 @@ async function detectFacesWithGpu(
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
-  const context = canvas.getContext('2d')
+  const context = canvas.getContext('2d', { willReadFrequently: true })
   if (!context) { canvas.width = 0; canvas.height = 0; return [] }
   context.drawImage(img, 0, 0, width, height)
   try {
@@ -752,17 +797,17 @@ async function detectFacesWithGpu(
       }
     }))
     const faces: DetectedFaceRecord[] = []
-    const batchSize = 8
+    const batchSize = inferenceBatchSize()
     for (let start = 0; start < proposals.length; start += batchSize) {
       if (shouldCancel?.()) return []
       const batch = proposals.slice(start, start + batchSize)
-      const landmarks = await new faceapi.DetectAllFaceLandmarksTask(
-        Promise.resolve(batch.map(proposal => ({ detection: proposal.detection }))), canvas, false
-      )
-      if (!Array.isArray(landmarks) || landmarks.length !== batch.length) {
-        throw new Error('Không thể căn chỉnh đầy đủ các khuôn mặt.')
-      }
-      const chips: HTMLCanvasElement[] = await faceapi.extractFaces(canvas, landmarks.map((result: any) => result.landmarks.align(null, { useDlibAlignment: true })))
+      const crops = extractFaceChips(canvas, batch.map(proposal => proposal.detection.forSize(width, height).box.floor()))
+      let landmarks: any[]
+      try {
+        const unshifted = await computeLandmarkBatch(faceapi, crops)
+        landmarks = unshifted.map((value, index) => faceapi.extendWithFaceLandmarks({ detection: batch[index].detection }, value))
+      } finally { for (const crop of crops) { crop.width = 0; crop.height = 0 } }
+      const chips = extractFaceChips(canvas, landmarks.map(result => result.landmarks.align(null, { useDlibAlignment: true })))
       try {
         // The descriptor remains the existing 128D face-api space. It is not
         // normalized/padded into an incompatible ArcFace512 descriptor.
@@ -950,7 +995,7 @@ export async function scanAlbumFaces(options: {
   const device = typeof navigator === 'undefined' ? undefined : navigator as Navigator & { deviceMemory?: number }
   const mobile = Boolean(device && (/Android|iPhone|iPad|iPod/i.test(device.userAgent) || (device.platform === 'MacIntel' && device.maxTouchPoints > 1)))
   const lowMemory = Boolean(device && ((device.deviceMemory !== undefined && device.deviceMemory <= 4) || (mobile && device.hardwareConcurrency > 0 && device.hardwareConcurrency <= 4)))
-  const deviceLimit = lowMemory ? 2 : mobile ? 3 : 4
+  const deviceLimit = lowMemory ? 2 : mobile ? 4 : 6
   const requestedConcurrency = concurrency !== undefined && Number.isFinite(concurrency) ? Math.floor(concurrency) : deviceLimit
   const prefetchCount = Math.min(deviceLimit, Math.max(1, requestedConcurrency))
   const preparedImages = new Map<number, Promise<PreparedImage>>()
@@ -1011,13 +1056,24 @@ function faceQuality(face: Pick<DetectedFaceRecord, 'score' | 'box' | 'quality'>
   return face.score * Math.min(1, Math.sqrt(Math.max(face.box.width * face.box.height, 0.0001)) / 0.10) * 0.65
 }
 
-function embeddingSpace(face: DetectedFaceRecord): string {
-  return `${face.embeddingModel || (face.descriptor.length === 128 ? LEGACY_EMBEDDING_MODEL : 'unknown')}:${face.descriptor.length}`
+function boundedDistance(left: number[], right: number[], maximum = Infinity): number {
+  if (!left.length || left.length !== right.length) return Infinity
+  const limit = maximum * maximum
+  let sum = 0
+  for (let index = 0; index < left.length; index++) {
+    const delta = left[index] - right[index]
+    if (!Number.isFinite(delta)) return Infinity
+    sum += delta * delta
+    if (sum > limit) return Infinity
+  }
+  return Math.sqrt(sum)
 }
 
-function faceDistance(left: DetectedFaceRecord, right: DetectedFaceRecord): number {
-  if (embeddingSpace(left) !== embeddingSpace(right)) return Infinity
-  return computeEuclideanDistance(left.descriptor, right.descriptor)
+function faceDistance(left: DetectedFaceRecord, right: DetectedFaceRecord, maximum = Infinity): number {
+  const leftModel = left.embeddingModel || (left.descriptor.length === 128 ? LEGACY_EMBEDDING_MODEL : 'unknown')
+  const rightModel = right.embeddingModel || (right.descriptor.length === 128 ? LEGACY_EMBEDDING_MODEL : 'unknown')
+  if (leftModel !== rightModel) return Infinity
+  return boundedDistance(left.descriptor, right.descriptor, maximum)
 }
 
 function overlappingFaceBoxes(
@@ -1092,11 +1148,11 @@ export function clusterDetectedFaces(
       // Every member must match the same fixed, highest-quality representative.
       // Pose variations may differ from each other without creating extra cards;
       // a chain of similar faces can never move the matching target.
-      const anchorDistance = faceDistance(face, cluster.faces[0])
+      const anchorDistance = faceDistance(face, cluster.faces[0], threshold)
       if (anchorDistance > threshold) continue
       // A fixed anchor prevents identity chains; the average/centroid check
       // rejects borderline outliers that only happen to resemble that anchor.
-      const centroidDistance = computeEuclideanDistance(face.descriptor, cluster.centroid)
+      const centroidDistance = boundedDistance(face.descriptor, cluster.centroid, threshold + 0.02)
       if (centroidDistance > threshold + 0.02) continue
       const distance = (anchorDistance + centroidDistance) / 2
 
@@ -1143,7 +1199,12 @@ export function clusterDetectedFaces(
     centroid: c.centroid,
     referenceFaceIds: [c.faces[0].faceId],
   }))
-  const consolidated = consolidateFaceViews(clusters)
+  const consolidated = consolidateFaceViews(clusters, threshold)
+  const referencesByCluster = new Map(consolidated.map(cluster => {
+    const ids = new Set(cluster.referenceFaceIds || [cluster.faces[0]?.faceId])
+    return [cluster, cluster.faces.filter(face => ids.has(face.faceId))] as const
+  }))
+  const imagesByCluster = new Map(consolidated.map(cluster => [cluster, new Set(cluster.imageIds)]))
   // Blurry/tiny/strongly angled detections cannot invent a new identity. Only
   // attach them to a clear, unambiguous existing identity after consolidation.
   for (const face of lowQualityFaces) {
@@ -1151,11 +1212,10 @@ export function clusterDetectedFaces(
     let bestDistance = Infinity
     let secondDistance = Infinity
     for (const cluster of consolidated) {
-      if (cluster.imageIds.includes(face.imageId)) continue
-      const referenceIds = new Set(cluster.referenceFaceIds || [cluster.faces[0]?.faceId])
+      if (imagesByCluster.get(cluster)!.has(face.imageId)) continue
       let distance = Infinity
-      for (const candidate of cluster.faces) {
-        if (referenceIds.has(candidate.faceId)) distance = Math.min(distance, faceDistance(face, candidate))
+      for (const candidate of referencesByCluster.get(cluster)!) {
+        distance = Math.min(distance, faceDistance(face, candidate, threshold + 0.05))
       }
       if (distance < bestDistance) {
         secondDistance = bestDistance
@@ -1166,6 +1226,7 @@ export function clusterDetectedFaces(
     if (!best || bestDistance > threshold || secondDistance - bestDistance < 0.05) continue
     best.faces.push(face)
     best.imageIds.push(face.imageId)
+    imagesByCluster.get(best)!.add(face.imageId)
     // Low quality assignments never become matching references or move the
     // centroid, keeping later assignments anchored to the clear seed faces.
   }
@@ -1173,24 +1234,32 @@ export function clusterDetectedFaces(
     .map((cluster, index) => ({ ...cluster, label: `Khuôn mặt #${index + 1}` }))
 }
 
-function consolidateFaceViews(clusters: FaceCluster[]): FaceCluster[] {
+function consolidateFaceViews(clusters: FaceCluster[], threshold: number): FaceCluster[] {
   const result = [...clusters]
+  const imageSets = new Map(result.map(cluster => [cluster, new Set(cluster.imageIds)]))
+  const intersects = (left: Set<string>, right: Set<string>) => {
+    if (left.size > right.size) [left, right] = [right, left]
+    for (const id of left) if (right.has(id)) return true
+    return false
+  }
+  const strictness = Math.max(0, 0.38 - threshold)
   for (let i = 0; i < result.length; i++) {
     const root = result[i]
     for (let j = i + 1; j < result.length; j++) {
       const other = result[j]
-      if (root.imageIds.some(id => other.imageIds.includes(id))) continue
-      const anchorDistance = faceDistance(root.faces[0], other.faces[0])
-      if (anchorDistance > 0.50) continue
+      const rootImages = imageSets.get(root)!, otherImages = imageSets.get(other)!
+      if (intersects(rootImages, otherImages)) continue
+      const anchorDistance = faceDistance(root.faces[0], other.faces[0], 0.50 - strictness)
+      if (anchorDistance > 0.50 - strictness) continue
       // Average-link support is computed only on the stored descriptors, never
       // by rerunning a model. The centroid is an inexpensive rejection bound.
-      if (computeEuclideanDistance(root.centroid, other.centroid) > 0.46) continue
-      if (other.faces.some(face => faceDistance(face, root.faces[0]) > 0.56)) continue
+      if (boundedDistance(root.centroid, other.centroid, 0.46 - strictness) > 0.46 - strictness) continue
+      if (other.faces.some(face => faceDistance(face, root.faces[0], 0.56 - strictness) > 0.56 - strictness)) continue
       const left = root.faces.slice(0, 6), right = other.faces.slice(0, 6)
       let crossDistance = 0
       for (const a of left) for (const b of right) crossDistance += faceDistance(a, b)
-      if (crossDistance / (left.length * right.length) > 0.48) continue
-      const strongSingleView = anchorDistance <= 0.42
+      if (crossDistance / (left.length * right.length) > 0.48 - strictness) continue
+      const strongSingleView = anchorDistance <= 0.42 - strictness
       if (!strongSingleView) {
         if (left.length < 2 || right.length < 2) continue
         const leftSupported = left.filter(a => right.some(b => faceDistance(a, b) <= 0.50)).length
@@ -1202,19 +1271,19 @@ function consolidateFaceViews(clusters: FaceCluster[]): FaceCluster[] {
       // person; another compatible view is not. Keep stricter distances and
       // repeated support above, plus this real competitor margin.
       const separation = strongSingleView ? 0.08 : 0.05
-      const rootImages = new Set(root.imageIds)
-      const otherImages = new Set(other.imageIds)
       const ambiguous = result.some((candidate, index) => index !== i && index !== j && (
-        (candidate.imageIds.some(id => rootImages.has(id)) &&
+        (intersects(imageSets.get(candidate)!, rootImages) &&
           faceDistance(other.faces[0], candidate.faces[0]) < anchorDistance + separation) ||
-        (candidate.imageIds.some(id => otherImages.has(id)) &&
+        (intersects(imageSets.get(candidate)!, otherImages) &&
           faceDistance(root.faces[0], candidate.faces[0]) < anchorDistance + separation)
       ))
       if (ambiguous) continue
+      const count = root.faces.length + other.faces.length
+      root.centroid = root.centroid.map((value, index) => (value * root.faces.length + other.centroid[index] * other.faces.length) / count)
       root.faces = [...root.faces, ...other.faces]
-      root.imageIds = [...new Set([...root.imageIds, ...other.imageIds])]
+      for (const id of otherImages) rootImages.add(id)
+      root.imageIds = [...rootImages]
       root.referenceFaceIds = [...new Set([...(root.referenceFaceIds || []), ...(other.referenceFaceIds || [])])]
-      root.centroid = root.faces[0].descriptor.map((_, index) => root.faces.reduce((sum, face) => sum + face.descriptor[index], 0) / root.faces.length)
       result.splice(j, 1)
       j--
     }
@@ -1222,10 +1291,32 @@ function consolidateFaceViews(clusters: FaceCluster[]): FaceCluster[] {
   return result.map((cluster, index) => ({ ...cluster, label: `Khuôn mặt #${index + 1}` }))
 }
 
-export function matchFaceCluster(cluster: FaceCluster, threshold = 0.38): Set<string> {
-  const referenceIds = new Set(cluster.referenceFaceIds || [cluster.faces[0]?.faceId])
-  const references = cluster.faces.filter(face => referenceIds.has(face.faceId)).map(face => face.descriptor)
-  return matchFacesByDescriptors(cluster.faces, references, threshold).matchedImageIds
+export function matchFaceCluster(cluster: FaceCluster, _threshold = 0.38): Set<string> {
+  // Clustering already validated membership; a manual merge is explicit proof.
+  // A second anchor threshold silently dropped accepted pose/lighting views.
+  return new Set(cluster.faces.map(face => face.imageId))
+}
+
+/** Match a query to an identity, refusing an ambiguous lookalike instead of
+ * falling back to an unrestricted search over every detected face. */
+export function matchReferenceFace(clusters: FaceCluster[], target: DetectedFaceRecord, threshold = 0.38): Set<string> {
+  const exact = clusters.find(cluster => cluster.faces.some(face =>
+    face.imageId === target.imageId && face.faceId === target.faceId && faceDistance(face, target) < 0.00001
+  ))
+  if (exact) return matchFaceCluster(exact)
+  let best: FaceCluster | undefined
+  let nearest = Infinity, runnerUp = Infinity
+  for (const cluster of clusters) {
+    const referenceIds = new Set(cluster.referenceFaceIds || [cluster.faces[0]?.faceId])
+    let distance = Infinity
+    for (const face of cluster.faces) {
+      if (referenceIds.has(face.faceId)) distance = Math.min(distance, faceDistance(face, target))
+    }
+    if (distance < nearest) {
+      runnerUp = nearest; nearest = distance; best = cluster
+    } else if (distance < runnerUp) runnerUp = distance
+  }
+  return best && nearest <= threshold && runnerUp - nearest >= 0.05 ? matchFaceCluster(best) : new Set()
 }
 
 export function matchFacesByDescriptors(

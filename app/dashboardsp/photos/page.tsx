@@ -20,6 +20,7 @@ import {
 import { getCustomerProductsSupabase } from '@/lib/customer-products'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { ALBUM_PHOTO_SORT_OPTIONS, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
+import { usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
 
 type Album = {
   id: string
@@ -70,7 +71,8 @@ export default function CustomerProductPhotosPage() {
     albums.find((album) => album.id === selectedAlbumId) || null
 
   const albumImages = useMemo(() => driveItems.filter((item) => item.type === 'image'), [driveItems])
-  const images = useMemo(() => sortAlbumPhotos(albumImages, photoSort), [albumImages, photoSort])
+  const { items: timedImages, loading: loadingCaptureTimes } = usePhotoCaptureTimes(albumImages, photoSort.startsWith('captured-'))
+  const images = useMemo(() => sortAlbumPhotos(timedImages, photoSort), [timedImages, photoSort])
 
   useEffect(() => {
     let active = true
@@ -537,7 +539,7 @@ export default function CustomerProductPhotosPage() {
                 </select>
               </label>
               {photoSort.startsWith('captured-') && (
-                <p className="text-xs opacity-55">Ảnh không có thời gian chụp được xếp cuối.</p>
+                <p className="text-xs opacity-55">{loadingCaptureTimes ? 'Đang đọc ngày chụp…' : 'Ảnh không có thời gian chụp được xếp cuối.'}</p>
               )}
             </div>
           )}
