@@ -17,6 +17,7 @@ import { DEFAULT_ALBUM_FEATURES, normalizeAlbumFeatures, resolveAlbumFeatures } 
 import { useImageZoom } from '@/lib/use-image-zoom'
 import { ALBUM_PHOTO_SORT_OPTIONS, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
 import { usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
+import { saveAlbumFaceAccess, useAlbumFaceAccess } from '@/lib/album-face-access'
 import { 
   Search, Sun, Moon, Plus, Camera, 
   Trash2, LogOut, User as UserIcon,
@@ -57,6 +58,7 @@ interface FolderSettings {
   enable_watermark?: boolean
   collect_customer_info?: boolean
   max_viewers?: number
+  enable_face_filter?: boolean
 }
 
 interface MasterFolderItem {
@@ -277,6 +279,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const savingAlbumCoverRef = useRef(false)
   const [isSavingAlbumCover, setIsSavingAlbumCover] = useState(false)
   const [editingFolderSetting, setEditingFolderSetting] = useState<FolderSettings | null>(null)
+  const [isSavingFolderSetting, setIsSavingFolderSetting] = useState(false)
   const [editingFeatureFlags, setEditingFeatureFlags] = useState({ password: false, selectionLimit: false })
 
   const [ratings, setRatings] = useState<Record<string, number>>({})
@@ -438,8 +441,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }, [])
   const handleClearInspectFaceImage = useCallback(() => setInspectFaceImageItem(null), [])
 
-  const [gridDensity, setGridDensity] = useState<'comfortable' | 'compact'>('comfortable')
-
   const [useComma, setUseComma] = useState(true)
   const [useSpace, setUseSpace] = useState(true)
   const [useNewline, setUseNewline] = useState(false)
@@ -454,6 +455,15 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const currentActiveFolderId = folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].id : (selectedAlbum?.id || '')
   const currentActiveFolderTitle = customNames[currentActiveFolderId] || (folderHistory.length > 0 ? folderHistory[folderHistory.length - 1].title : (selectedAlbum?.title || ''))
+  const faceAccess = useAlbumFaceAccess(currentActiveFolderId, isSharedGuest)
+  const canUseFaceFilter = !isSharedGuest || (faceAccess.ready && faceAccess.enabled)
+  useEffect(() => {
+    if (canUseFaceFilter) return
+    setIsFaceFilterOpen(false)
+    setFaceToolsRequested(false)
+    setInspectFaceImageItem(null)
+    setFaceMatchedIds(null)
+  }, [canUseFaceFilter, currentActiveFolderId])
 
   const guestRootAlbumId = selectedAlbum?.id || currentActiveFolderId
 
@@ -1028,7 +1038,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const visibleItems = useMemo(() => (items || []).filter(item => item && !hiddenItemIds.has(item.id)), [items, hiddenItemIds])
   const subFolders = visibleItems.filter(item => item.type === 'folder')
-  const { items: timedItems, loading: loadingCaptureTimes } = usePhotoCaptureTimes(visibleItems, photoSort.startsWith('captured-'))
+  const { items: timedItems } = usePhotoCaptureTimes(visibleItems, photoSort.startsWith('captured-'))
   const mediaFiles = useMemo(() => sortAlbumPhotos(timedItems.filter(item => item.type !== 'folder'), photoSort,
     item => customNames[item.id] || item.name), [timedItems, photoSort, customNames])
 
@@ -2247,6 +2257,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   const handleOpenCurrentFolderSetting = () => {
+    if (isSharedGuest) return
     setEditingFeatureFlags({ password: Boolean(activeSetting.password), selectionLimit: Boolean(activeSetting.max_select) })
     setEditingFolderSetting({
       id: currentActiveFolderId,
@@ -2256,14 +2267,20 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       allow_comments: activeSetting.allow_comments ?? true,
       enable_watermark: activeSetting.enable_watermark === true,
       collect_customer_info: activeSetting.collect_customer_info ?? false,
-      max_viewers: activeSetting.max_viewers ?? 0
+      max_viewers: activeSetting.max_viewers ?? 0,
+      enable_face_filter: faceAccess.ready ? faceAccess.enabled : undefined,
     })
   }
 
   const handleSaveCurrentFolderSetting = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!editingFolderSetting) return
+    if (!editingFolderSetting || isSharedGuest || isSavingFolderSetting) return
+    if (!faceAccess.ready) {
+      void showAlert('Chưa đọc được quyền lọc khuôn mặt. Vui lòng bấm Thử lại trong cài đặt album.')
+      return
+    }
 
+    setIsSavingFolderSetting(true)
     try {
       const newTitle = editingFolderSetting.title.trim()
       const limit = Number(editingFolderSetting.max_select)
@@ -2316,10 +2333,18 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         [editingFolderSetting.id]: { ...editingFolderSetting, ...payload }
       }))
 
+      const faceFilterEnabled = editingFolderSetting.enable_face_filter ?? faceAccess.enabled
+      if (faceFilterEnabled !== faceAccess.enabled) {
+        const { data: sessionData } = await supabase.auth.getSession()
+        await saveAlbumFaceAccess(editingFolderSetting.id, faceFilterEnabled, sessionData.session?.access_token || '')
+      }
+
       setEditingFolderSetting(null)
       void showAlert(`Đã lưu cài đặt cho "${newTitle || currentActiveFolderTitle}" thành công!`)
     } catch (err: any) {
       void showAlert('Lỗi lưu cài đặt: ' + err.message)
+    } finally {
+      setIsSavingFolderSetting(false)
     }
   }
 
@@ -4307,7 +4332,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   >
                     <Heart className="h-3.5 w-3.5" /> Chưa chọn ({mediaFiles.length - displaySelectedImagesList.length})
                   </button>
-                  <button
+                  {canUseFaceFilter && downloadableImages.length > 0 && <button
                     type="button"
                     onClick={() => setIsFaceFilterOpen(prev => !prev)}
                     className={`min-h-11 min-w-0 justify-center sm:min-h-0 shrink-0 inline-flex items-center gap-1.5 rounded-xl border px-2 sm:px-3 py-2 text-[10px] sm:text-[11px] font-bold transition cursor-pointer ${
@@ -4324,7 +4349,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                         ? `Lọc khuôn mặt (${faceMatchedIds.size})`
                         : 'Lọc khuôn mặt'}
                     </span>
-                  </button>
+                  </button>}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -4338,10 +4363,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       className={`h-9 w-full rounded-xl border pl-9 pr-3 text-[11px] outline-none transition ${isDarkMode ? 'border-white/10 bg-white/5 text-white placeholder:text-white/30 focus:border-emerald-500' : 'border-gray-200 bg-gray-50 text-gray-900 focus:border-emerald-500'}`}
                     />
                   </div>
-                  {isSharedGuest && <div className={`hidden sm:flex items-center gap-1 rounded-xl border p-1 ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-50'}`}>
-                    <button type="button" onClick={() => setGridDensity('comfortable')} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${gridDensity === 'comfortable' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-emerald-500'}`} title="Ảnh lớn"><ImageIcon className="h-3.5 w-3.5" /></button>
-                    <button type="button" onClick={() => setGridDensity('compact')} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${gridDensity === 'compact' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-emerald-500'}`} title="Ảnh nhỏ"><Square className="h-3.5 w-3.5" /></button>
-                  </div>}
+
                   <button
                     onClick={() => setIsAdminPanelOpen(true)}
                     className="hidden sm:inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-[11px] font-bold text-white hover:bg-emerald-700"
@@ -4371,7 +4393,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       {ALBUM_PHOTO_SORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </label>
-                  {photoSort.startsWith('captured-') && <span className={`text-[11px] ${isDarkMode ? 'text-white/50' : 'text-gray-500'}`}>{loadingCaptureTimes ? 'Đang đọc ngày chụp…' : 'Ảnh không có ngày chụp được xếp cuối.'}</span>}
+                  {photoSort.startsWith('captured-') && <span className={`text-[11px] ${isDarkMode ? 'text-white/50' : 'text-gray-500'}`}>Ảnh không có ngày chụp được xếp cuối theo tên.</span>}
                   {displaySelectedImagesList.length > 0 && (
                     <button onClick={handleClearAllSelections} className="sm:ml-auto shrink-0 inline-flex min-h-10 items-center gap-1 rounded-xl border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-red-500"><Trash2 className="h-3 w-3" /> Bỏ chọn tất cả ({displaySelectedImagesList.length})</button>
                   )}
@@ -4380,7 +4402,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             </section>
 
             {/* BẢNG NHẬN DIỆN & LỌC KHUÔN MẶT */}
-            {downloadableImages.length > 0 && (isFaceFilterOpen || faceToolsRequested) && (
+            {canUseFaceFilter && downloadableImages.length > 0 && (isFaceFilterOpen || faceToolsRequested) && (
               <FaceFilterPanel
                 folderId={currentActiveFolderId || selectedAlbum?.id || 'album'}
                 images={downloadableImages}
@@ -4406,7 +4428,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 <button onClick={handleOpenCurrentFolderSetting} className="min-w-0 justify-center sm:justify-start shrink-0 inline-flex min-h-11 sm:min-h-9 items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-500"><Settings className="h-3.5 w-3.5" /> Cài đặt Album</button>
                 <button onClick={() => { fetchComments(); setIsCommentModalOpen(true) }} className="min-w-0 justify-center sm:justify-start shrink-0 inline-flex min-h-11 sm:min-h-9 items-center gap-1.5 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 text-[10px] font-semibold text-amber-500"><MessageSquare className="h-3.5 w-3.5" /> Bình luận <span className="rounded-full bg-amber-500/15 px-1.5">{commentedImagesList.length}</span></button>
                 <button onClick={handleOpenVisibilityManager} className={`min-w-0 justify-center sm:justify-start shrink-0 inline-flex min-h-11 sm:min-h-9 items-center gap-1.5 rounded-xl border px-3 text-[10px] font-semibold ${isDarkMode ? 'border-white/10 bg-white/5 text-white/60' : 'border-gray-200 bg-gray-50 text-gray-600'}`}><Eye className="h-3.5 w-3.5" /> Ẩn / Hiện mục</button>
-                <button onClick={() => setIsFaceFilterOpen(prev => !prev)} className="col-span-2 sm:col-span-1 min-w-0 justify-center sm:justify-start shrink-0 inline-flex min-h-11 sm:min-h-9 items-center gap-1.5 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"><FaceScanIcon className="h-3.5 w-3.5" /> Nhận diện khuôn mặt</button>
+                {downloadableImages.length > 0 && <button onClick={() => setIsFaceFilterOpen(prev => !prev)} className="col-span-2 sm:col-span-1 min-w-0 justify-center sm:justify-start shrink-0 inline-flex min-h-11 sm:min-h-9 items-center gap-1.5 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"><FaceScanIcon className="h-3.5 w-3.5" /> Nhận diện khuôn mặt</button>}
               </section>
             )}
 
@@ -4442,7 +4464,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       </h3>
                     </div>
 
-                    <div className={`grid ${isSharedGuest ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5' : 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2'}`}>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
                       {subFolders
                         .filter(f => f.name.toLowerCase().includes(searchTerm.toLowerCase()))
                         .map((folder) => {
@@ -4466,7 +4488,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                             >
                               <div 
                                 onClick={() => handleOpenSubFolder(folder)}
-                                className={`${isSharedGuest ? 'h-44 sm:h-52' : 'aspect-[16/10]'} bg-gray-50 dark:bg-[#12141a] relative cursor-pointer overflow-hidden flex items-center justify-center`}
+                                className="aspect-[16/10] bg-gray-50 dark:bg-[#12141a] relative cursor-pointer overflow-hidden flex items-center justify-center"
                               >
                                 {hasCover ? (
                                   <img 
@@ -4483,7 +4505,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   />
                                 ) : (
                                   <div className="flex items-center justify-center w-full h-full group-hover:scale-105 transition-transform duration-300">
-                                    <CustomFolderGraphic className={isSharedGuest ? 'w-24 h-24 sm:w-28 sm:h-28' : 'w-12 h-12'} />
+                                    <CustomFolderGraphic className="w-12 h-12" />
                                   </div>
                                 )}
 
@@ -4508,7 +4530,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                 )}
                               </div>
 
-                              <div className={`flex gap-2 ${isSharedGuest ? 'p-3.5 items-center justify-between' : 'p-2 flex-col items-stretch'}`}>
+                              <div className="flex flex-col items-stretch gap-2 p-2">
                                 <div onClick={() => handleOpenSubFolder(folder)} className="cursor-pointer truncate flex-1">
                                   <h4 className="font-semibold text-xs sm:text-sm hover:text-emerald-600 transition-colors truncate" title={displayName}>
                                     {displayName}
@@ -4518,7 +4540,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   </p>
                                 </div>
 
-                                <div className={`flex items-center gap-1.5 flex-shrink-0 ${!isSharedGuest ? 'flex-wrap justify-end' : ''}`}>
+                                <div className="flex min-h-8 shrink-0 flex-wrap items-center justify-end gap-1.5">
                                   {!isSharedGuest && (
                                     <button
                                       type="button"
@@ -4573,7 +4595,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       </div>
                     )}
 
-                    <div className={`grid gap-2.5 sm:gap-3 ${!isSharedGuest ? 'grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8' : gridDensity === 'compact' ? 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'}`}>
+                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3 md:grid-cols-6 lg:grid-cols-8">
                       {filteredMediaFiles.map((item) => {
                           const isFavorite = (displayRatings[item.id] || 0) > 0
                           const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`
@@ -4890,7 +4912,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </button>
               </div>
 
-              <div className={`mt-2 grid ${previewMedia.type === 'image' ? 'grid-cols-3' : 'grid-cols-1'} gap-2`}>
+              <div className={`mt-2 grid ${previewMedia.type === 'image' ? canUseFaceFilter ? 'grid-cols-3' : 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
                 {previewMedia.type === 'image' && (
                   <button
                     type="button"
@@ -4901,7 +4923,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                     {downloadSelectedIds.has(previewMedia.id) ? 'Đã chọn tải' : 'Chọn tải'}
                   </button>
                 )}
-                {previewMedia.type === 'image' && (
+                {previewMedia.type === 'image' && canUseFaceFilter && (
                   <button
                     type="button"
                     onClick={() => {
@@ -4958,7 +4980,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 {isGuestSelectionReview ? ((displayRatings[previewMedia.id] || 0) > 0 ? 'Khách đã chọn' : 'Khách chưa chọn') : (displayRatings[previewMedia.id] || 0) > 0 ? 'Đã chọn ảnh' : 'Thả tim chọn ảnh'}
               </button>
 
-              {previewMedia.type === 'image' && (
+              {previewMedia.type === 'image' && canUseFaceFilter && (
                 <>
                   <div className="h-4 w-[1px] bg-white/20 mx-1" />
                   <button
@@ -5549,9 +5571,18 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </label>
               </div>
 
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                <label className="flex min-h-11 items-center gap-2 font-semibold">
+                  <input type="checkbox" checked={editingFolderSetting.enable_face_filter ?? faceAccess.enabled} disabled={!faceAccess.ready || isSavingFolderSetting} onChange={event => setEditingFolderSetting({ ...editingFolderSetting, enable_face_filter: event.target.checked })} className="rounded text-emerald-600" />
+                  Cho khách lọc ảnh theo khuôn mặt
+                </label>
+                <p className="mt-1 text-[11px] leading-relaxed text-gray-500">Chỉ áp dụng cho album này. Bật quyền không quét trước; ảnh được phân tích khi người xem mở lọc khuôn mặt.</p>
+                {!faceAccess.ready && <div className="mt-2 flex items-center gap-2 text-[11px] text-amber-600"><span>{faceAccess.error || 'Đang đọc quyền lọc khuôn mặt…'}</span>{faceAccess.error && <button type="button" onClick={faceAccess.refresh} className="min-h-10 underline">Thử lại</button>}</div>}
+              </div>
+
               <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-gray-100 dark:border-white/10">
                 <button type="button" onClick={() => setEditingFolderSetting(null)} className="px-4 py-2 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10">Hủy</button>
-                <button type="submit" className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md">Lưu Cài Đặt</button>
+                <button type="submit" disabled={isSavingFolderSetting || !faceAccess.ready} className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-md disabled:opacity-50">{isSavingFolderSetting ? 'Đang lưu…' : 'Lưu Cài Đặt'}</button>
               </div>
             </form>
           </div>

@@ -5,6 +5,7 @@ import React, { useEffect, useId, useMemo, useRef, useState, useCallback } from 
 import { createPortal } from 'react-dom'
 import {
   Camera,
+  Clock3,
   Check,
   CheckSquare,
   Download,
@@ -56,9 +57,23 @@ export interface FaceFilterPanelProps {
   clearSignal?: number
 }
 
+// Only this small label ticks; the face cards and gallery do not rerender once
+// per second just to update the clock.
+function ScanDuration({ startedAt, elapsedMs }: { startedAt: number | null; elapsedMs: number }) {
+  const [now, setNow] = useState(() => performance.now())
+  useEffect(() => {
+    if (startedAt === null) return
+    const timer = setInterval(() => setNow(performance.now()), 1000)
+    return () => clearInterval(timer)
+  }, [startedAt])
+  const seconds = Math.floor(Math.max(0, startedAt === null ? elapsedMs : Math.max(now, startedAt) - startedAt) / 1000)
+  const duration = `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`
+  return <span className="mt-1 inline-flex items-center gap-1.5 text-[11px] opacity-60"><Clock3 className="h-3 w-3" />Thời gian quét: <span className="font-mono tabular-nums">{duration}</span></span>
+}
+
 export default function FaceFilterPanel({
   folderId,
-  images,
+  images: providedImages,
   isDarkMode,
   isOpen,
   onClose,
@@ -72,6 +87,7 @@ export default function FaceFilterPanel({
   onClearInspectImageItem,
   clearSignal = 0,
 }: FaceFilterPanelProps) {
+  const images = useMemo(() => [...new Map(providedImages.filter(item => !item.type || item.type === 'image').map(item => [item.id, item])).values()], [providedImages])
   const panelRef = useRef<HTMLElement | null>(null)
   const contentRef = useRef<HTMLDivElement | null>(null)
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
@@ -81,6 +97,7 @@ export default function FaceFilterPanel({
   const [detectedFaces, setDetectedFaces] = useState<DetectedFaceRecord[]>([])
   const [scannedCount, setScannedCount] = useState(0)
   const [isScanning, setIsScanning] = useState(false)
+  const [scanTiming, setScanTiming] = useState<{ startedAt: number | null; elapsedMs: number }>({ startedAt: null, elapsedMs: 0 })
   const [scanProgress, setScanProgress] = useState<ScanProgressInfo>({
     completed: 0,
     total: 0,
@@ -172,6 +189,7 @@ export default function FaceFilterPanel({
     referenceRequestRef.current++
     autoScanTriggeredForFolderRef.current = ''
     setIsScanning(false)
+    setScanTiming({ startedAt: null, elapsedMs: 0 })
     setIsDetectingReference(false)
     setDetectedFaces([])
     setScannedCount(0)
@@ -201,6 +219,7 @@ export default function FaceFilterPanel({
     activeScanRef.current = null
     autoScanTriggeredForFolderRef.current = ''
     setIsScanning(false)
+    setScanTiming({ startedAt: null, elapsedMs: 0 })
     setHydratedCacheKey('')
   }, [cacheKey])
 
@@ -237,9 +256,10 @@ export default function FaceFilterPanel({
       const scanImages = imagesRef.current
       if (activeScanRef.current || scanImages.length === 0) return
 
-      const run = { cancelled: false }
+      const run = { cancelled: false, startedAt: performance.now() }
       activeScanRef.current = run
       setIsScanning(true)
+      setScanTiming({ startedAt: run.startedAt, elapsedMs: 0 })
       setScanError('')
 
       if (forceRescan) {
@@ -291,6 +311,7 @@ export default function FaceFilterPanel({
         if (activeScanRef.current === run) {
           activeScanRef.current = null
           setIsScanning(false)
+          setScanTiming({ startedAt: null, elapsedMs: performance.now() - run.startedAt })
         }
       }
     },
@@ -309,7 +330,7 @@ export default function FaceFilterPanel({
 
   // Xử lý khi người dùng bấm "Tìm mặt trong ảnh này" từ modal xem ảnh lớn
   useEffect(() => {
-    if (!inspectImageItem) return
+    if (!isOpen || !inspectImageItem || images.length === 0) return
 
     let active = true
     if (contentRef.current) contentRef.current.scrollTop = 0
@@ -343,7 +364,7 @@ export default function FaceFilterPanel({
     return () => {
       active = false
     }
-  }, [inspectImageItem, folderId, startAlbumScan, onClearInspectImageItem])
+  }, [isOpen, inspectImageItem, images.length, folderId, startAlbumScan, onClearInspectImageItem])
 
   // Keep numerical clustering off the phone's UI thread. Preserve the same
   // grouping rules and retain original face/descriptor objects for filtering.
@@ -622,6 +643,7 @@ export default function FaceFilterPanel({
             <p className={`mt-1 text-[11px] sm:text-xs ${isDarkMode ? 'text-white/60' : 'text-emerald-900/65'}`}>
               {isScanning ? 'Đang tìm khuôn mặt' : `${faceClusters.length} khuôn mặt`} • Đã quét {scannedCount}/{images.length} ảnh
             </p>
+            <ScanDuration startedAt={scanTiming.startedAt} elapsedMs={scanTiming.elapsedMs} />
           </div>
           <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Đóng nhận diện khuôn mặt" className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${isDarkMode ? 'text-white/65 hover:bg-white/10' : 'text-emerald-950/60 hover:bg-emerald-950/5'}`}>
             <X className="h-5 w-5" />

@@ -57,7 +57,7 @@ export default function PublicAlbumPage() {
   const [album, setAlbum] = useState<any>(null)
   const [albumImages, setImages] = useState<DriveItem[]>([])
   const [photoSort, setPhotoSort] = useState<AlbumPhotoSort>('default')
-  const { items: timedImages, loading: loadingCaptureTimes } = usePhotoCaptureTimes(albumImages, photoSort.startsWith('captured-'))
+  const { items: timedImages } = usePhotoCaptureTimes(albumImages, photoSort.startsWith('captured-'))
   const images = useMemo(() => sortAlbumPhotos(timedImages, photoSort), [timedImages, photoSort])
   const [loading, setLoading] = useState(true)
   const [errorText, setErrorText] = useState('')
@@ -576,7 +576,7 @@ export default function PublicAlbumPage() {
               </select>
             </label>
             {photoSort.startsWith('captured-') && (
-              <p className="text-xs opacity-55">{loadingCaptureTimes ? 'Đang đọc ngày chụp…' : 'Ảnh không có thời gian chụp được xếp cuối.'}</p>
+              <p className="text-xs opacity-55">Ảnh không có ngày chụp được xếp cuối theo tên.</p>
             )}
           </div>
         )}

@@ -47,9 +47,9 @@ export function sortAlbumPhotos<T extends AlbumPhotoTimeMetadata & { name: strin
   if (sort === 'default') return [...items]
 
   return items
-    .map((item, index) => ({ item, index, capturedAt: getPhotoCaptureTimestamp(item.capturedTime) }))
+    .map((item, index) => ({ item, index, name: getName(item).trim().normalize('NFC'), capturedAt: sort === 'name-asc' ? null : getPhotoCaptureTimestamp(item.capturedTime) }))
     .sort((a, b) => {
-      const byName = () => nameCollator.compare(getName(a.item).trim().normalize('NFC'), getName(b.item).trim().normalize('NFC')) || a.index - b.index
+      const byName = () => nameCollator.compare(a.name, b.name) || a.index - b.index
       if (sort === 'name-asc') return byName()
       // Upload/edit times are not capture times. Missing or invalid EXIF stays last in both directions.
       if (a.capturedAt === null || b.capturedAt === null) {

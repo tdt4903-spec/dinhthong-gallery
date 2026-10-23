@@ -10,8 +10,10 @@ run_worker_first = true
 [vars]
 # Do NOT put GOOGLE_DRIVE_API_KEY here.
 # Add it as a Worker secret in Cloudflare.
-# Cover uploads also require SUPABASE_URL and SUPABASE_ANON_KEY secrets.
+# Cover uploads and album face permissions require SUPABASE_URL and
+# SUPABASE_ANON_KEY secrets. Writes verify is_gallery_admin with the user's JWT.
 
 [[kv_namespaces]]
 binding = "ALBUM_COVERS"
+# Album face permissions use a separate face-access:v1: key prefix here.
 id = "cd08ede4fd3746fb9acbdfd18520bcf2"

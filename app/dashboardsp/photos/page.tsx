@@ -71,7 +71,7 @@ export default function CustomerProductPhotosPage() {
     albums.find((album) => album.id === selectedAlbumId) || null
 
   const albumImages = useMemo(() => driveItems.filter((item) => item.type === 'image'), [driveItems])
-  const { items: timedImages, loading: loadingCaptureTimes } = usePhotoCaptureTimes(albumImages, photoSort.startsWith('captured-'))
+  const { items: timedImages } = usePhotoCaptureTimes(albumImages, photoSort.startsWith('captured-'))
   const images = useMemo(() => sortAlbumPhotos(timedImages, photoSort), [timedImages, photoSort])
 
   useEffect(() => {
@@ -539,7 +539,7 @@ export default function CustomerProductPhotosPage() {
                 </select>
               </label>
               {photoSort.startsWith('captured-') && (
-                <p className="text-xs opacity-55">{loadingCaptureTimes ? 'Đang đọc ngày chụp…' : 'Ảnh không có thời gian chụp được xếp cuối.'}</p>
+                <p className="text-xs opacity-55">Ảnh không có ngày chụp được xếp cuối theo tên.</p>
               )}
             </div>
           )}

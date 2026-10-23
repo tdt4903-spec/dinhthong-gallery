@@ -45,6 +45,7 @@ export interface ScannableMediaItem {
   fullUrl?: string
   modifiedTime?: string
   contentHash?: string
+  type?: 'image' | 'video' | 'folder'
 }
 
 const FACE_API_SCRIPT_URLS = [
@@ -654,6 +655,59 @@ async function computeLandmarkBatch(faceapi: any, chips: HTMLCanvasElement[]): P
   return result
 }
 
+function suppressSsdBoxes(boxes: ArrayLike<number>, scores: ArrayLike<number>, minConfidence: number, maxResults: number): number[] {
+  const candidates = Array.from(scores, (score, index) => ({ score, index }))
+    .filter(candidate => candidate.score > minConfidence).sort((left, right) => right.score - left.score)
+  const kept: number[] = []
+  const overlap = (left: number, right: number) => {
+    const a = left * 4, b = right * 4
+    const topA = Math.min(boxes[a], boxes[a + 2]), leftA = Math.min(boxes[a + 1], boxes[a + 3])
+    const bottomA = Math.max(boxes[a], boxes[a + 2]), rightA = Math.max(boxes[a + 1], boxes[a + 3])
+    const topB = Math.min(boxes[b], boxes[b + 2]), leftB = Math.min(boxes[b + 1], boxes[b + 3])
+    const bottomB = Math.max(boxes[b], boxes[b + 2]), rightB = Math.max(boxes[b + 1], boxes[b + 3])
+    const areaA = (bottomA - topA) * (rightA - leftA), areaB = (bottomB - topB) * (rightB - leftB)
+    if (areaA <= 0 || areaB <= 0) return 0
+    const intersection = Math.max(0, Math.min(bottomA, bottomB) - Math.max(topA, topB)) * Math.max(0, Math.min(rightA, rightB) - Math.max(leftA, leftB))
+    return intersection / (areaA + areaB - intersection)
+  }
+  for (const candidate of candidates) {
+    if (kept.length >= maxResults) break
+    let suppressed = false
+    for (let index = kept.length - 1; index >= 0; index--) {
+      if (overlap(candidate.index, kept[index]) > 0.5) { suppressed = true; break }
+    }
+    if (!suppressed) kept.push(candidate.index)
+  }
+  return kept
+}
+
+// The pinned SSD convenience method calls boxes.arraySync() again for EVERY
+// NMS comparison. Crowd photos can copy all ~5k boxes thousands of times.
+// Download tensors once asynchronously and apply the same 0.5 IoU/0.6 score
+// suppression on typed arrays. Model, resolution and accepted boxes stay the same.
+async function detectSsdFaces(faceapi: any, canvas: HTMLCanvasElement): Promise<any[]> {
+  const net = faceapi.nets.ssdMobilenetv1
+  if (!net?.forwardInput || !faceapi.toNetInput || !faceapi.FaceDetection || !faceapi.Rect) {
+    return faceapi.detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6, maxResults: 100 }))
+  }
+  const input = await faceapi.toNetInput(canvas)
+  const output = net.forwardInput(input)
+  try {
+    const [boxes, scores] = await Promise.all([output.boxes[0].data(), output.scores[0].data()])
+    const indexes = suppressSsdBoxes(boxes, scores, 0.6, 100)
+    const reshaped = input.getReshapedInputDimensions(0)
+    const scaleX = input.inputSize / reshaped.width, scaleY = input.inputSize / reshaped.height
+    return indexes.map(index => {
+      const offset = index * 4
+      const top = Math.max(0, boxes[offset]) * scaleY, bottom = Math.min(1, boxes[offset + 2]) * scaleY
+      const left = Math.max(0, boxes[offset + 1]) * scaleX, right = Math.min(1, boxes[offset + 3]) * scaleX
+      return new faceapi.FaceDetection(scores[index], new faceapi.Rect(left, top, right - left, bottom - top), { width: input.getInputWidth(0), height: input.getInputHeight(0) })
+    })
+  } finally {
+    for (const tensor of [...output.boxes, ...output.scores]) tensor.dispose()
+  }
+}
+
 function extractFaceChips(canvas: HTMLCanvasElement, boxes: any[]): HTMLCanvasElement[] {
   // drawImage avoids a getImageData/putImageData GPU readback for every crop.
   return boxes.map(box => {
@@ -778,7 +832,7 @@ async function detectFacesWithGpu(
   try {
     // One detector pass per revision. The former whole-image flip and two
     // overlapping tile pyramids could run the detector over ten times/image.
-    const detections = await faceapi.detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6, maxResults: 100 }))
+    const detections = await detectSsdFaces(faceapi, canvas)
     if (!Array.isArray(detections) || shouldCancel?.()) return []
     const region = { x: 0, y: 0, width, height, mirrored: false }
     const proposals = uniqueFaceProposals(detections.map((detection: any, index: number) => {
@@ -859,6 +913,7 @@ export async function detectFacesInDriveImage(
   item: ScannableMediaItem,
   folderId?: string
 ): Promise<DetectedFaceRecord[]> {
+  if (item.type && item.type !== 'image') return []
   const cached = await getCachedFacesForImage(folderId || '', item)
   if (cached !== null) return deduplicateDetectedFaces(cached)
   const detected = await inferImageOnce(item)
@@ -878,12 +933,14 @@ export async function scanAlbumFaces(options: {
 }): Promise<DetectedFaceRecord[]> {
   const {
     folderId,
-    items,
+    items: providedItems,
     forceRescan = false,
     concurrency,
     shouldCancel,
     onProgress,
   } = options
+
+  const items = [...new Map(providedItems.filter(item => !item.type || item.type === 'image').map(item => [item.id, item])).values()]
 
   const total = items.length
   if (total === 0) {

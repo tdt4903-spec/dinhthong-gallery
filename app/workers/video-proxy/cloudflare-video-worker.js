@@ -239,6 +239,55 @@ async function listFolder(request, env, url) {
 
 const MAX_COVER_BYTES = 768 * 1024
 
+// Store only one small permission record per album in the existing KV binding.
+// No images, embeddings, automatic scans or new compute services are created.
+async function albumFaceAccess(request, env, url) {
+  const headers = { 'Cache-Control': 'no-store' }
+  const albumId = url.searchParams.get('id') || ''
+  if (!validDriveId(albumId) || albumId.length > 200) return Response.json({ error: 'Mã album không hợp lệ.' }, { status: 400, headers })
+  if (!env.ALBUM_COVERS) return Response.json({ error: 'Chưa thể đọc quyền lọc khuôn mặt.' }, { status: 503, headers })
+  const key = `face-access:v1:${albumId}`
+  if (request.method === 'GET' || request.method === 'HEAD') {
+    const value = await env.ALBUM_COVERS.get(key, 'json')
+    // Existing albums retain their current access until an admin changes it.
+    const enabled = value === null ? true : value.enabled === true
+    return new Response(request.method === 'HEAD' ? null : JSON.stringify({ albumId, enabled }), { headers: { ...headers, 'Content-Type': 'application/json' } })
+  }
+  if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405, headers: { ...headers, Allow: 'GET, HEAD, POST, OPTIONS' } })
+  const origin = request.headers.get('Origin') || ''
+  const allowedOrigins = ['https://dinhthongphotos.io.vn', 'https://www.dinhthongphotos.io.vn', 'https://dinhthong-gallery.vercel.app', 'http://localhost:3000', 'http://127.0.0.1:3000']
+  if (origin && !allowedOrigins.includes(origin)) return Response.json({ error: 'Không cho phép thay đổi từ trang này.' }, { status: 403, headers })
+  const authorization = request.headers.get('Authorization') || ''
+  if (!/^Bearer \S+$/.test(authorization)) return Response.json({ error: 'Vui lòng đăng nhập admin.' }, { status: 401, headers })
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return Response.json({ error: 'Chưa cấu hình xác thực admin.' }, { status: 503, headers })
+  const permission = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/is_gallery_admin`, {
+    method: 'POST',
+    headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: authorization, 'Content-Type': 'application/json' },
+    body: '{}',
+  })
+  if (!permission.ok || await permission.json() !== true) return Response.json({ error: 'Chỉ admin được thay đổi quyền lọc khuôn mặt.' }, { status: 403, headers })
+  if (request.headers.get('Content-Type')?.split(';')[0] !== 'application/json') return Response.json({ error: 'Dữ liệu không hợp lệ.' }, { status: 415, headers })
+  const reader = request.body?.getReader()
+  if (!reader) return Response.json({ error: 'Thiếu cài đặt.' }, { status: 400, headers })
+  const chunks = []
+  let length = 0
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    length += value.byteLength
+    if (length > 512) { await reader.cancel(); return Response.json({ error: 'Cài đặt vượt giới hạn.' }, { status: 413, headers }) }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+  let body
+  try { body = JSON.parse(new TextDecoder().decode(bytes)) } catch { return Response.json({ error: 'Cài đặt không hợp lệ.' }, { status: 400, headers }) }
+  if (typeof body?.enabled !== 'boolean') return Response.json({ error: 'Thiếu trạng thái bật/tắt.' }, { status: 400, headers })
+  await env.ALBUM_COVERS.put(key, JSON.stringify({ enabled: body.enabled, updatedAt: Date.now() }))
+  return Response.json({ albumId, enabled: body.enabled }, { headers })
+}
+
 async function albumCover(request, env, url) {
   const noStore = { 'Cache-Control': 'no-store' }
   if (!env.ALBUM_COVERS) return Response.json({ error: 'Kho ảnh bìa chưa sẵn sàng.' }, { status: 503, headers: noStore })
@@ -307,6 +356,7 @@ async function handleRequest(request, env, ctx) {
     }
 
     if (url.pathname === '/album-covers' || url.pathname.startsWith('/album-covers/')) return albumCover(request, env, url)
+    if (url.pathname === '/album-face-access') return albumFaceAccess(request, env, url)
 
     // Chỉ cho phép GET và HEAD; OPTIONS phục vụ kiểm tra CORS.
     if (request.method !== 'GET' && request.method !== 'HEAD') {
