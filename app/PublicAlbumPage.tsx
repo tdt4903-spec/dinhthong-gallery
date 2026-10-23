@@ -16,8 +16,8 @@ import { getCustomerProductsSupabase } from '@/lib/customer-products'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { getPublicCategoryPath } from '@/lib/public-gallery-paths'
 import { useImageZoom } from '@/lib/use-image-zoom'
-import { ALBUM_PHOTO_SORT_OPTIONS, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
-import { usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
+import { ALBUM_PHOTO_SORT_OPTIONS, formatPhotoCaptureTime, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
+import { captureTimeStatus, usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
 
 type DriveItem = AlbumPhotoTimeMetadata & {
   id: string
@@ -57,7 +57,8 @@ export default function PublicAlbumPage() {
   const [album, setAlbum] = useState<any>(null)
   const [albumImages, setImages] = useState<DriveItem[]>([])
   const [photoSort, setPhotoSort] = useState<AlbumPhotoSort>('default')
-  const { items: timedImages } = usePhotoCaptureTimes(albumImages, photoSort.startsWith('captured-'))
+  const captureTimes = usePhotoCaptureTimes(albumImages, albumImages.length > 0, { scopeKey: albumSlug })
+  const timedImages = captureTimes.items
   const images = useMemo(() => sortAlbumPhotos(timedImages, photoSort), [timedImages, photoSort])
   const [loading, setLoading] = useState(true)
   const [errorText, setErrorText] = useState('')
@@ -130,6 +131,7 @@ export default function PublicAlbumPage() {
     onSwipeLeft: showNextImage,
     onSwipeRight: showPreviousImage,
   })
+  const previewCaptureTime = formatPhotoCaptureTime(images.find(image => image.id === preview?.id)?.capturedTime)
 
   useEffect(() => {
     if (!preview) {
@@ -576,7 +578,7 @@ export default function PublicAlbumPage() {
               </select>
             </label>
             {photoSort.startsWith('captured-') && (
-              <p className="text-xs opacity-55">Ảnh không có ngày chụp được xếp cuối theo tên.</p>
+              <p className="max-w-xl text-xs leading-relaxed opacity-55" role="status">{captureTimeStatus(captureTimes)}</p>
             )}
           </div>
         )}
@@ -660,6 +662,7 @@ export default function PublicAlbumPage() {
               )}
               {' / '}
               {images.length}
+              {previewCaptureTime && <div className="mt-1 text-[10px] font-normal leading-snug text-white/55">{previewCaptureTime}</div>}
             </div>
 
             <button

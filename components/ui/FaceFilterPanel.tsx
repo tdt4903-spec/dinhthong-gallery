@@ -1,6 +1,7 @@
 'use client'
 
 import { FaceScanIcon } from './FaceScanIcon'
+import WindowedAlbumGrid from './WindowedAlbumGrid'
 import React, { useEffect, useId, useMemo, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -55,6 +56,7 @@ export interface FaceFilterPanelProps {
   inspectImageItem?: ScannableMediaItem | null
   onClearInspectImageItem?: () => void
   clearSignal?: number
+  onScanActivityChange?: (running: boolean) => void
 }
 
 // Only this small label ticks; the face cards and gallery do not rerender once
@@ -86,6 +88,7 @@ export default function FaceFilterPanel({
   inspectImageItem = null,
   onClearInspectImageItem,
   clearSignal = 0,
+  onScanActivityChange,
 }: FaceFilterPanelProps) {
   const images = useMemo(() => [...new Map(providedImages.filter(item => !item.type || item.type === 'image').map(item => [item.id, item])).values()], [providedImages])
   const panelRef = useRef<HTMLElement | null>(null)
@@ -97,6 +100,8 @@ export default function FaceFilterPanel({
   const [detectedFaces, setDetectedFaces] = useState<DetectedFaceRecord[]>([])
   const [scannedCount, setScannedCount] = useState(0)
   const [isScanning, setIsScanning] = useState(false)
+  useEffect(() => { onScanActivityChange?.(isScanning) }, [isScanning, onScanActivityChange])
+  useEffect(() => () => { onScanActivityChange?.(false) }, [onScanActivityChange])
   const [scanTiming, setScanTiming] = useState<{ startedAt: number | null; elapsedMs: number }>({ startedAt: null, elapsedMs: 0 })
   const [scanProgress, setScanProgress] = useState<ScanProgressInfo>({
     completed: 0,
@@ -875,7 +880,7 @@ export default function FaceFilterPanel({
           </div>
         )}
         {faceClusters.length > 0 ? (
-          <div className="grid grid-cols-3 gap-2 min-[380px]:grid-cols-4 sm:grid-cols-6 lg:grid-cols-8">
+          <WindowedAlbumGrid className="grid grid-cols-3 gap-2 min-[380px]:grid-cols-4 sm:grid-cols-6 lg:grid-cols-8" itemAspect={1} scrollRoot={contentRef}>
             {faceClusters.map((cluster, idx) => {
               const isSelected = isMergeMode ? mergeSelection.has(cluster.id) : selectedClusterIds.has(cluster.id)
               const imageCount = faceClusterImageIds.get(cluster.id)?.size || 0
@@ -938,7 +943,7 @@ export default function FaceFilterPanel({
                 </button>
               )
             })}
-          </div>
+          </WindowedAlbumGrid>
         ) : !isScanning ? (
           <div
             className={`rounded-xl border border-dashed px-4 py-5 text-center text-xs ${

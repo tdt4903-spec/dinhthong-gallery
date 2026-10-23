@@ -8,6 +8,7 @@ import dynamic from 'next/dynamic'
 import { FaceScanIcon } from '../../components/ui/FaceScanIcon'
 import AlbumVideoPreview from '../../components/ui/AlbumVideoPreview'
 import GuestContactButton from '../../components/ui/GuestContactButton'
+import WindowedAlbumGrid from '../../components/ui/WindowedAlbumGrid'
 import { createBrowserClient } from '@supabase/ssr'
 import { saveAs } from 'file-saver'
 import { fetchCloudflareMediaBlob, prepareCloudflareAlbumShare, prepareCloudflareArchiveLocally, supportsLocalArchivePreparation, UnsupportedLocalArchiveError, runCloudflareArchive, type DownloadEntry } from '@/lib/cloudflare-download'
@@ -15,16 +16,18 @@ import { fetchCloudflareFolderPage } from '@/lib/cloudflare-folder'
 import { SITE_BANNER_URL } from '@/lib/site-assets'
 import { DEFAULT_ALBUM_FEATURES, normalizeAlbumFeatures, resolveAlbumFeatures } from '@/lib/album-features'
 import { useImageZoom } from '@/lib/use-image-zoom'
-import { ALBUM_PHOTO_SORT_OPTIONS, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
-import { usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
+import { ALBUM_PHOTO_SORT_OPTIONS, formatPhotoCaptureTime, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
+import { captureTimeStatus, usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
 import { saveAlbumFaceAccess, useAlbumFaceAccess } from '@/lib/album-face-access'
+import { useAlbumScrollGuard } from '@/lib/use-album-scroll-guard'
 import { 
-  Search, Sun, Moon, Plus, Camera, 
-  Trash2, LogOut, User as UserIcon,
+  Search, Sun, Moon, Plus, Camera,
+  Trash2, LogOut, User as UserIcon, BookOpen,
   Download, ArrowLeft as BackIcon, Film, Loader2, X, Star, Heart, ClipboardList, Copy, Check, ChevronLeft, ChevronRight, Share2, KeyRound, FolderSync, Settings, ChevronRight as ChevronPath, Image as ImageIcon, RefreshCw, CheckSquare, Square, Eye, Wallet, MessageSquare, Lock as LockIcon, ZoomIn, ZoomOut, RotateCcw, Send, Bell
 } from 'lucide-react'
 
 const FaceFilterPanel = dynamic(() => import('../../components/ui/FaceFilterPanel'), { ssr: false })
+const AlbumUsageGuide = dynamic(() => import('../../components/ui/AlbumUsageGuide'), { ssr: false })
 
 interface MediaItem extends AlbumPhotoTimeMetadata {
   id: string
@@ -223,6 +226,7 @@ interface GalleryClientProps {
 }
 
 export default function GalleryClient({ displayName = '' }: GalleryClientProps) {
+  useAlbumScrollGuard()
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
@@ -424,6 +428,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
 
   const [isFaceFilterOpen, setIsFaceFilterOpen] = useState(false)
+  const [isUsageGuideOpen, setIsUsageGuideOpen] = useState(false)
+  const [isFaceScanRunning, setIsFaceScanRunning] = useState(false)
   const [faceToolsRequested, setFaceToolsRequested] = useState(false)
   useEffect(() => {
     if (isFaceFilterOpen) setFaceToolsRequested(true)
@@ -1038,7 +1044,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
   const visibleItems = useMemo(() => (items || []).filter(item => item && !hiddenItemIds.has(item.id)), [items, hiddenItemIds])
   const subFolders = visibleItems.filter(item => item.type === 'folder')
-  const { items: timedItems } = usePhotoCaptureTimes(visibleItems, photoSort.startsWith('captured-'))
+  const captureTimes = usePhotoCaptureTimes(visibleItems, visibleItems.length > 0, { scopeKey: currentActiveFolderId, paused: isFaceScanRunning || isFaceFilterOpen || loadingImages })
+  const timedItems = captureTimes.items
   const mediaFiles = useMemo(() => sortAlbumPhotos(timedItems.filter(item => item.type !== 'folder'), photoSort,
     item => customNames[item.id] || item.name), [timedItems, photoSort, customNames])
 
@@ -4353,6 +4360,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <button type="button" aria-label="Hướng dẫn sử dụng" onClick={() => setIsUsageGuideOpen(true)} className={`inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl border px-2.5 text-[10px] font-semibold sm:min-h-9 sm:text-[11px] ${isDarkMode ? 'border-white/10 bg-white/5 text-white/75' : 'border-gray-200 bg-white text-gray-600'}`}><BookOpen aria-hidden="true" className="h-4 w-4 shrink-0" /><span className="hidden min-[380px]:inline">Hướng dẫn sử dụng</span></button>
                   <div className="relative flex-1 lg:w-[230px] lg:flex-none">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
                     <input
@@ -4393,7 +4401,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       {ALBUM_PHOTO_SORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </label>
-                  {photoSort.startsWith('captured-') && <span className={`text-[11px] ${isDarkMode ? 'text-white/50' : 'text-gray-500'}`}>Ảnh không có ngày chụp được xếp cuối theo tên.</span>}
+                  {photoSort.startsWith('captured-') && <span role="status" className={`max-w-xl text-[11px] leading-relaxed ${isDarkMode ? 'text-white/50' : 'text-gray-500'}`}>{captureTimeStatus(captureTimes)}</span>}
                   {displaySelectedImagesList.length > 0 && (
                     <button onClick={handleClearAllSelections} className="sm:ml-auto shrink-0 inline-flex min-h-10 items-center gap-1 rounded-xl border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-red-500"><Trash2 className="h-3 w-3" /> Bỏ chọn tất cả ({displaySelectedImagesList.length})</button>
                   )}
@@ -4418,6 +4426,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 inspectImageItem={inspectFaceImageItem}
                 onClearInspectImageItem={handleClearInspectFaceImage}
                 clearSignal={clearFaceFilterSignal}
+                onScanActivityChange={setIsFaceScanRunning}
               />
             )}
 
@@ -4595,7 +4604,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3 md:grid-cols-6 lg:grid-cols-8">
+                    <WindowedAlbumGrid className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3 md:grid-cols-6 lg:grid-cols-8">
                       {filteredMediaFiles.map((item) => {
                           const isFavorite = (displayRatings[item.id] || 0) > 0
                           const fastDisplayUrl = `https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`
@@ -4727,11 +4736,12 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   </div>
                                 </div>
                                 <div className={`mt-1 truncate text-[8px] sm:text-[9px] ${isDarkMode ? 'text-white/26' : 'text-gray-400'}`} title={displayName}>{displayName}</div>
+                                <div className={`mt-0.5 min-h-3 truncate text-[8px] tabular-nums sm:text-[9px] ${isDarkMode ? 'text-white/40' : 'text-gray-500'}`} title={formatPhotoCaptureTime(item.capturedTime) || undefined}>{formatPhotoCaptureTime(item.capturedTime) ? `Chụp: ${formatPhotoCaptureTime(item.capturedTime)}` : ''}</div>
                               </div>
                             </div>
                           )
                         })}
-                    </div>
+                    </WindowedAlbumGrid>
                   </div>
                 )}
               </div>
@@ -4739,6 +4749,8 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           </div>
         )}
       </main>
+
+      <AlbumUsageGuide isOpen={isUsageGuideOpen} isDarkMode={isDarkMode} onClose={() => setIsUsageGuideOpen(false)} faceFilterAllowed={canUseFaceFilter} />
 
       {/* MODAL LIGHTBOX */}
       {previewMedia && (
@@ -4833,6 +4845,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               />
             ) : (
               <div
+                data-allow-touch-gesture
                 ref={imageZoom.viewportRef}
                 {...imageZoom.viewportProps}
                 className="media-viewer-viewport absolute inset-0 flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing"
@@ -6115,7 +6128,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       )}
       <AppPopupHost popup={popup} onResolve={resolvePopup} />
 
-      {isSharedGuest && !isMediaDialogOpen && !isFaceFilterOpen && !showGuestNameModal && !guestAccessDenied && !popup.open && (
+      {isSharedGuest && !isMediaDialogOpen && !isFaceFilterOpen && !isUsageGuideOpen && !showGuestNameModal && !guestAccessDenied && !popup.open && (
         <GuestContactButton
           isDarkMode={isDarkMode}
           hasMobileToolbar={Boolean(selectedAlbum && !isLocked && downloadableImages.length > 0)}

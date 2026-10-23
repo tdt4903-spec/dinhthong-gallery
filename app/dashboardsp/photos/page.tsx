@@ -19,8 +19,8 @@ import {
 
 import { getCustomerProductsSupabase } from '@/lib/customer-products'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
-import { ALBUM_PHOTO_SORT_OPTIONS, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
-import { usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
+import { ALBUM_PHOTO_SORT_OPTIONS, formatPhotoCaptureTime, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
+import { captureTimeStatus, usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
 
 type Album = {
   id: string
@@ -71,7 +71,8 @@ export default function CustomerProductPhotosPage() {
     albums.find((album) => album.id === selectedAlbumId) || null
 
   const albumImages = useMemo(() => driveItems.filter((item) => item.type === 'image'), [driveItems])
-  const { items: timedImages } = usePhotoCaptureTimes(albumImages, photoSort.startsWith('captured-'))
+  const captureTimes = usePhotoCaptureTimes(albumImages, albumImages.length > 0, { scopeKey: selectedAlbumId })
+  const timedImages = captureTimes.items
   const images = useMemo(() => sortAlbumPhotos(timedImages, photoSort), [timedImages, photoSort])
 
   useEffect(() => {
@@ -539,7 +540,7 @@ export default function CustomerProductPhotosPage() {
                 </select>
               </label>
               {photoSort.startsWith('captured-') && (
-                <p className="text-xs opacity-55">Ảnh không có ngày chụp được xếp cuối theo tên.</p>
+                <p className="max-w-xl text-xs leading-relaxed opacity-55" role="status">{captureTimeStatus(captureTimes)}</p>
               )}
             </div>
           )}
@@ -627,7 +628,10 @@ export default function CustomerProductPhotosPage() {
                           : 'text-black/55'
                       }`}
                     >
-                      {item.name}
+                      <div className="truncate">{item.name}</div>
+                      {formatPhotoCaptureTime(item.capturedTime) && (
+                        <div className="mt-1 truncate text-[9px] tabular-nums opacity-70">Chụp: {formatPhotoCaptureTime(item.capturedTime)}</div>
+                      )}
                     </div>
                   </button>
                 )

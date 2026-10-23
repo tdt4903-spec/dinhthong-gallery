@@ -3,8 +3,19 @@ export type AlbumPhotoSort = 'default' | 'name-asc' | 'captured-asc' | 'captured
 export type AlbumPhotoTimeMetadata = {
   /** EXIF DateTime from Drive imageMediaMetadata.time, when the image retains it. */
   capturedTime?: string
+  /** Optional image digest supplied by the media source for revision-safe metadata caches. */
+  contentHash?: string
   createdTime?: string
   modifiedTime?: string
+}
+
+/** Display the camera's original local date and time without converting its timezone. */
+export function formatPhotoCaptureTime(value?: string): string | null {
+  if (getPhotoCaptureTimestamp(value) === null || !value) return null
+  const parts = value.trim().match(/^(\d{4})[:-](\d{2})[:-](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/)
+  if (!parts) return null
+  const [, year, month, day, hour, minute, second] = parts
+  return `${day}/${month}/${year} ${hour}:${minute}:${second}`
 }
 
 export const ALBUM_PHOTO_SORT_OPTIONS: ReadonlyArray<{ value: AlbumPhotoSort; label: string }> = [
