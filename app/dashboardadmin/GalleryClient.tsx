@@ -83,6 +83,20 @@ interface KeyRecord {
 const SECRET_SALT = "DINHTHONG_SECRET_AUTH_2026"
 const preloadedCache = new Set<string>()
 
+const mergeAlbumRatings = (
+  previous: Record<string, number>,
+  incoming: Record<string, number>,
+  itemIds: string[],
+) => {
+  const removed = itemIds.some(id => id in previous && !(id in incoming))
+  const changed = Object.keys(incoming).some(id => previous[id] !== incoming[id])
+  if (!removed && !changed) return previous
+
+  const next = { ...previous }
+  itemIds.forEach(id => delete next[id])
+  return Object.assign(next, incoming)
+}
+
 // Domain Cloudflare Worker thực tế của bạn
 const VIDEO_WORKER_BASE = (process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || 'https://dinhthong-video-proxy.tdt4903.workers.dev').replace(/\/$/, '')
 
@@ -1314,12 +1328,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           const value = Number(localRatings?.[id] || 0)
           if (value > 0) nextRatings[id] = value
         })
-        setRatings(prev => {
-          const next = { ...prev }
-          itemIds.forEach(id => delete next[id])
-          Object.keys(nextRatings).forEach(id => { next[id] = nextRatings[id] })
-          return next
-        })
+        setRatings(prev => mergeAlbumRatings(prev, nextRatings, itemIds))
         return nextRatings
       } catch {
         return {} as Record<string, number>
@@ -1384,12 +1393,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         }
       }
 
-      setRatings(prev => {
-        const next = { ...prev }
-        itemIds.forEach(id => delete next[id])
-        Object.keys(nextRatings).forEach(id => { next[id] = nextRatings[id] })
-        return next
-      })
+      setRatings(prev => mergeAlbumRatings(prev, nextRatings, itemIds))
 
       localStorage.setItem('dinhthong_image_ratings', JSON.stringify(nextRatings))
       return nextRatings
@@ -2971,16 +2975,40 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     const folderId = currentActiveFolderId
     if (!folderId || loadingImages) return
 
+    let disposed = false
+    let inFlight = false
     const refresh = async () => {
-      const currentMediaIds = mediaFiles.map(item => item.id)
-      await fetchSelectionsForFolder(folderId, true, currentMediaIds)
-      if (!isSharedGuest && isAdminPanelOpen) await fetchGuestSelections(folderId)
+      if (disposed || inFlight || document.visibilityState === 'hidden') return
+      inFlight = true
+      try {
+        const currentMediaIds = mediaFiles.map(item => item.id)
+        await fetchSelectionsForFolder(folderId, true, currentMediaIds)
+        if (!disposed && !isSharedGuest && isAdminPanelOpen) await fetchGuestSelections(folderId)
+      } finally {
+        inFlight = false
+      }
     }
 
-    refresh()
+    void refresh()
+    // Guest hearts already update local state immediately. Re-reading the same
+    // localStorage every eight seconds reconciles the entire grid while scrolling.
+    if (isSharedGuest) {
+      const onStorage = (event: StorageEvent) => {
+        if (event.key === 'dinhthong_image_ratings' || event.key === null) void refresh()
+      }
+      window.addEventListener('storage', onStorage)
+      return () => {
+        disposed = true
+        window.removeEventListener('storage', onStorage)
+      }
+    }
+
     const interval = window.setInterval(refresh, 8000)
-    return () => window.clearInterval(interval)
-  }, [currentActiveFolderId, isSharedGuest, isAdminPanelOpen, isAdmin, user?.email])
+    return () => {
+      disposed = true
+      window.clearInterval(interval)
+    }
+  }, [currentActiveFolderId, isSharedGuest, isAdminPanelOpen, isAdmin, user?.email, loadingImages, mediaFiles])
 
   useEffect(() => {
     if (!isSharedGuest || !guestId || !guestRootAlbumId) return
@@ -3126,7 +3154,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   return (
-    <div data-site-theme={isDarkMode ? 'dark' : 'light'} className={`site-page-surface min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#06140f] text-white' : 'bg-[#f5f7f3] text-[#1c1d21]'}`}>
+    <div data-site-theme={isDarkMode ? 'dark' : 'light'} className={`site-page-surface ${isSharedGuest ? 'guest-album-page' : ''} min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#06140f] text-white' : 'bg-[#f5f7f3] text-[#1c1d21]'}`}>
       
       {/* HEADER */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#071710]/94 border-white/10' : 'bg-[#fbfdf9]/94 border-emerald-950/8'} ${selectedAlbum && !isSharedGuest ? 'lg:fixed lg:inset-x-0 lg:top-0 lg:z-[90] lg:h-[66px]' : ''}`}>
@@ -4437,10 +4465,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                     alt={displayName} 
                                     loading="lazy"
                                     decoding="async"
-                                    style={!isSharedGuest ? { height: '100%' } : undefined}
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                    className="album-card-preview-image object-cover group-hover:scale-105 transition-transform duration-300"
                                     onError={(e) => {
-                                      (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${folder.id}=w400-h400-p-k-no`
+                                      const image = e.currentTarget
+                                      const fallback = `https://lh3.googleusercontent.com/d/${folder.id}=w400-h400-p-k-no`
+                                      if (image.src !== fallback) image.src = fallback
                                     }}
                                   />
                                 ) : (
@@ -4562,8 +4591,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                       src={`https://lh3.googleusercontent.com/d/${item.id}=w360-h360-p-k-no`}
                                       alt={displayName}
                                       loading="lazy"
-                                      style={!isSharedGuest ? { height: '100%' } : undefined}
-                                      className="w-full h-full object-cover opacity-70 group-hover:scale-105 transition-transform duration-200"
+                                      className="album-card-preview-image object-cover opacity-70 group-hover:scale-105 transition-transform duration-200"
                                       onError={(e) => {
                                         (e.target as HTMLImageElement).style.display = 'none'
                                       }}
@@ -4584,10 +4612,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                       alt={displayName} 
                                       loading="lazy"
                                       decoding="async"
-                                      style={!isSharedGuest ? { height: '100%' } : undefined}
-                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200 pointer-events-none"
+                                      className="album-card-preview-image object-cover group-hover:scale-105 transition-transform duration-200 pointer-events-none"
                                       onError={(e) => {
-                                        (e.target as HTMLImageElement).src = `https://lh3.googleusercontent.com/d/${item.id}=w360`
+                                        const image = e.currentTarget
+                                        const fallback = `https://lh3.googleusercontent.com/d/${item.id}=w360`
+                                        if (image.src !== fallback) image.src = fallback
                                       }}
                                     />
 

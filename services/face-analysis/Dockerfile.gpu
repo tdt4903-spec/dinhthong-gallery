@@ -1,0 +1,18 @@
+# CUDA 12 / cuDNN 9 must match the installed ONNX Runtime GPU release.
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+ENV DEBIAN_FRONTEND=noninteractive PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+    OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
+    && rm -rf /var/lib/apt/lists/* && python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+WORKDIR /app
+COPY requirements.txt .
+RUN sed '/^onnxruntime[>=]/d' requirements.txt > requirements-gpu.txt \
+    && pip install --no-cache-dir -r requirements-gpu.txt 'onnxruntime-gpu>=1.20,<2' \
+    && useradd --uid 10001 --create-home face && mkdir /data /models && chown face:face /data
+COPY face_service ./face_service
+ENV FACE_ORT_PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider FACE_DETECTOR_WORKERS=1
+USER face
+EXPOSE 8080
+VOLUME ["/data"]
+CMD ["uvicorn", "face_service.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--no-access-log"]

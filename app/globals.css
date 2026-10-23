@@ -511,6 +511,22 @@ textarea {
 
 /* ===== DINHTHONG MOBILE RESPONSIVE END ===== */
 
+/* Fixed preview boxes must override the mobile media height:auto rule. */
+.album-card-preview-image {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Keep vertical gestures inside shared albums instead of refreshing the page. */
+html:has(.guest-album-page),
+body:has(.guest-album-page) {
+  overscroll-behavior-y: none;
+}
+
 /* Photo viewers fill the screen; ordinary popups keep their mobile margins. */
 .media-viewer[role="dialog"] {
   position: fixed;

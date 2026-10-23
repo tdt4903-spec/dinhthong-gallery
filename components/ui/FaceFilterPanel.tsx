@@ -91,7 +91,15 @@ export default function FaceFilterPanel({
   const [isGroupingFaces, setIsGroupingFaces] = useState(false)
   const [groupedFaces, setGroupedFaces] = useState<{ source: DetectedFaceRecord[]; clusters: FaceCluster[] } | null>(null)
   const [hydratedCacheKey, setHydratedCacheKey] = useState('')
-  const cacheKey = useMemo(() => JSON.stringify([folderId, images.map(image => image.id)]), [folderId, images])
+  // Array identity and display order can change without the album contents
+  // changing. Only actual image revisions should restart hydration or a scan.
+  const cacheKey = useMemo(() => JSON.stringify([folderId, images.map(image => ({
+    id: image.id,
+    name: image.name,
+    revision: image.contentHash || image.modifiedTime || '',
+  })).sort((left, right) => left.id.localeCompare(right.id))]), [folderId, images])
+  const imagesRef = useRef(images)
+  imagesRef.current = images
 
   const [threshold, setThreshold] = useState<number>(0.38)
   const [selectedClusterIds, setSelectedClusterIds] = useState<Set<string>>(new Set())
@@ -188,6 +196,16 @@ export default function FaceFilterPanel({
   }, [folderId, onFaceFilterChange, FACE_SCAN_VERSION])
 
   useEffect(() => {
+    // A real revision change invalidates the active snapshot. Already completed
+    // images remain in the cache and the next scan resumes only missing work.
+    if (activeScanRef.current) activeScanRef.current.cancelled = true
+    activeScanRef.current = null
+    autoScanTriggeredForFolderRef.current = ''
+    setIsScanning(false)
+    setHydratedCacheKey('')
+  }, [cacheKey])
+
+  useEffect(() => {
     if (clearSignal > 0) {
       setSelectedClusterIds(new Set())
       setSelectedClusterFaces(new Map())
@@ -200,7 +218,7 @@ export default function FaceFilterPanel({
     let active = true
     if (!isOpen || !folderId || images.length === 0) return
 
-    loadCachedFolderFaces(folderId, images).then(({ faces, scannedCount: cachedCount }) => {
+    loadCachedFolderFaces(folderId, imagesRef.current).then(({ faces, scannedCount: cachedCount }) => {
       if (!active) return
       if (!activeScanRef.current) {
         setDetectedFaces(faces)
@@ -214,11 +232,12 @@ export default function FaceFilterPanel({
     return () => {
       active = false
     }
-  }, [folderId, images, isOpen, cacheKey, FACE_SCAN_VERSION])
+  }, [folderId, isOpen, cacheKey, FACE_SCAN_VERSION])
 
   const startAlbumScan = useCallback(
     async (forceRescan = false) => {
-      if (activeScanRef.current || images.length === 0) return
+      const scanImages = imagesRef.current
+      if (activeScanRef.current || scanImages.length === 0) return
 
       const run = { cancelled: false }
       activeScanRef.current = run
@@ -239,7 +258,7 @@ export default function FaceFilterPanel({
       try {
         const finalFaces = await scanAlbumFaces({
           folderId: folderId || 'default_album',
-          items: images,
+          items: scanImages,
           forceRescan,
           shouldCancel: () => run.cancelled || activeScanRef.current !== run,
           onProgress: (info) => {
@@ -269,7 +288,7 @@ export default function FaceFilterPanel({
         }
       }
     },
-    [folderId, images]
+    [folderId, cacheKey]
   )
 
   // Tự động quét khi người dùng mở bảng Nhận diện khuôn mặt lần đầu trong album

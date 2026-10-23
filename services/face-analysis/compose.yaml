@@ -1,0 +1,53 @@
+services:
+  face-cpu:
+    profiles: [cpu]
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports: ["127.0.0.1:8080:8080"]
+    volumes:
+      - face-data:/data
+      - ${FACE_MODELS_DIR:-./models}:/models:ro
+    cpus: 8
+    mem_limit: 12g
+    stop_grace_period: 90s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  face-gpu:
+    profiles: [gpu]
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      FACE_ORT_PROVIDERS: CUDAExecutionProvider,CPUExecutionProvider
+      FACE_DETECTOR_WORKERS: "1"
+    ports: ["127.0.0.1:8080:8080"]
+    volumes:
+      - face-data:/data
+      - ${FACE_MODELS_DIR:-./models}:/models:ro
+    cpus: 8
+    mem_limit: 16g
+    stop_grace_period: 90s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  face-data:

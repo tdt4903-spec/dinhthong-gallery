@@ -83,7 +83,7 @@ async function thumbnail(request, env, url) {
     return Response.json({ error: 'Invalid Google Drive file ID' }, { status: 400 })
   }
   const requestedSize = Number(url.searchParams.get('size') || 640)
-  const size = [640, 1280, 1600, 2048].includes(requestedSize) ? requestedSize : 640
+  const size = [640, 960, 1024, 1280, 1600, 2048].includes(requestedSize) ? requestedSize : 640
   const version = url.searchParams.get('v') || url.searchParams.get('scan') || ''
   const resourceKey = url.searchParams.get('resourceKey') || ''
   if (version.length > 128 || (resourceKey && !/^[a-zA-Z0-9_-]{1,200}$/.test(resourceKey))) {

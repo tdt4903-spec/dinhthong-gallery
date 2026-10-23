@@ -13,6 +13,11 @@ export interface DetectedFaceRecord {
     height: number
   }
   score: number
+  /** Quality is measured on the preview; absent on compatible older cache rows. */
+  quality?: number
+  blurScore?: number
+  canSeedCluster?: boolean
+  embeddingModel?: string
 }
 
 export interface FaceCluster {
@@ -38,6 +43,8 @@ export interface ScannableMediaItem {
   name: string
   url?: string
   fullUrl?: string
+  modifiedTime?: string
+  contentHash?: string
 }
 
 const FACE_API_SCRIPT_URLS = [
@@ -54,7 +61,8 @@ const DB_NAME = 'dinhthong_face_cache_v1'
 const DB_VERSION = 2
 const STORE_NAME = 'image_faces'
 export const FACE_SCAN_VERSION = 'multiview-aligned-v4'
-const FACE_IMAGE_SIZE = 1600
+const FACE_IMAGE_SIZE = 1024
+const LEGACY_EMBEDDING_MODEL = 'face-api-128'
 const FACE_MEDIA_WORKER_BASE = (process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || 'https://dinhthong-video-proxy.tdt4903.workers.dev').replace(/\/+$/, '')
 
 let modelsLoadPromise: Promise<any> | null = null
@@ -71,20 +79,30 @@ function isValidFaceRecord(value: unknown): value is DetectedFaceRecord {
     face.box.width > 0 && face.box.height > 0
 }
 
-function readCachedImageFaces(value: unknown, imageId: string): DetectedFaceRecord[] | null {
+function imageRevision(item: ScannableMediaItem): string {
+  if (item.contentHash) return `hash:${item.contentHash}`
+  return item.modifiedTime ? `mtime:${item.modifiedTime}` : ''
+}
+
+function readCachedImageFaces(value: unknown, item: ScannableMediaItem): DetectedFaceRecord[] | null {
   if (!value || typeof value !== 'object') return null
-  const row = value as { imageId?: unknown; scanVersion?: unknown; faces?: unknown }
-  if (row.imageId !== imageId || row.scanVersion !== FACE_SCAN_VERSION || !Array.isArray(row.faces)) return null
+  const row = value as { imageId?: unknown; scanVersion?: unknown; sourceRevision?: unknown; faces?: unknown }
+  const revision = imageRevision(item)
+  if (row.imageId !== item.id || row.scanVersion !== FACE_SCAN_VERSION || !Array.isArray(row.faces)) return null
+  // A known revision must match exactly. Legacy callers without revision data
+  // can continue reusing the newest compatible result instead of rescanning.
+  if (revision && row.sourceRevision !== revision) return null
   return row.faces.every((face: unknown) =>
-    isValidFaceRecord(face) && face.imageId === imageId && face.descriptor.length === 128
+    isValidFaceRecord(face) && face.imageId === item.id && face.descriptor.length === 128 &&
+    (!face.embeddingModel || face.embeddingModel === LEGACY_EMBEDDING_MODEL)
   ) ? row.faces as DetectedFaceRecord[] : null
 }
 
-function newestCachedImageFaces(rows: unknown[], imageId: string): DetectedFaceRecord[] | null {
+function newestCachedImageFaces(rows: unknown[], item: ScannableMediaItem): DetectedFaceRecord[] | null {
   let faces: DetectedFaceRecord[] | null = null
   let newestScannedAt = -Infinity
   for (const row of rows) {
-    const candidate = readCachedImageFaces(row, imageId)
+    const candidate = readCachedImageFaces(row, item)
     if (candidate === null) continue
     const value = (row as { scannedAt?: unknown }).scannedAt
     const scannedAt = typeof value === 'number' && Number.isFinite(value) ? value : 0
@@ -254,7 +272,7 @@ function openFaceCacheDb(): Promise<IDBDatabase | null> {
 
 async function getCachedFacesForImage(
   folderId: string,
-  imageId: string
+  item: ScannableMediaItem
 ): Promise<DetectedFaceRecord[] | null> {
   const db = await openFaceCacheDb()
   if (!db) return null
@@ -263,15 +281,15 @@ async function getCachedFacesForImage(
     try {
       const tx = db.transaction(STORE_NAME, 'readonly')
       const store = tx.objectStore(STORE_NAME)
-      const req = store.get(`${folderId}::${imageId}`)
+      const req = store.get(`${folderId}::${item.id}`)
       req.onsuccess = () => {
-        const localFaces = readCachedImageFaces(req.result, imageId)
+        const localFaces = readCachedImageFaces(req.result, item)
         if (localFaces !== null) {
           resolve(localFaces)
           return
         }
-        const shared = store.index('imageId').getAll(imageId)
-        shared.onsuccess = () => resolve(newestCachedImageFaces(shared.result || [], imageId))
+        const shared = store.index('imageId').getAll(item.id)
+        shared.onsuccess = () => resolve(newestCachedImageFaces(shared.result || [], item))
         shared.onerror = () => resolve(null)
       }
       req.onerror = () => resolve(null)
@@ -290,7 +308,7 @@ async function getCachedFolderFacesByImage(
   if (!folderId || items.length === 0) return empty
   const db = await openFaceCacheDb()
   if (!db) return empty
-  const requestedIds = new Set(items.map(item => item.id))
+  const requestedItems = new Map(items.map(item => [item.id, item]))
   return new Promise(resolve => {
     try {
       // Read the current folder first, then look up only missing Drive IDs.
@@ -302,16 +320,17 @@ async function getCachedFolderFacesByImage(
       const request = store.index('folderId').getAll(folderId)
       request.onsuccess = () => {
         for (const row of request.result || []) {
-          if (!requestedIds.has(row?.imageId)) continue
-          const faces = readCachedImageFaces(row, row.imageId)
+          const item = requestedItems.get(row?.imageId)
+          if (!item) continue
+          const faces = readCachedImageFaces(row, item)
           if (faces !== null) cached.set(row.imageId, faces)
         }
         const imageIndex = store.index('imageId')
-        for (const imageId of requestedIds) {
+        for (const [imageId, item] of requestedItems) {
           if (cached.has(imageId)) continue
           const shared = imageIndex.getAll(imageId)
           shared.onsuccess = () => {
-            const faces = newestCachedImageFaces(shared.result || [], imageId)
+            const faces = newestCachedImageFaces(shared.result || [], item)
             if (faces !== null) cached.set(imageId, faces)
           }
         }
@@ -327,7 +346,7 @@ async function getCachedFolderFacesByImage(
 
 async function setCachedImageBatch(
   folderId: string,
-  images: { imageId: string; faces: DetectedFaceRecord[] }[]
+  images: { imageId: string; sourceRevision: string; faces: DetectedFaceRecord[] }[]
 ): Promise<void> {
   if (!folderId || images.length === 0) return
   const db = await openFaceCacheDb()
@@ -337,8 +356,8 @@ async function setCachedImageBatch(
       const tx = db.transaction(STORE_NAME, 'readwrite')
       const store = tx.objectStore(STORE_NAME)
       const scannedAt = Date.now()
-      for (const { imageId, faces } of images) {
-        store.put({ key: `${folderId}::${imageId}`, folderId, imageId, scannedAt, scanVersion: FACE_SCAN_VERSION, faces })
+      for (const { imageId, sourceRevision, faces } of images) {
+        store.put({ key: `${folderId}::${imageId}`, folderId, imageId, sourceRevision, scannedAt, scanVersion: FACE_SCAN_VERSION, faces })
       }
       tx.oncomplete = () => resolve()
       tx.onerror = () => resolve()
@@ -351,7 +370,7 @@ async function setCachedImageBatch(
 
 async function setCachedFacesForImage(
   folderId: string,
-  imageId: string,
+  item: ScannableMediaItem,
   faces: DetectedFaceRecord[]
 ): Promise<void> {
   const db = await openFaceCacheDb()
@@ -362,9 +381,10 @@ async function setCachedFacesForImage(
       const tx = db.transaction(STORE_NAME, 'readwrite')
       const store = tx.objectStore(STORE_NAME)
       store.put({
-        key: `${folderId}::${imageId}`,
+        key: `${folderId}::${item.id}`,
         folderId,
-        imageId,
+        imageId: item.id,
+        sourceRevision: imageRevision(item),
         scannedAt: Date.now(),
         scanVersion: FACE_SCAN_VERSION,
         faces,
@@ -445,9 +465,10 @@ function loadCorsSafeImage(url: string): Promise<HTMLImageElement> {
 }
 
 async function loadDriveThumbnailForCanvas(item: ScannableMediaItem): Promise<HTMLImageElement> {
+  const version = `${FACE_SCAN_VERSION}:${imageRevision(item)}`
   const candidateUrls = [
-    `${FACE_MEDIA_WORKER_BASE}/thumb?id=${encodeURIComponent(item.id)}&size=${FACE_IMAGE_SIZE}&scan=${FACE_SCAN_VERSION}`,
-    `https://lh3.googleusercontent.com/d/${encodeURIComponent(item.id)}=w${FACE_IMAGE_SIZE}`,
+    `${FACE_MEDIA_WORKER_BASE}/thumb?id=${encodeURIComponent(item.id)}&size=${FACE_IMAGE_SIZE}&v=${encodeURIComponent(version)}`,
+    `https://lh3.googleusercontent.com/d/${encodeURIComponent(item.id)}=w${FACE_IMAGE_SIZE}${imageRevision(item) ? `?_dtv=${encodeURIComponent(imageRevision(item))}` : ''}`,
   ]
 
   let lastErr: unknown = null
@@ -514,6 +535,47 @@ function uniqueFaceProposals(proposals: FaceDetectionProposal[]): FaceDetectionP
 }
 
 const descriptorBatchSupport = new WeakMap<object, boolean>()
+const imageInferenceInFlight = new Map<string, Promise<DetectedFaceRecord[]>>()
+const recentImageResults = new Map<string, DetectedFaceRecord[]>()
+
+function imageInferenceKey(item: ScannableMediaItem): string {
+  return JSON.stringify([FACE_SCAN_VERSION, item.id, imageRevision(item)])
+}
+
+function rememberImageResult(key: string, faces: DetectedFaceRecord[]): void {
+  recentImageResults.delete(key)
+  recentImageResults.set(key, faces)
+  // IndexedDB is the durable store. This small window also bridges a pending
+  // batch commit when another album/reference requests the same image.
+  while (recentImageResults.size > 32) recentImageResults.delete(recentImageResults.keys().next().value!)
+}
+
+async function inferImageOnce(
+  item: ScannableMediaItem,
+  preparedImage?: HTMLImageElement
+): Promise<DetectedFaceRecord[]> {
+  const key = imageInferenceKey(item)
+  const recent = recentImageResults.get(key)
+  if (recent) return recent
+  const running = imageInferenceInFlight.get(key)
+  if (running) return running
+  const task = (async () => {
+    const image = preparedImage || await loadDriveThumbnailForCanvas(item)
+    try {
+      // Complete this one bounded inference even when one consumer cancels;
+      // another consumer may be waiting for the same image.
+      const faces = await detectFacesFromImageElement(image, item.id, item.name)
+      rememberImageResult(key, faces)
+      return faces
+    } finally {
+      if (!preparedImage) image.src = ''
+    }
+  })()
+  imageInferenceInFlight.set(key, task)
+  try { return await task } finally {
+    if (imageInferenceInFlight.get(key) === task) imageInferenceInFlight.delete(key)
+  }
+}
 
 function validatedDescriptor(descriptor: unknown): number[] {
   if (!(descriptor instanceof Float32Array) && !Array.isArray(descriptor)) {
@@ -528,12 +590,15 @@ function validatedDescriptor(descriptor: unknown): number[] {
 
 async function computeDescriptorBatch(faceapi: any, inputs: HTMLCanvasElement[]): Promise<number[][]> {
   const descriptors: number[][] = []
-  // The pinned face-api accepts an array and runs one recognition forward pass
-  // for it. Two chips bound mobile GPU memory and reuse only batch shapes 1/2;
-  // a single portrait never pays for padded or duplicated face chips.
-  for (let start = 0; start < inputs.length; start += 2) {
-    const batch = inputs.slice(start, start + 2)
-    if (batch.length === 2 && descriptorBatchSupport.get(faceapi) !== false) {
+  const device = typeof navigator === 'undefined' ? undefined : navigator as Navigator & { deviceMemory?: number }
+  const mobile = Boolean(device && (/Android|iPhone|iPad|iPod/i.test(device.userAgent) || (device.platform === 'MacIntel' && device.maxTouchPoints > 1)))
+  const lowMemory = Boolean(device && ((device.deviceMemory !== undefined && device.deviceMemory <= 4) || (mobile && device.hardwareConcurrency > 0 && device.hardwareConcurrency <= 4)))
+  const batchSize = lowMemory ? 2 : mobile ? 4 : 8
+  // The pinned face-api accepts an array for one recognition forward pass.
+  // Small bounded batches keep mobile tensor memory predictable.
+  for (let start = 0; start < inputs.length; start += batchSize) {
+    const batch = inputs.slice(start, start + batchSize)
+    if (batch.length > 1 && descriptorBatchSupport.get(faceapi) !== false) {
       try {
         const result = await faceapi.computeFaceDescriptor(batch)
         if (!Array.isArray(result) || result.length !== batch.length) {
@@ -577,6 +642,74 @@ export async function detectFacesFromImageElement(
   } finally { release() }
 }
 
+function measureFaceQuality(
+  canvas: HTMLCanvasElement,
+  box: DetectedFaceRecord['box'],
+  score: number,
+  landmarks: any
+): Pick<DetectedFaceRecord, 'quality' | 'blurScore' | 'canSeedCluster'> {
+  const faceWidth = box.width * canvas.width
+  const faceHeight = box.height * canvas.height
+  const smallestSide = Math.min(faceWidth, faceHeight)
+  const sample = document.createElement('canvas')
+  sample.width = 48
+  sample.height = 48
+  let blurScore = 0
+  let measuredBlur = false
+  try {
+    const context = sample.getContext('2d', { willReadFrequently: true })
+    if (context) {
+      context.drawImage(canvas, box.x * canvas.width, box.y * canvas.height, faceWidth, faceHeight, 0, 0, 48, 48)
+      const data = context.getImageData(0, 0, 48, 48).data
+      const gray = new Float32Array(48 * 48)
+      for (let index = 0; index < gray.length; index++) {
+        const offset = index * 4
+        gray[index] = data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114
+      }
+      let sum = 0, squared = 0, count = 0
+      for (let y = 1; y < 47; y++) {
+        for (let x = 1; x < 47; x++) {
+          const index = y * 48 + x
+          const laplacian = gray[index - 1] + gray[index + 1] + gray[index - 48] + gray[index + 48] - 4 * gray[index]
+          sum += laplacian
+          squared += laplacian * laplacian
+          count++
+        }
+      }
+      blurScore = Math.max(0, squared / count - (sum / count) ** 2)
+      measuredBlur = true
+    }
+  } finally {
+    sample.width = 0
+    sample.height = 0
+  }
+
+  let poseQuality = 1
+  if (landmarks?.getLeftEye && landmarks?.getRightEye && landmarks?.getNose) {
+    const center = (points: { x: number; y: number }[]) => ({
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    })
+    const left = center(landmarks.getLeftEye())
+    const right = center(landmarks.getRightEye())
+    const nose = landmarks.getNose()
+    const tip = nose[3] || nose[0]
+    const eyeDistance = Math.hypot(right.x - left.x, right.y - left.y)
+    if (eyeDistance > 0 && tip) {
+      const yaw = Math.abs(tip.x - (left.x + right.x) / 2) / eyeDistance
+      const roll = Math.abs(right.y - left.y) / eyeDistance
+      poseQuality = Math.max(0.25, 1 - Math.max(0, yaw - 0.15) * 0.8 - roll * 0.35)
+    }
+  }
+  const sharpness = measuredBlur ? Math.min(1, blurScore / 120) : 0.5
+  const quality = score * (0.35 + 0.65 * Math.min(1, smallestSide / 80)) * (0.45 + 0.55 * sharpness) * poseQuality
+  return {
+    quality: Number(quality.toFixed(5)),
+    blurScore: Number(blurScore.toFixed(3)),
+    canSeedCluster: score >= 0.78 && smallestSide >= 28 && (!measuredBlur || blurScore >= 12) && poseQuality >= 0.55,
+  }
+}
+
 async function detectFacesWithGpu(
   img: HTMLImageElement,
   imageId: string,
@@ -585,237 +718,80 @@ async function detectFacesWithGpu(
   shouldCancel?: () => boolean
 ): Promise<DetectedFaceRecord[]> {
   const faceapi = await ensureFaceModelsLoaded()
-
   const naturalW = img.naturalWidth || img.width
   const naturalH = img.naturalHeight || img.height
   if (!naturalW || !naturalH) return []
-
   const scale = Math.min(1, maxDimension / Math.max(naturalW, naturalH))
   const width = Math.max(1, Math.round(naturalW * scale))
   const height = Math.max(1, Math.round(naturalH * scale))
-
-  const workCanvas = document.createElement('canvas')
-  workCanvas.width = width
-  workCanvas.height = height
-  const ctx = workCanvas.getContext('2d')
-  if (!ctx) { workCanvas.width = 0; workCanvas.height = 0; return [] }
-
-  ctx.drawImage(img, 0, 0, width, height)
-
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) { canvas.width = 0; canvas.height = 0; return [] }
+  context.drawImage(img, 0, 0, width, height)
   try {
+    // One detector pass per revision. The former whole-image flip and two
+    // overlapping tile pyramids could run the detector over ten times/image.
+    const detections = await faceapi.detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6, maxResults: 100 }))
+    if (!Array.isArray(detections) || shouldCancel?.()) return []
+    const region = { x: 0, y: 0, width, height, mirrored: false }
+    const proposals = uniqueFaceProposals(detections.map((detection: any, index: number) => {
+      const box = detection.box
+      return {
+        faceId: `${imageId}_face_${index}`,
+        detection,
+        region,
+        box: {
+          x: Number((box.x / width).toFixed(4)),
+          y: Number((box.y / height).toFixed(4)),
+          width: Number((box.width / width).toFixed(4)),
+          height: Number((box.height / height).toFixed(4)),
+        },
+        score: Number((detection.score || 0).toFixed(4)),
+      }
+    }))
     const faces: DetectedFaceRecord[] = []
-    const proposals: FaceDetectionProposal[] = []
-    const alignedBoxes = new Map<string, { x: number; y: number; width: number; height: number; mirrored: boolean }>()
-    const detectRegion = async (source: HTMLCanvasElement, offsetX = 0, offsetY = 0, mirrored = false) => {
-      if (shouldCancel?.()) return
-      const detections = await faceapi
-        .detectAllFaces(source, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6, maxResults: 100 }))
-      if (!Array.isArray(detections) || shouldCancel?.()) return
-
-      const region = { x: offsetX, y: offsetY, width: source.width, height: source.height, mirrored }
-      for (const detection of detections) {
-        const localBox = detection.box
-        // An internal crop edge can cut a face and produce a different descriptor.
-        // The overlapping neighbouring crop supplies its complete face instead.
-        const edgeMargin = 12
-        if (
-          (offsetX > 0 && localBox.x < edgeMargin) ||
-          (offsetY > 0 && localBox.y < edgeMargin) ||
-          (offsetX + source.width < width && localBox.x + localBox.width > source.width - edgeMargin) ||
-          (offsetY + source.height < height && localBox.y + localBox.height > source.height - edgeMargin)
-        ) continue
-        const box = { x: (mirrored ? source.width - localBox.x - localBox.width : localBox.x) + offsetX, y: localBox.y + offsetY, width: localBox.width, height: localBox.height }
-        proposals.push({
-          faceId: `${imageId}_face_${proposals.length}`,
-          detection,
-          region,
-          box: {
-            x: Number((box.x / width).toFixed(4)),
-            y: Number((box.y / height).toFixed(4)),
-            width: Number((box.width / width).toFixed(4)),
-            height: Number((box.height / height).toFixed(4)),
-          },
-          score: Number((detection.score || 0).toFixed(4)),
-        })
-      }
-    }
-
-    await detectRegion(workCanvas)
-    const primaryFaces = uniqueFaceProposals(proposals)
-    // A clear close portrait already supplies a complete detection. Mirroring
-    // descriptors below still handles pose variation without a second full SSD
-    // pass. Reserve extra detector passes for small, uncertain or missing faces.
-    const needsMirroredDetection = primaryFaces.length === 0 || primaryFaces.some(face =>
-      face.score < 0.8 || Math.min(face.box.width * width, face.box.height * height) < 96
-    )
-    if (!shouldCancel?.() && needsMirroredDetection) {
-      const mirroredImage = document.createElement('canvas')
-      mirroredImage.width = width
-      mirroredImage.height = height
-      try {
-        const mirroredContext = mirroredImage.getContext('2d')
-        if (mirroredContext) {
-          mirroredContext.translate(width, 0)
-          mirroredContext.scale(-1, 1)
-          mirroredContext.drawImage(workCanvas, 0, 0)
-          await detectRegion(mirroredImage, 0, 0, true)
-        }
-      } finally {
-        mirroredImage.width = 0
-        mirroredImage.height = 0
-      }
-    }
-    // SSD rescales the entire image internally. Overlapping crops preserve
-    // more pixels around distant faces without enlarging a low-resolution image.
-    const primaryFaceSize = primaryFaces.length ? Math.min(...primaryFaces.map(face => Math.min(face.box.width, face.box.height))) : 0
-    const needsDetailScan = Math.max(width, height) > 1000 && (
-      primaryFaces.length === 0 || primaryFaces.length >= 4 || primaryFaceSize < 0.12
-    )
-    const scanTiles = async (tileSize: number) => {
-      const tileWidth = Math.min(tileSize, width)
-      const tileHeight = Math.min(tileSize, height)
-      const offsets = (length: number, tile: number) => {
-        const positions = [0]
-        while (positions[positions.length - 1] + tile < length) {
-          positions.push(Math.min(length - tile, positions[positions.length - 1] + Math.floor(tile * 0.80)))
-        }
-        return positions
-      }
-      const tile = document.createElement('canvas')
-      tile.width = tileWidth
-      tile.height = tileHeight
-      const tileContext = tile.getContext('2d')
-      try {
-        if (tileContext) {
-          for (const y of offsets(height, tileHeight)) {
-            for (const x of offsets(width, tileWidth)) {
-              if (shouldCancel?.()) return
-              tileContext.drawImage(workCanvas, x, y, tileWidth, tileHeight, 0, 0, tileWidth, tileHeight)
-              await detectRegion(tile, x, y)
-            }
-          }
-        }
-      } finally {
-        tile.width = 0
-        tile.height = 0
-      }
-    }
-    if (needsDetailScan) {
-      await scanTiles(900)
-      const detected = uniqueFaceProposals(proposals)
-      const hasSmallFaces = detected.some(face => Math.min(face.box.width * width, face.box.height * height) < 96)
-      if (!shouldCancel?.() && (detected.length === 0 || hasSmallFaces)) await scanTiles(640)
-    }
-
-    if (shouldCancel?.()) return []
-
-    // Detection runs at every original scale. Landmarks and embeddings run only
-    // for distinct proposals, using the same region and Dlib alignment as before.
-    // Small groups cap mobile GPU memory and reuse the same network tensor shape.
-    const descriptorBatchSize = 4
-    const byRegion = new Map<FaceDetectionProposal['region'], FaceDetectionProposal[]>()
-    for (const proposal of uniqueFaceProposals(proposals)) {
-      const group = byRegion.get(proposal.region) || []
-      group.push(proposal)
-      byRegion.set(proposal.region, group)
-    }
-    for (const [region, selected] of byRegion) {
+    const batchSize = 8
+    for (let start = 0; start < proposals.length; start += batchSize) {
       if (shouldCancel?.()) return []
-      const isWholeImage = !region.mirrored && region.x === 0 && region.y === 0 && region.width === width && region.height === height
-      const source = isWholeImage ? workCanvas : document.createElement('canvas')
-      if (!isWholeImage) {
-        source.width = region.width
-        source.height = region.height
-        const sourceContext = source.getContext('2d')
-        if (!sourceContext) { source.width = 0; source.height = 0; continue }
-        if (region.mirrored) sourceContext.setTransform(-1, 0, 0, 1, source.width, 0)
-        sourceContext.drawImage(workCanvas, region.x, region.y, region.width, region.height, 0, 0, source.width, source.height)
+      const batch = proposals.slice(start, start + batchSize)
+      const landmarks = await new faceapi.DetectAllFaceLandmarksTask(
+        Promise.resolve(batch.map(proposal => ({ detection: proposal.detection }))), canvas, false
+      )
+      if (!Array.isArray(landmarks) || landmarks.length !== batch.length) {
+        throw new Error('Không thể căn chỉnh đầy đủ các khuôn mặt.')
       }
+      const chips: HTMLCanvasElement[] = await faceapi.extractFaces(canvas, landmarks.map((result: any) => result.landmarks.align(null, { useDlibAlignment: true })))
       try {
-        for (let start = 0; start < selected.length; start += descriptorBatchSize) {
-          if (shouldCancel?.()) return []
-          const batch = selected.slice(start, start + descriptorBatchSize)
-          const landmarks = await new faceapi.DetectAllFaceLandmarksTask(
-            Promise.resolve(batch.map(proposal => ({ detection: proposal.detection }))), source, false
-          )
-          if (!Array.isArray(landmarks) || landmarks.length !== batch.length) {
-            throw new Error('Không thể căn chỉnh đầy đủ các khuôn mặt.')
-          }
-          const chips: HTMLCanvasElement[] = await faceapi.extractFaces(source, landmarks.map((det: any) => det.landmarks.align(null, { useDlibAlignment: true })))
-          try {
-            const descriptors = await computeDescriptorBatch(faceapi, chips)
-            for (let index = 0; index < landmarks.length; index++) {
-              const det = landmarks[index]
-              const proposal = batch[index]
-              const aligned = det.landmarks.align(null, { useDlibAlignment: true })
-              alignedBoxes.set(proposal.faceId, {
-                x: (region.mirrored ? source.width - aligned.x - aligned.width : aligned.x) + region.x,
-                y: aligned.y + region.y, width: aligned.width, height: aligned.height, mirrored: region.mirrored,
-              })
-              faces.push({
-                faceId: proposal.faceId, imageId, imageName, descriptor: descriptors[index].map(value => Number(value.toFixed(6))),
-                avatarDataUrl: '', box: proposal.box, score: proposal.score,
-              })
-            }
-          } finally {
-            for (const chip of chips) { chip.width = 0; chip.height = 0 }
-          }
+        // The descriptor remains the existing 128D face-api space. It is not
+        // normalized/padded into an incompatible ArcFace512 descriptor.
+        const descriptors = await computeDescriptorBatch(faceapi, chips)
+        for (let index = 0; index < batch.length; index++) {
+          const proposal = batch[index]
+          faces.push({
+            faceId: proposal.faceId,
+            imageId,
+            imageName,
+            descriptor: descriptors[index].map(value => Number(value.toFixed(6))),
+            embeddingModel: LEGACY_EMBEDDING_MODEL,
+            box: proposal.box,
+            score: proposal.score,
+            ...measureFaceQuality(canvas, proposal.box, proposal.score, landmarks[index].landmarks),
+            avatarDataUrl: cropFaceAvatarDataUrl(canvas, {
+              x: proposal.box.x * width, y: proposal.box.y * height,
+              width: proposal.box.width * width, height: proposal.box.height * height,
+            }),
+          })
         }
       } finally {
-        if (!isWholeImage) { source.width = 0; source.height = 0 }
+        for (const chip of chips) { chip.width = 0; chip.height = 0 }
       }
     }
-    const uniqueFaces = deduplicateDetectedFaces(faces)
-    // Average the original aligned embedding with its mirrored view, as with
-    // recognition jittering. Do not widen a search by taking the best of many
-    // unrelated descriptors, and do not L2-normalize this model's embeddings.
-    if (typeof faceapi.computeFaceDescriptor === 'function') {
-      for (let start = 0; start < uniqueFaces.length; start += descriptorBatchSize) {
-        if (shouldCancel?.()) return []
-        const batch = uniqueFaces.slice(start, start + descriptorBatchSize)
-        const chips: HTMLCanvasElement[] = []
-        const chipFaces: DetectedFaceRecord[] = []
-        try {
-          for (const face of batch) {
-            const aligned = alignedBoxes.get(face.faceId)
-            if (!aligned) continue
-            const x = Math.max(0, aligned.x), y = Math.max(0, aligned.y)
-            const cropWidth = Math.min(width - x, aligned.width - (x - aligned.x))
-            const cropHeight = Math.min(height - y, aligned.height - (y - aligned.y))
-            if (cropWidth <= 0 || cropHeight <= 0) continue
-            const chip = document.createElement('canvas')
-            chip.width = Math.max(1, Math.round(cropWidth))
-            chip.height = Math.max(1, Math.round(cropHeight))
-            const chipContext = chip.getContext('2d')
-            if (!chipContext) continue
-            chipContext.setTransform(aligned.mirrored ? 1 : -1, 0, 0, 1, aligned.mirrored ? 0 : chip.width, 0)
-            chipContext.drawImage(workCanvas, x, y, cropWidth, cropHeight, 0, 0, chip.width, chip.height)
-            chips.push(chip)
-            chipFaces.push(face)
-          }
-          const mirroredDescriptors = await computeDescriptorBatch(faceapi, chips)
-          for (let index = 0; index < chipFaces.length; index++) {
-            const face = chipFaces[index]
-            const mirrored = mirroredDescriptors[index]
-            if (mirrored.length === face.descriptor.length && mirrored.every(Number.isFinite)) {
-              face.descriptor = face.descriptor.map((value, dimension) => Number(((value + mirrored[dimension]) / 2).toFixed(6)))
-            }
-          }
-        } finally {
-          for (const chip of chips) { chip.width = 0; chip.height = 0 }
-        }
-      }
-    }
-    for (const face of uniqueFaces) {
-      face.avatarDataUrl = cropFaceAvatarDataUrl(workCanvas, {
-        x: face.box.x * width, y: face.box.y * height,
-        width: face.box.width * width, height: face.box.height * height,
-      })
-    }
-    return shouldCancel?.() ? [] : uniqueFaces
+    return shouldCancel?.() ? [] : deduplicateDetectedFaces(faces)
   } finally {
-    workCanvas.width = 0
-    workCanvas.height = 0
+    canvas.width = 0
+    canvas.height = 0
   }
 }
 
@@ -838,12 +814,11 @@ export async function detectFacesInDriveImage(
   item: ScannableMediaItem,
   folderId?: string
 ): Promise<DetectedFaceRecord[]> {
-  const cached = await getCachedFacesForImage(folderId || '', item.id)
+  const cached = await getCachedFacesForImage(folderId || '', item)
   if (cached !== null) return deduplicateDetectedFaces(cached)
-  const img = await loadDriveThumbnailForCanvas(item)
-  const detected = await detectFacesFromImageElement(img, item.id, item.name)
+  const detected = await inferImageOnce(item)
   if (folderId) {
-    await setCachedFacesForImage(folderId, item.id, detected)
+    await setCachedFacesForImage(folderId, item, detected)
   }
   return detected
 }
@@ -876,6 +851,7 @@ export async function scanAlbumFaces(options: {
 
   if (forceRescan && folderId) {
     await clearFolderFaceCache(folderId)
+    for (const item of items) recentImageResults.delete(imageInferenceKey(item))
   }
   const cachedByImage = forceRescan ? new Map<string, DetectedFaceRecord[]>() : await getCachedFolderFacesByImage(folderId, items)
   const allFaces: DetectedFaceRecord[] = []
@@ -907,7 +883,7 @@ export async function scanAlbumFaces(options: {
       : 'Đang khởi tạo AI nhận diện khuôn mặt...',
   }, allFaces)
 
-  let cacheBatch: { imageId: string; faces: DetectedFaceRecord[] }[] = []
+  let cacheBatch: { imageId: string; sourceRevision: string; faces: DetectedFaceRecord[] }[] = []
   let cacheWriteQueue = Promise.resolve()
   const flushCacheBatch = () => {
     if (!folderId || cacheBatch.length === 0) return
@@ -935,12 +911,12 @@ export async function scanAlbumFaces(options: {
       if (!prepared || shouldCancel?.()) return
       if ('error' in prepared) throw prepared.error
       if (shouldCancel?.()) return
-      const detected = await detectFacesFromImageElement(prepared.image, item.id, item.name, FACE_IMAGE_SIZE, shouldCancel)
-      if (shouldCancel?.()) return
+      const detected = await inferImageOnce(item, prepared.image)
       if (folderId) {
-        cacheBatch.push({ imageId: item.id, faces: detected })
+        cacheBatch.push({ imageId: item.id, sourceRevision: imageRevision(item), faces: detected })
         if (cacheBatch.length >= 6) flushCacheBatch()
       }
+      if (shouldCancel?.()) return
       if (detected.length > 0) {
         allFaces.push(...detected)
       }
@@ -1030,8 +1006,18 @@ function updateCentroid(current: number[], added: number[], countBefore: number)
   return current.map((val, idx) => (val * countBefore + (added[idx] || 0)) / nextCount)
 }
 
-function faceQuality(face: Pick<DetectedFaceRecord, 'score' | 'box'>): number {
-  return face.score * Math.sqrt(Math.max(face.box.width * face.box.height, 0.0001))
+function faceQuality(face: Pick<DetectedFaceRecord, 'score' | 'box' | 'quality'>): number {
+  if (typeof face.quality === 'number' && Number.isFinite(face.quality)) return face.quality
+  return face.score * Math.min(1, Math.sqrt(Math.max(face.box.width * face.box.height, 0.0001)) / 0.10) * 0.65
+}
+
+function embeddingSpace(face: DetectedFaceRecord): string {
+  return `${face.embeddingModel || (face.descriptor.length === 128 ? LEGACY_EMBEDDING_MODEL : 'unknown')}:${face.descriptor.length}`
+}
+
+function faceDistance(left: DetectedFaceRecord, right: DetectedFaceRecord): number {
+  if (embeddingSpace(left) !== embeddingSpace(right)) return Infinity
+  return computeEuclideanDistance(left.descriptor, right.descriptor)
 }
 
 function overlappingFaceBoxes(
@@ -1065,7 +1051,7 @@ export function deduplicateDetectedFaces(faces: DetectedFaceRecord[]): DetectedF
       existing.faceId === face.faceId ||
       overlappingFaceBoxes(existing, face) ||
       (overlappingFaceBoxes(existing, face, 0.50, 0.75) &&
-        computeEuclideanDistance(existing.descriptor, face.descriptor) <= 0.38)
+        faceDistance(existing, face) <= 0.38)
     )
     if (duplicate) continue
     existingFaces.push(face)
@@ -1082,6 +1068,8 @@ export function clusterDetectedFaces(
   if (!faces || faces.length === 0) return []
 
   const sortedFaces = deduplicateDetectedFaces(faces)
+  const lowQualityFaces = sortedFaces.filter(face => face.canSeedCluster === false)
+  const seedFaces = sortedFaces.filter(face => face.canSeedCluster !== false)
 
   const rawClusters: {
     faces: DetectedFaceRecord[]
@@ -1089,11 +1077,12 @@ export function clusterDetectedFaces(
     imageIdSet: Set<string>
   }[] = []
 
-  for (const face of sortedFaces) {
+  for (const face of seedFaces) {
     if (!face.descriptor || face.descriptor.length === 0) continue
 
     let bestClusterIdx = -1
     let bestDistance = Infinity
+    let secondDistance = Infinity
 
     for (let i = 0; i < rawClusters.length; i++) {
       const cluster = rawClusters[i]
@@ -1103,15 +1092,24 @@ export function clusterDetectedFaces(
       // Every member must match the same fixed, highest-quality representative.
       // Pose variations may differ from each other without creating extra cards;
       // a chain of similar faces can never move the matching target.
-      const distance = computeEuclideanDistance(face.descriptor, cluster.faces[0].descriptor)
+      const anchorDistance = faceDistance(face, cluster.faces[0])
+      if (anchorDistance > threshold) continue
+      // A fixed anchor prevents identity chains; the average/centroid check
+      // rejects borderline outliers that only happen to resemble that anchor.
+      const centroidDistance = computeEuclideanDistance(face.descriptor, cluster.centroid)
+      if (centroidDistance > threshold + 0.02) continue
+      const distance = (anchorDistance + centroidDistance) / 2
 
       if (distance <= threshold && distance < bestDistance) {
+        secondDistance = bestDistance
         bestDistance = distance
         bestClusterIdx = i
+      } else if (distance < secondDistance) {
+        secondDistance = distance
       }
     }
 
-    if (bestClusterIdx >= 0) {
+    if (bestClusterIdx >= 0 && (bestDistance <= threshold - 0.08 || secondDistance - bestDistance >= 0.035)) {
       const target = rawClusters[bestClusterIdx]
       target.centroid = updateCentroid(
         target.centroid,
@@ -1145,7 +1143,34 @@ export function clusterDetectedFaces(
     centroid: c.centroid,
     referenceFaceIds: [c.faces[0].faceId],
   }))
-  return consolidateFaceViews(clusters)
+  const consolidated = consolidateFaceViews(clusters)
+  // Blurry/tiny/strongly angled detections cannot invent a new identity. Only
+  // attach them to a clear, unambiguous existing identity after consolidation.
+  for (const face of lowQualityFaces) {
+    let best: FaceCluster | undefined
+    let bestDistance = Infinity
+    let secondDistance = Infinity
+    for (const cluster of consolidated) {
+      if (cluster.imageIds.includes(face.imageId)) continue
+      const referenceIds = new Set(cluster.referenceFaceIds || [cluster.faces[0]?.faceId])
+      let distance = Infinity
+      for (const candidate of cluster.faces) {
+        if (referenceIds.has(candidate.faceId)) distance = Math.min(distance, faceDistance(face, candidate))
+      }
+      if (distance < bestDistance) {
+        secondDistance = bestDistance
+        bestDistance = distance
+        best = cluster
+      } else if (distance < secondDistance) secondDistance = distance
+    }
+    if (!best || bestDistance > threshold || secondDistance - bestDistance < 0.05) continue
+    best.faces.push(face)
+    best.imageIds.push(face.imageId)
+    // Low quality assignments never become matching references or move the
+    // centroid, keeping later assignments anchored to the clear seed faces.
+  }
+  return consolidated.sort((a, b) => b.imageIds.length - a.imageIds.length || faceQuality(b.faces[0]) - faceQuality(a.faces[0]))
+    .map((cluster, index) => ({ ...cluster, label: `Khuôn mặt #${index + 1}` }))
 }
 
 function consolidateFaceViews(clusters: FaceCluster[]): FaceCluster[] {
@@ -1155,15 +1180,21 @@ function consolidateFaceViews(clusters: FaceCluster[]): FaceCluster[] {
     for (let j = i + 1; j < result.length; j++) {
       const other = result[j]
       if (root.imageIds.some(id => other.imageIds.includes(id))) continue
-      const anchorDistance = computeEuclideanDistance(root.faces[0].descriptor, other.faces[0].descriptor)
+      const anchorDistance = faceDistance(root.faces[0], other.faces[0])
       if (anchorDistance > 0.50) continue
-      if (other.faces.some(face => computeEuclideanDistance(face.descriptor, root.faces[0].descriptor) > 0.56)) continue
+      // Average-link support is computed only on the stored descriptors, never
+      // by rerunning a model. The centroid is an inexpensive rejection bound.
+      if (computeEuclideanDistance(root.centroid, other.centroid) > 0.46) continue
+      if (other.faces.some(face => faceDistance(face, root.faces[0]) > 0.56)) continue
       const left = root.faces.slice(0, 6), right = other.faces.slice(0, 6)
+      let crossDistance = 0
+      for (const a of left) for (const b of right) crossDistance += faceDistance(a, b)
+      if (crossDistance / (left.length * right.length) > 0.48) continue
       const strongSingleView = anchorDistance <= 0.42
       if (!strongSingleView) {
         if (left.length < 2 || right.length < 2) continue
-        const leftSupported = left.filter(a => right.some(b => computeEuclideanDistance(a.descriptor, b.descriptor) <= 0.50)).length
-        const rightSupported = right.filter(b => left.some(a => computeEuclideanDistance(a.descriptor, b.descriptor) <= 0.50)).length
+        const leftSupported = left.filter(a => right.some(b => faceDistance(a, b) <= 0.50)).length
+        const rightSupported = right.filter(b => left.some(a => faceDistance(a, b) <= 0.50)).length
         if (leftSupported < 2 || rightSupported < 2) continue
       }
       // Three views of one person used to block each other's merge as an
@@ -1175,9 +1206,9 @@ function consolidateFaceViews(clusters: FaceCluster[]): FaceCluster[] {
       const otherImages = new Set(other.imageIds)
       const ambiguous = result.some((candidate, index) => index !== i && index !== j && (
         (candidate.imageIds.some(id => rootImages.has(id)) &&
-          computeEuclideanDistance(other.faces[0].descriptor, candidate.faces[0].descriptor) < anchorDistance + separation) ||
+          faceDistance(other.faces[0], candidate.faces[0]) < anchorDistance + separation) ||
         (candidate.imageIds.some(id => otherImages.has(id)) &&
-          computeEuclideanDistance(root.faces[0].descriptor, candidate.faces[0].descriptor) < anchorDistance + separation)
+          faceDistance(root.faces[0], candidate.faces[0]) < anchorDistance + separation)
       ))
       if (ambiguous) continue
       root.faces = [...root.faces, ...other.faces]
