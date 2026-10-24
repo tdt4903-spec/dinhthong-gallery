@@ -4,16 +4,13 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode 
 import { createPortal } from 'react-dom'
 import { BookOpen, Info, Monitor, ScanFace, Smartphone, X } from 'lucide-react'
 import AlbumGuidePreview, { type GuideScene as Illustration, type GuidePhoto, type GuideFace } from './AlbumGuidePreview'
+import { ALBUM_GUIDE_SAMPLE } from '@/lib/album-guide-sample'
 
 export interface AlbumUsageGuideProps {
   isOpen: boolean
   isDarkMode: boolean
   onClose: () => void
   faceFilterAllowed?: boolean
-  albumTitle?: string
-  folderId?: string
-  photos?: GuidePhoto[]
-  photoCount?: number
 }
 
 type GuideTab = 'faces' | 'desktop' | 'phone'
@@ -23,8 +20,6 @@ const tabs = [
   { id: 'desktop', label: 'Tải trên máy tính', Icon: Monitor },
   { id: 'phone', label: 'Tải trên điện thoại', Icon: Smartphone },
 ] as const
-
-const EMPTY_PHOTOS: GuidePhoto[] = []
 
 type PreviewContext = { photos: GuidePhoto[]; faces: GuideFace[]; albumTitle: string; photoCount: number }
 
@@ -45,7 +40,8 @@ function Steps({ items, isDarkMode, preview }: { items: { title: string; detail:
   )
 }
 
-export default function AlbumUsageGuide({ isOpen, isDarkMode, onClose, faceFilterAllowed = true, albumTitle = 'Album của bạn', folderId, photos = EMPTY_PHOTOS, photoCount = photos.length }: AlbumUsageGuideProps) {
+export default function AlbumUsageGuide({ isOpen, isDarkMode, onClose, faceFilterAllowed = true }: AlbumUsageGuideProps) {
+  const { folderId, photos, photoCount, title: albumTitle } = ALBUM_GUIDE_SAMPLE
   const [cachedAvatars, setCachedAvatars] = useState<{ scope: string; faces: GuideFace[] }>({ scope: '', faces: [] })
   useEffect(() => {
     if (!isOpen || !folderId || !photos.length) return
@@ -173,7 +169,7 @@ export default function AlbumUsageGuide({ isOpen, isDarkMode, onClose, faceFilte
             <div className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${isDarkMode ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-800'}`}><BookOpen aria-hidden="true" className="h-5 w-5" /></div>
             <div className="min-w-0 flex-1 pt-1">
               <h2 id={`${id}-title`} className="text-base font-bold sm:text-xl">Hướng dẫn sử dụng</h2>
-              <p id={`${id}-description`} className={`mt-1 text-xs leading-5 ${mutedClass}`}>Làm theo vị trí được đánh dấu trên giao diện album để tìm và tải ảnh.</p>
+              <p id={`${id}-description`} className={`mt-1 text-xs leading-5 ${mutedClass}`}>Làm theo vị trí được đánh dấu để tìm và tải ảnh. Ảnh mẫu: BIỂN KỲ XUÂN.</p>
             </div>
             <button ref={closeRef} type="button" onClick={onClose} aria-label="Đóng hướng dẫn sử dụng" className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${isDarkMode ? 'hover:bg-white/10' : 'hover:bg-emerald-950/5'}`}><X aria-hidden="true" className="h-5 w-5" /></button>
           </div>

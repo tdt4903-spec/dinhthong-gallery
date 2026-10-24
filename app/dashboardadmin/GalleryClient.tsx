@@ -1061,7 +1061,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     firstCurrentImage?.coverUrl || firstCurrentImage?.url || firstCurrentImage?.fullUrl || ''
   )
   const downloadableImages = useMemo(() => visibleItems.filter(item => item.type === 'image'), [visibleItems])
-  const guidePhotos = useMemo(() => downloadableImages.slice(0, 8), [downloadableImages])
   const selectedDownloadImages = downloadableImages.filter(item => downloadSelectedIds.has(item.id))
   const areAllDownloadImagesSelected = downloadableImages.length > 0 && selectedDownloadImages.length === downloadableImages.length
 
@@ -4751,16 +4750,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         )}
       </main>
 
-      <AlbumUsageGuide
-        isOpen={isUsageGuideOpen}
-        isDarkMode={isDarkMode}
-        onClose={() => setIsUsageGuideOpen(false)}
-        faceFilterAllowed={canUseFaceFilter}
-        albumTitle={currentActiveFolderTitle}
-        folderId={currentActiveFolderId || selectedAlbum?.id}
-        photos={guidePhotos}
-        photoCount={downloadableImages.length}
-      />
+      <AlbumUsageGuide isOpen={isUsageGuideOpen} isDarkMode={isDarkMode} onClose={() => setIsUsageGuideOpen(false)} faceFilterAllowed={canUseFaceFilter} />
 
       {/* MODAL LIGHTBOX */}
       {previewMedia && (
