@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { BookOpen, Info, Monitor, ScanFace, Smartphone, X } from 'lucide-react'
 import AlbumGuidePreview, { type GuideScene as Illustration, type GuidePhoto, type GuideFace } from './AlbumGuidePreview'
 import { ALBUM_GUIDE_SAMPLE } from '@/lib/album-guide-sample'
+import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
 
 export interface AlbumUsageGuideProps {
   isOpen: boolean
@@ -64,22 +65,10 @@ export default function AlbumUsageGuide({ isOpen, isDarkMode, onClose, faceFilte
   useEffect(() => { onCloseRef.current = onClose }, [onClose])
   const id = useId()
 
+  usePageScrollLock(isOpen)
   useEffect(() => {
     if (!isOpen) return
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const body = document.body
-    const html = document.documentElement
-    const previousBodyOverflow = body.style.overflow
-    const previousHtmlOverflow = html.style.overflow
-    const previousBodyOverscroll = body.style.overscrollBehavior
-    const previousHtmlOverscroll = html.style.overscrollBehavior
-    const previousPaddingRight = body.style.paddingRight
-    const scrollbarWidth = window.innerWidth - html.clientWidth
-    if (scrollbarWidth > 0) body.style.paddingRight = `${parseFloat(getComputedStyle(body).paddingRight) + scrollbarWidth}px`
-    body.style.overflow = 'hidden'
-    html.style.overflow = 'hidden'
-    body.style.overscrollBehavior = 'none'
-    html.style.overscrollBehavior = 'none'
     closeRef.current?.focus({ preventScroll: true })
 
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -117,11 +106,6 @@ export default function AlbumUsageGuide({ isOpen, isDarkMode, onClose, faceFilte
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true)
       document.removeEventListener('focusin', keepFocusInside)
-      body.style.overflow = previousBodyOverflow
-      html.style.overflow = previousHtmlOverflow
-      body.style.overscrollBehavior = previousBodyOverscroll
-      html.style.overscrollBehavior = previousHtmlOverscroll
-      body.style.paddingRight = previousPaddingRight
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
     }
   }, [isOpen])

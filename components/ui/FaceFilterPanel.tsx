@@ -4,6 +4,7 @@ import { FaceScanIcon } from './FaceScanIcon'
 import WindowedAlbumGrid from './WindowedAlbumGrid'
 import React, { useEffect, useId, useMemo, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
 import {
   Camera,
   Clock3,
@@ -143,13 +144,10 @@ export default function FaceFilterPanel({
     onCloseRef.current = onClose
   }, [onClose])
 
+  usePageScrollLock(isOpen)
   useEffect(() => {
     if (!isOpen) return
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const previousBodyOverflow = document.body.style.overflow
-    const previousHtmlOverflow = document.documentElement.style.overflow
-    document.body.style.overflow = 'hidden'
-    document.documentElement.style.overflow = 'hidden'
     closeButtonRef.current?.focus({ preventScroll: true })
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -181,8 +179,6 @@ export default function FaceFilterPanel({
     document.addEventListener('keydown', handleKeyDown, true)
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true)
-      document.body.style.overflow = previousBodyOverflow
-      document.documentElement.style.overflow = previousHtmlOverflow
       if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
     }
   }, [isOpen])

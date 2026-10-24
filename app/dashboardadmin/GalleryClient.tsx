@@ -20,6 +20,7 @@ import { ALBUM_PHOTO_SORT_OPTIONS, formatPhotoCaptureTime, sortAlbumPhotos, type
 import { captureTimeStatus, usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
 import { saveAlbumFaceAccess, useAlbumFaceAccess } from '@/lib/album-face-access'
 import { useAlbumScrollGuard } from '@/lib/use-album-scroll-guard'
+import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
 import { 
   Search, Sun, Moon, Plus, Camera,
   Trash2, LogOut, User as UserIcon, BookOpen,
@@ -366,6 +367,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   const archiveDialogRef = useRef<HTMLDivElement | null>(null)
   const archiveDialogOpen = archiveProgress !== null
   const isMediaDialogOpen = isPreviewOpen || archiveDialogOpen
+  usePageScrollLock(isMediaDialogOpen)
   useEffect(() => {
     if (!archiveDialogOpen) return
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -3139,18 +3141,6 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }, [currentIndex, previewSourceList])
 
   useEffect(() => {
-    if (!isMediaDialogOpen) return
-    const bodyOverflow = document.body.style.overflow
-    const htmlOverflow = document.documentElement.style.overflow
-    document.body.style.overflow = 'hidden'
-    document.documentElement.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = bodyOverflow
-      document.documentElement.style.overflow = htmlOverflow
-    }
-  }, [isMediaDialogOpen])
-
-  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!previewMedia || archiveDialogOpen) return
       const target = e.target
@@ -3194,7 +3184,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
   }
 
   return (
-    <div data-site-theme={isDarkMode ? 'dark' : 'light'} className={`site-page-surface ${isSharedGuest ? 'guest-album-page' : ''} min-h-screen w-full max-w-full overflow-x-hidden pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#06140f] text-white' : 'bg-[#f5f7f3] text-[#1c1d21]'}`}>
+    <div data-site-theme={isDarkMode ? 'dark' : 'light'} className={`site-page-surface album-gallery-page ${isSharedGuest ? 'guest-album-page' : ''} min-h-screen w-full max-w-full overflow-x-clip pb-20 transition-colors duration-300 ${isDarkMode ? 'bg-[#06140f] text-white' : 'bg-[#f5f7f3] text-[#1c1d21]'}`}>
       
       {/* HEADER */}
       <header className={`sticky top-0 z-30 backdrop-blur-md border-b transition-colors ${isDarkMode ? 'bg-[#071710]/94 border-white/10' : 'bg-[#fbfdf9]/94 border-emerald-950/8'} ${selectedAlbum && !isSharedGuest ? 'lg:fixed lg:inset-x-0 lg:top-0 lg:z-[90] lg:h-[66px]' : ''}`}>
@@ -4401,7 +4391,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       {ALBUM_PHOTO_SORT_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </select>
                   </label>
-                  {photoSort.startsWith('captured-') && <span role="status" className={`max-w-xl text-[11px] leading-relaxed ${isDarkMode ? 'text-white/50' : 'text-gray-500'}`}>{captureTimeStatus(captureTimes)}</span>}
+                  {!isSharedGuest && photoSort.startsWith('captured-') && <span role="status" className={`max-w-xl text-[11px] leading-relaxed ${isDarkMode ? 'text-white/50' : 'text-gray-500'}`}>{captureTimeStatus(captureTimes)}</span>}
                   {displaySelectedImagesList.length > 0 && (
                     <button onClick={handleClearAllSelections} className="sm:ml-auto shrink-0 inline-flex min-h-10 items-center gap-1 rounded-xl border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-[10px] font-semibold text-red-500"><Trash2 className="h-3 w-3" /> Bỏ chọn tất cả ({displaySelectedImagesList.length})</button>
                   )}
@@ -4611,6 +4601,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                           const displayName = customNames[item.id] || item.name
                           const isDownloadChecked = downloadSelectedIds.has(item.id)
                           const isThisDownloading = downloadingId === item.id
+                          const captureTimeLabel = !isSharedGuest ? formatPhotoCaptureTime(item.capturedTime) : null
 
                           return (
                             <div 
@@ -4736,7 +4727,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                   </div>
                                 </div>
                                 <div className={`mt-1 truncate text-[8px] sm:text-[9px] ${isDarkMode ? 'text-white/26' : 'text-gray-400'}`} title={displayName}>{displayName}</div>
-                                <div className={`mt-0.5 min-h-3 truncate text-[8px] tabular-nums sm:text-[9px] ${isDarkMode ? 'text-white/40' : 'text-gray-500'}`} title={formatPhotoCaptureTime(item.capturedTime) || undefined}>{formatPhotoCaptureTime(item.capturedTime) ? `Chụp: ${formatPhotoCaptureTime(item.capturedTime)}` : ''}</div>
+                                {!isSharedGuest && <div className={`mt-0.5 min-h-3 truncate text-[8px] tabular-nums sm:text-[9px] ${isDarkMode ? 'text-white/40' : 'text-gray-500'}`} title={captureTimeLabel || undefined}>{captureTimeLabel ? `Chụp: ${captureTimeLabel}` : ''}</div>}
                               </div>
                             </div>
                           )

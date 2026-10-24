@@ -7,10 +7,9 @@ import { useEffect } from 'react'
  * Normal album scrolling, sliders, horizontal tabs and pinch zoom are retained. */
 export function useAlbumScrollGuard() {
   useEffect(() => {
-    const previousHtml = document.documentElement.style.overscrollBehaviorY
-    const previousBody = document.body.style.overscrollBehaviorY
-    document.documentElement.style.overscrollBehaviorY = 'none'
-    document.body.style.overscrollBehaviorY = 'none'
+    // Pull-to-refresh is a touch gesture. Desktop wheel scrolling must keep
+    // native scroll chaining through the page's layout containers.
+    if (!window.matchMedia('(pointer: coarse)').matches) return
     let lastX = 0, lastY = 0
     let tracking = false
     let scrollableAncestors: Element[] = []
@@ -54,8 +53,6 @@ export function useAlbumScrollGuard() {
     return () => {
       document.removeEventListener('touchstart', start)
       document.removeEventListener('touchmove', move)
-      document.documentElement.style.overscrollBehaviorY = previousHtml
-      document.body.style.overscrollBehaviorY = previousBody
     }
   }, [])
 }

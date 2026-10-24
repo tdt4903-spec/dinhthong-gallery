@@ -521,10 +521,18 @@ textarea {
   object-fit: cover;
 }
 
-/* Keep vertical gestures inside shared albums instead of refreshing the page. */
-html:has(.guest-album-page),
-body:has(.guest-album-page) {
-  overscroll-behavior-y: none;
+/* Clip horizontal overflow without creating extra vertical scroll containers. */
+html:has(.album-gallery-page),
+body:has(.album-gallery-page) {
+  overflow-x: clip;
+}
+
+/* Pull-to-refresh prevention belongs to touch devices, not desktop wheels. */
+@media (pointer: coarse) {
+  html:has(.album-gallery-page),
+  body:has(.album-gallery-page) {
+    overscroll-behavior-y: none;
+  }
 }
 
 /* Photo viewers fill the screen; ordinary popups keep their mobile margins. */
