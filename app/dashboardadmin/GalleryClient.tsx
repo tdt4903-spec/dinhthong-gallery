@@ -4773,9 +4773,13 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                 </span>
               )}
             </div>
-            <button onClick={(e) => previewMedia.type === 'image' && zoomScale > 1 ? handleResetZoom(e) : handleDownloadMedia(previewMedia, e)} disabled={zoomScale <= 1 && (Boolean(downloadingId) || Boolean(zippingFolderId) || Boolean(pendingMobileAlbumShare) || isSharingMobileAlbum)} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 backdrop-blur-md disabled:opacity-50" aria-label={previewMedia.type === 'image' && zoomScale > 1 ? 'Đưa ảnh về kích thước ban đầu' : previewMedia.type === 'video' ? 'Tải video' : 'Tải ảnh'}>
-              {previewMedia.type === 'image' && zoomScale > 1 ? <RotateCcw className="h-4 w-4" /> : downloadingId === previewMedia.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            </button>
+            {previewMedia.type === 'image' && zoomScale > 1 ? (
+              <button type="button" onClick={handleResetZoom} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 backdrop-blur-md" aria-label="Đưa ảnh về kích thước ban đầu">
+                <RotateCcw className="h-4 w-4" />
+              </button>
+            ) : (
+              <span aria-hidden="true" className="h-11 w-11" />
+            )}
           </div>
 
           <div className="media-viewer-desktop-header hidden sm:flex items-center justify-between px-3 py-2 text-white/90 z-30">
