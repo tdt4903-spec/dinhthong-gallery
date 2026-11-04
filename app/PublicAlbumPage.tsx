@@ -391,7 +391,7 @@ export default function PublicAlbumPage() {
     return (
       <main
         data-site-theme={isDarkMode ? 'dark' : 'light'}
-        className={`site-page-surface min-h-screen flex items-center justify-center ${
+        className={`site-page-surface studio-public-album min-h-screen flex items-center justify-center ${
           isDarkMode
             ? 'bg-[#06140f] text-white'
             : 'bg-[#f5f7f3] text-[#1c1d21]'
@@ -414,7 +414,7 @@ export default function PublicAlbumPage() {
     return (
       <main
         data-site-theme={isDarkMode ? 'dark' : 'light'}
-        className={`site-page-surface min-h-screen flex items-center justify-center px-5 ${
+        className={`site-page-surface studio-public-album min-h-screen flex items-center justify-center px-5 ${
           isDarkMode
             ? 'bg-[#06140f] text-white'
             : 'bg-[#f5f7f3] text-[#1c1d21]'
@@ -453,7 +453,7 @@ export default function PublicAlbumPage() {
     <main
       onContextMenu={(event) => event.preventDefault()}
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`public-compact site-page-surface min-h-screen select-none transition-colors ${
+      className={`public-compact site-page-surface studio-public-album min-h-screen select-none transition-colors ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'

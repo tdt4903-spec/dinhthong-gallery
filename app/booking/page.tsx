@@ -780,7 +780,7 @@ export default function BookingPage() {
   return (
     <main
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`site-page-surface min-h-screen ${
+      className={`site-page-surface studio-booking min-h-screen ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-white text-[#202520]'
@@ -845,8 +845,9 @@ export default function BookingPage() {
             </div>
 
             <h1 className="mt-1 font-serif text-3xl sm:text-4xl">
-              Đặt lịch
+              Lên lịch cho khoảnh khắc của bạn
             </h1>
+            <p className="studio-section-note">Chọn thể loại, thời gian và để lại thông tin để studio liên hệ xác nhận.</p>
 
           </div>
 
@@ -1288,7 +1289,7 @@ export default function BookingPage() {
             payment && (
 
             <div
-              className={`rounded-[20px] border p-4 ${
+              className={`studio-panel rounded-[20px] border p-4 ${
                 isDarkMode
                   ? 'border-white/10 bg-white/[0.025]'
                   : 'border-black/[0.07] bg-[#fbfcfa]'
@@ -1511,7 +1512,7 @@ export default function BookingPage() {
 
 
           <div
-            className={`rounded-[20px] border p-5 ${
+            className={`studio-panel rounded-[20px] border p-5 ${
               isDarkMode
                 ? 'border-white/10 bg-white/[0.025]'
                 : 'border-black/[0.07] bg-[#fbfcfa]'
@@ -1728,7 +1729,7 @@ function ResultPage({
   return (
     <main
       data-site-theme={dark ? 'dark' : 'light'}
-      className={`site-page-surface min-h-screen ${
+      className={`site-page-surface studio-booking min-h-screen ${
         dark
           ? 'bg-[#06140f] text-white'
           : 'bg-white text-[#202520]'

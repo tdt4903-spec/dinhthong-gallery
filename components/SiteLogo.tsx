@@ -2,7 +2,7 @@ import { Camera } from 'lucide-react'
 
 export default function SiteLogo({ isDarkMode }: { isDarkMode: boolean }) {
   return (
-    <span className="inline-flex min-w-0 items-center gap-2 sm:gap-3">
+    <span className="studio-brand inline-flex min-w-0 items-center gap-2 sm:gap-3">
       <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl sm:h-11 sm:w-11 ${isDarkMode ? 'bg-emerald-400/10 text-emerald-300' : 'bg-[#005640] text-white'}`}>
         <Camera aria-hidden="true" className="h-[18px] w-[18px] sm:h-5 sm:w-5" />
       </span>

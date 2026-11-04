@@ -277,7 +277,7 @@ export default function CustomerProductPhotosPage() {
   return (
     <main
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`site-page-surface min-h-screen transition-colors ${
+      className={`site-page-surface studio-photos min-h-screen transition-colors ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'
@@ -340,7 +340,7 @@ export default function CustomerProductPhotosPage() {
 
       <div className="mx-auto max-w-[1600px] px-4 py-7 sm:px-6 lg:px-8">
         <section
-          className={`rounded-[24px] border p-4 sm:p-5 ${
+          className={`studio-panel rounded-[24px] border p-4 sm:p-5 ${
             isDarkMode
               ? 'border-white/10 bg-white/[0.03]'
               : 'border-black/10 bg-white'
@@ -547,7 +547,7 @@ export default function CustomerProductPhotosPage() {
 
           {loadingDrive ? (
             <div
-              className={`flex min-h-[360px] items-center justify-center rounded-[24px] border ${
+              className={`flex min-h-[360px] items-center justify-center studio-panel rounded-[24px] border ${
                 isDarkMode
                   ? 'border-white/10'
                   : 'border-black/10'
@@ -563,7 +563,7 @@ export default function CustomerProductPhotosPage() {
             </div>
           ) : images.length === 0 ? (
             <div
-              className={`flex min-h-[360px] items-center justify-center rounded-[24px] border ${
+              className={`flex min-h-[360px] items-center justify-center studio-panel rounded-[24px] border ${
                 isDarkMode
                   ? 'border-white/10'
                   : 'border-black/10'

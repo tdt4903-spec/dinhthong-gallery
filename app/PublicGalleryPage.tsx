@@ -132,7 +132,7 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
   return (
     <main
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`public-compact site-page-surface min-h-screen transition-colors duration-300 ${
+      className={`public-compact site-page-surface studio-public min-h-screen transition-colors duration-300 ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'
@@ -205,22 +205,16 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
             }`}
           />
 
-          <div className="relative z-10 flex h-full items-end p-6 sm:p-12 lg:p-16">
+          <div className="studio-hero-content relative z-10 flex h-full items-end p-6 sm:p-12 lg:p-16">
             <div className="w-full min-w-0 max-w-[820px] text-white">
 
               <div className="public-hero-reveal text-[9px] font-bold uppercase tracking-[0.32em] text-white/60">
                 Dinh Thong Gallery
               </div>
 
-              <div className="public-hero-reveal public-hero-title mt-5">
-                <div className="font-serif text-6xl font-medium uppercase leading-[0.92] tracking-[0.01em] sm:text-7xl lg:text-[92px]">
-                  Album
-                </div>
-
-                <div className="mt-3 text-[17px] font-semibold uppercase tracking-[0.28em] text-white/90 sm:text-[21px] lg:text-[24px]">
-                  Đã thực hiện
-                </div>
-              </div>
+              <h1 className="public-hero-reveal studio-hero-heading mt-5">
+                Khoảnh khắc.<br /><span>Còn mãi.</span>
+              </h1>
 
               <div className="public-hero-reveal public-hero-description mt-5 max-w-[760px] text-[10px] font-medium uppercase leading-6 tracking-[0.1em] text-white/70 sm:mt-6 sm:text-[11px] sm:leading-7 lg:text-xs">
                 <div className="whitespace-normal">
@@ -264,7 +258,7 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
         id={category ? 'albums' : 'categories'}
         className={`mx-auto max-w-[1500px] scroll-mt-20 px-4 sm:px-6 ${category ? 'py-16 sm:py-24' : 'py-10 sm:py-14'}`}
       >
-        <div className="text-center">
+        <div className="studio-collection-heading">
 
           {category ? (
             <>
@@ -276,7 +270,7 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
               </h2>
             </>
           ) : (
-            <h2 className="font-serif text-2xl font-medium uppercase tracking-[0.06em] sm:text-3xl">Bộ sưu tập</h2>
+            <div><p className="studio-eyebrow">DINHTHONG · PORTFOLIO</p><h2 className="studio-section-title">Bộ sưu tập</h2><p className="studio-section-note">Chọn một bộ sưu tập để khám phá những câu chuyện qua ảnh.</p></div>
           )}
 
           <div
@@ -296,13 +290,13 @@ export default function AlbumPublicPage({ category }: { category?: PublicCategor
         ) : !category && categories.length > 0 ? (
           <PublicCategoryCards categories={categories} albums={albums} />
         ) : category && filteredAlbums.length > 0 ? (
-          <div className="mt-12 grid gap-x-5 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="studio-album-grid mt-12 grid gap-x-5 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
 
             {filteredAlbums.map((album) => (
               <a
                 key={album.id}
                 href={`/${album.slug}`}
-                className="group block"
+                className="studio-album-card group block"
               >
 
                 <div

@@ -901,7 +901,7 @@ export default function DashboardBooking() {
   return (
     <main
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`site-page-surface min-h-screen ${
+      className={`site-page-surface studio-bookings min-h-screen ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#202520]'
@@ -2024,7 +2024,7 @@ function Modal({
       />
 
       <div
-        className={`relative flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-[28px] border shadow-[0_32px_100px_rgba(0,0,0,.38)] ${
+        className={`relative flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden studio-panel rounded-[28px] border shadow-[0_32px_100px_rgba(0,0,0,.38)] ${
           dark
             ? 'border-white/10 bg-[#081710]'
             : 'border-white/70 bg-[#fbfcf7] text-[#10261d]'
@@ -2154,7 +2154,7 @@ function Info({
 function sectionClass(
   dark: boolean
 ) {
-  return `mt-4 overflow-hidden rounded-[20px] border sm:mt-5 ${
+  return `mt-4 overflow-hidden studio-panel rounded-[20px] border sm:mt-5 ${
     dark
       ? 'border-white/10 bg-white/[0.025]'
       : 'border-black/[0.07] bg-white'

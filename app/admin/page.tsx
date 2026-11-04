@@ -53,7 +53,7 @@ export default function LoginPage() {
 
   if (checking) {
     return (
-      <div data-site-theme="dark" className="site-page-surface min-h-screen bg-[#06130d] flex flex-col items-center justify-center text-white">
+      <div data-site-theme="dark" className="site-page-surface studio-login min-h-screen bg-[#06130d] flex flex-col items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
         <p className="text-[11px] tracking-[0.2em] uppercase text-white/55">Đang kiểm tra phiên đăng nhập</p>
       </div>
@@ -61,7 +61,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main data-site-theme="dark" className="site-page-surface min-h-screen bg-[#07140e] text-white overflow-hidden">
+    <main data-site-theme="dark" className="site-page-surface studio-login min-h-screen bg-[#07140e] text-white overflow-hidden">
       <div className="relative min-h-screen grid lg:grid-cols-[1.15fr_0.85fr]">
         <div className="absolute inset-0 lg:hidden">
           <img
@@ -132,7 +132,7 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="rounded-[30px] border border-white/10 bg-[#10241a]/88 p-6 shadow-[0_32px_80px_rgba(0,0,0,.38)] backdrop-blur-2xl sm:p-8 lg:bg-[#0d2117]">
+            <div className="studio-login-card rounded-[30px] border border-white/10 bg-[#10241a]/88 p-6 shadow-[0_32px_80px_rgba(0,0,0,.38)] backdrop-blur-2xl sm:p-8 lg:bg-[#0d2117]">
               <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl border border-emerald-300/15 bg-emerald-400/10 text-emerald-300">
                 <Camera className="h-6 w-6" />
               </div>

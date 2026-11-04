@@ -915,7 +915,7 @@ export default function CustomerProductsDashboard() {
   return (
     <main
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`site-page-surface min-h-screen transition-colors ${
+      className={`site-page-surface studio-products min-h-screen transition-colors ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'
@@ -923,7 +923,7 @@ export default function CustomerProductsDashboard() {
     >
       <div className="flex min-h-screen">
         <aside
-          className={`hidden w-[252px] shrink-0 border-r lg:flex lg:flex-col ${
+          className={`studio-sidebar hidden w-[252px] shrink-0 border-r lg:flex lg:flex-col ${
             isDarkMode
               ? 'border-white/10 bg-[#071710]'
               : 'border-black/[0.07] bg-[#fbfdf9]'
@@ -1301,7 +1301,7 @@ export default function CustomerProductsDashboard() {
             </section>
 
             <section
-              className={`mt-5 overflow-hidden rounded-[24px] border ${
+              className={`studio-data-panel mt-5 overflow-hidden rounded-[24px] border ${
                 isDarkMode
                   ? 'border-white/10 bg-white/[0.025]'
                   : 'border-black/[0.08] bg-white'
@@ -2215,7 +2215,7 @@ function Stat({
 }) {
   return (
     <div
-      className={`rounded-[20px] border p-4 ${
+      className={`studio-stat rounded-[20px] border p-4 ${
         isDarkMode
           ? 'border-white/10 bg-white/[0.025]'
           : 'border-black/[0.07] bg-white'

@@ -3412,7 +3412,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         {!selectedAlbum ? (
           <div className="space-y-5 sm:space-y-6">
             {/* ADMIN HOME — cinematic dashboard, không dùng bố cục kiểu Google Drive */}
-            <section className={`relative overflow-hidden rounded-[28px] border shadow-[0_28px_80px_rgba(0,0,0,.18)] ${isDarkMode ? 'border-emerald-200/15 bg-[#082017]' : 'border-emerald-900/10 bg-[#eff6f0]'}`}>
+            <section className={`studio-overview relative overflow-hidden rounded-[28px] border shadow-[0_28px_80px_rgba(0,0,0,.18)] ${isDarkMode ? 'border-emerald-200/15 bg-[#082017]' : 'border-emerald-900/10 bg-[#eff6f0]'}`}>
               <div className="absolute inset-0">
                 <img src={SITE_BANNER_URL} alt="DinhThong Gallery" className="h-full w-full object-cover" />
                 <div className={`absolute inset-0 ${isDarkMode ? 'bg-[linear-gradient(90deg,rgba(2,25,17,.93),rgba(3,30,20,.58),rgba(4,23,16,.24))]' : 'bg-[linear-gradient(90deg,rgba(242,248,243,.94),rgba(239,247,241,.68),rgba(236,244,238,.25))]'}`} />
@@ -3431,10 +3431,10 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
 
                 <div className="max-w-[690px] py-7 sm:py-10">
                   <h1 className={`font-serif text-4xl sm:text-5xl lg:text-[56px] leading-[1.02] tracking-tight ${isDarkMode ? 'text-white' : 'text-[#0c2b1d]'}`}>
-                    Hello, {displayName.trim() || 'Thông'} 👋
+                    Xin chào, {displayName.trim() || 'Thông'}
                   </h1>
                   <p className={`mt-3 max-w-xl text-xs sm:text-sm leading-6 ${isDarkMode ? 'text-white/64' : 'text-[#385747]'}`}>
-                    Mỗi bức ảnh là một câu chuyện, cảm ơn bạn đã tiếp tục hành trình cùng DinhThong Gallery.
+                    Quản lý album, chia sẻ với khách và theo dõi ảnh đã chọn — mọi thứ trong một không gian.
                   </p>
                 </div>
 
@@ -3466,7 +3466,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             </section>
 
             {/* BỘ SƯU TẬP */}
-            <section id="all-albums" className={`rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#0b1711]/72' : 'border-emerald-950/8 bg-white/80 shadow-sm'}`}>
+            <section id="all-albums" className={`studio-library rounded-[26px] border p-4 sm:p-5 ${isDarkMode ? 'border-white/10 bg-[#0b1711]/72' : 'border-emerald-950/8 bg-white/80 shadow-sm'}`}>
               <div className="mb-4 flex items-end justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
@@ -4225,7 +4225,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         ) : (
           <div>
             {/* ALBUM HERO */}
-            <section className={`relative overflow-hidden rounded-[24px] sm:rounded-[28px] border shadow-[0_24px_70px_rgba(0,0,0,.16)] ${isDarkMode ? 'border-emerald-200/12 bg-[#081811]' : 'border-emerald-950/8 bg-[#eff6f0]'}`}>
+            <section className={`studio-album-summary relative overflow-hidden rounded-[24px] sm:rounded-[28px] border shadow-[0_24px_70px_rgba(0,0,0,.16)] ${isDarkMode ? 'border-emerald-200/12 bg-[#081811]' : 'border-emerald-950/8 bg-[#eff6f0]'}`}>
               <div className="absolute inset-0">
                 <img src={SITE_BANNER_URL} alt="Album background" className="h-full w-full object-cover" />
                 <div className={`absolute inset-0 ${isDarkMode ? 'bg-[linear-gradient(90deg,rgba(3,22,15,.95),rgba(4,28,18,.82),rgba(4,22,15,.50))]' : 'bg-[linear-gradient(90deg,rgba(245,249,246,.96),rgba(239,247,241,.86),rgba(235,245,238,.58))]'}`} />
