@@ -9,12 +9,13 @@ import { getPublicCategoryPath } from '@/lib/public-gallery-paths'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { updateAlbumPresentation, updateCategoryVisibility } from './actions'
 import type { PortfolioActionResult, PortfolioAlbum, PortfolioCategory } from './types'
+import PortraitEditor from './PortraitEditor'
 import styles from './portfolio-dashboard.module.css'
 
-type Props = { categories: PortfolioCategory[]; albums: PortfolioAlbum[]; loadError?: boolean; readOnly: boolean }
+type Props = { photoKey: string | null; categories: PortfolioCategory[]; albums: PortfolioAlbum[]; loadError?: boolean; readOnly: boolean }
 type View = 'all' | 'visible' | 'hidden' | 'featured'
 
-export default function PortfolioDashboard({ categories, albums, readOnly, loadError = false }: Props) {
+export default function PortfolioDashboard({ photoKey, categories, albums, readOnly, loadError = false }: Props) {
   const router = useRouter()
   const { isDarkMode, toggleTheme } = useGalleryTheme()
   const [view, setView] = useState<View>('all')
@@ -61,6 +62,7 @@ export default function PortfolioDashboard({ categories, albums, readOnly, loadE
         <section className={styles.intro} aria-labelledby="portfolio-management-title"><div><p className={styles.eyebrow}>KHÔNG GIAN TRƯNG BÀY</p><h1 id="portfolio-management-title">Những câu chuyện<br /><em>được chọn để chia sẻ.</em></h1><p>Quản lý bộ sưu tập và những bộ ảnh xuất hiện trên portfolio của studio.</p></div><Link href="/dashboardsp" prefetch={false} className={styles.primaryButton}><Plus size={16} aria-hidden="true" />Quản lý sản phẩm</Link></section>
 
         {readOnly && <p className={styles.visibilityNote}>Đang xem thử dữ liệu công khai. Đăng nhập bằng tài khoản quản trị để chỉnh sửa.</p>}
+        <PortraitEditor initialKey={photoKey} readOnly={readOnly} />
         {loadError ? <div className={styles.loadError} role="alert"><EyeOff size={25} aria-hidden="true" /><h2>Chưa thể tải dữ liệu portfolio</h2><p>Vui lòng tải lại để tiếp tục quản lý nội dung public.</p><button type="button" disabled={pending} onClick={() => startTransition(() => router.refresh())} className={styles.secondaryButton}><RefreshCw size={15} />Tải lại</button></div> : <>
           <section className={styles.stats} aria-label="Tổng quan portfolio">
             {[{ label: 'Bộ sưu tập', value: categories.length, note: `${categories.filter(item => item.visible).length} đang hiển thị`, icon: FolderOpen }, { label: 'Album trên portfolio', value: visibleAlbums.length, note: 'Trong bộ sưu tập đang hiển thị', icon: Eye }, { label: 'Album nổi bật', value: featuredAlbums.length, note: 'Được gắn nhãn trên portfolio', icon: Star }, { label: 'Album đang ẩn', value: counts.hidden, note: 'Bao gồm bộ sưu tập đang ẩn', icon: EyeOff }].map(({ label, value, note, icon: Icon }) => <div key={label} className={styles.stat}><div><span>{label}</span><Icon size={16} strokeWidth={1.5} aria-hidden="true" /></div><strong>{value}</strong><p>{note}</p></div>)}

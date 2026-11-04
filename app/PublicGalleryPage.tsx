@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Camera, ImageIcon, Loader2, Moon, RefreshCw, Search, Sun, X } from 'lucide-react'
 import { getCustomerProductsSupabase, type CustomerAlbum, type CustomerCategory } from '@/lib/customer-products'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
-import { SITE_BANNER_URL } from '@/lib/site-assets'
+import ApprovedAdminBadge from '@/components/ui/ApprovedAdminBadge'
+import { adminPortraitUrl, SITE_BANNER_URL } from '@/lib/site-assets'
 import PublicCategoryCards from '@/components/PublicCategoryCards'
 import ProductPreviewImage from '@/components/ui/ProductPreviewImage'
 import styles from './public-home.module.css'
@@ -19,6 +20,15 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
   const [albums, setAlbums] = useState<CustomerAlbum[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
+  const [portraits, setPortraits] = useState<{ display_name: string; photo_key: string }[]>([])
+  useEffect(() => {
+    if (category) return
+    let active = true
+    void supabase.rpc('get_portfolio_admin_portraits').then(({ data }) => {
+      if (active && Array.isArray(data)) setPortraits(data)
+    })
+    return () => { active = false }
+  }, [supabase, category])
   const [query, setQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
 
@@ -76,7 +86,7 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
           </Link>
           <nav className={styles.nav} aria-label="Điều hướng portfolio">
             <Link href="/#portfolio" className={styles.active}>Portfolio</Link>
-            <Link href="/#about">Về Dinh Thong Gallery</Link>
+            <Link href="/#about">Về Dinh Thong Photos</Link>
           </nav>
           <div className={styles.headerActions}>
             <button type="button" onClick={toggleTheme} className={styles.iconButton} aria-label={isDarkMode ? 'Chuyển giao diện sáng' : 'Chuyển giao diện tối'} title="Đổi giao diện sáng / tối">
@@ -133,7 +143,10 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
           </>}
       </section>
 
-      {!category && <section id="about" className={styles.about} aria-labelledby="about-title"><div className={styles.aboutLabel}><Camera size={26} strokeWidth={1.3} aria-hidden="true" /><p className={styles.eyebrow}>VỀ Dinh Thong Gallery</p></div><div><h2 id="about-title">Đẹp nhất là khi<br /><em>bạn được là chính mình.</em></h2><p>Dinh Thong Gallery lưu giữ những câu chuyện thật và những cảm xúc tự nhiên. Từ ý tưởng đầu tiên đến khung hình cuối cùng, mỗi bộ ảnh là một cách để nhớ về những điều có ý nghĩa với bạn.</p></div></section>}
+      {!category && <section id="about" className={styles.about} aria-labelledby="about-title"><div className={styles.aboutLabel}>{portraits.length > 0 && <ul className={styles.portraits}>{portraits.map(profile => <li key={profile.photo_key}>
+        <img src={adminPortraitUrl(profile.photo_key)} loading="lazy" alt="" />
+        <span>{profile.display_name} <ApprovedAdminBadge /></span>
+      </li>)}</ul>}{!portraits.length && <Camera size={26} strokeWidth={1.3} aria-hidden="true" />}<p className={styles.eyebrow}>Về Dinh Thong Photos</p></div><div><h2 id="about-title">Đẹp nhất là khi<br /><em>bạn được là chính mình.</em></h2><p>Dinh Thong Gallery lưu giữ những câu chuyện thật và những cảm xúc tự nhiên. Từ ý tưởng đầu tiên đến khung hình cuối cùng, mỗi bộ ảnh là một cách để nhớ về những điều có ý nghĩa với bạn.</p></div></section>}
 
       <footer className={styles.footer}><Link href="/" className={styles.footerBrand}>Dinh Thong Gallery</Link><p>© {new Date().getFullYear()} Dinh Thong Gallery.<br className={styles.mobileBreak} /> Khoảnh khắc lưu giữ cảm xúc.</p></footer>
     </main>

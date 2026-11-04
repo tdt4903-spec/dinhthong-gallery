@@ -104,3 +104,5 @@
 }
 .workspace-loading { max-width: 1100px; padding: clamp(24px, 5vw, 72px); }
 .workspace-loading h1 { margin: 10px 0; font: 2rem Georgia, serif; }
+
+.workspace-account-name { display: flex; align-items: center; gap: 5px; }

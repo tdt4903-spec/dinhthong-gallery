@@ -7,3 +7,7 @@ export const SITE_BACKGROUND_URL = `${CLOUDFLARE_MEDIA_BASE}/assets/site-backgro
 
 export const SITE_LOGO_URL = `${CLOUDFLARE_MEDIA_BASE}/assets/logo-web-v1.png`
 export const SITE_SHARE_IMAGE_URL = `${CLOUDFLARE_MEDIA_BASE}/assets/share-favicon-v1.png`
+
+export function adminPortraitUrl(photoKey: string) {
+  return `${CLOUDFLARE_MEDIA_BASE}/album-covers/${encodeURIComponent(photoKey)}.jpg`
+}

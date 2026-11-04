@@ -155,3 +155,5 @@
 @media (max-width: 767px) {
   .studio-ui .studio-overview > .relative { padding: 18px; }
 }
+
+.approved-admin-badge { display: inline-block; width: 17px; height: 17px; flex-shrink: 0; vertical-align: -2px; fill: #1678d7; color: #fff; stroke-width: 1.8; }

@@ -557,13 +557,6 @@ export default function BookingPage() {
     }
 
 
-    if (!form.zalo.trim()) {
-      setErrorText(
-        'Vui lòng nhập Zalo.'
-      )
-      return
-    }
-
     const customerEmail =
       form.email.trim()
 
@@ -614,16 +607,14 @@ export default function BookingPage() {
 
     try {
 
-      const {
-        data: insertedBooking,
-        error,
-      } =
+      const bookingId = crypto.randomUUID()
+      const { error } =
         await supabase
           .from(
             'booking_requests'
           )
           .insert({
-
+            id: bookingId,
             full_name:
               form.full_name.trim(),
 
@@ -662,57 +653,52 @@ export default function BookingPage() {
             transferred: false,
 
           })
-          .select('id')
-          .single()
 
 
       if (error) throw error
 
 
-      if (insertedBooking?.id) {
-        try {
-          const notifyResponse =
-            await fetch(
-              '/api/booking/email',
-              {
-                method: 'POST',
+      try {
+        const notifyResponse =
+          await fetch(
+            '/api/booking/email',
+            {
+              method: 'POST',
 
-                headers: {
-                  'Content-Type':
-                    'application/json',
-                },
+              headers: {
+                'Content-Type':
+                  'application/json',
+              },
 
-                body:
-                  JSON.stringify({
-                    action:
-                      'new_booking',
+              body:
+                JSON.stringify({
+                  action:
+                    'new_booking',
 
-                    bookingId:
-                      insertedBooking.id,
-                  }),
-              }
-            )
+                  bookingId,
+                }),
+            }
+          )
 
-          const notifyData =
-            await notifyResponse
-              .json()
-              .catch(() => null)
+        const notifyData =
+          await notifyResponse
+            .json()
+            .catch(() => null)
 
-          if (
-            !notifyResponse.ok ||
-            !notifyData?.ok
-          ) {
-            console.error(
-              'Không gửi được Email Admin:',
-              notifyData
-            )
-          }
-        } catch (notifyError) {
+        if (
+          !notifyResponse.ok ||
+          !notifyData?.ok
+        ) {
           console.error(
             'Không gửi được Email Admin:',
-            notifyError
+            notifyData
           )
         }
+      } catch (notifyError) {
+        console.error(
+          'Không gửi được Email Admin:',
+          notifyError
+        )
       }
 
 
@@ -1236,8 +1222,7 @@ export default function BookingPage() {
 
 
               <InputField
-                title="Zalo"
-                required
+                title="Zalo (không bắt buộc)"
                 value={form.zalo}
                 dark={isDarkMode}
                 setValue={value =>

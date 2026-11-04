@@ -18,9 +18,12 @@ export default async function PublicManagementPage() {
     categories = categories.eq('visible', true)
     albums = albums.eq('is_public', true)
   }
-  const [collections, photos] = await Promise.all([categories, albums])
+  const [collections, photos, portrait] = await Promise.all([
+    categories, albums,
+    authorized ? supabase.from('portfolio_admin_portraits').select('photo_key').maybeSingle() : null,
+  ])
   const items = collections.data ?? []
   const visibleIds = new Set(items.map(item => item.id))
   const albumRows = photos.data ?? []
-  return <PortfolioDashboard categories={items} albums={authorized ? albumRows : albumRows.filter(album => visibleIds.has(album.category_id))} readOnly={!authorized} loadError={Boolean(collections.error || photos.error)} />
+  return <PortfolioDashboard photoKey={portrait?.data?.photo_key ?? null} categories={items} albums={authorized ? albumRows : albumRows.filter(album => visibleIds.has(album.category_id))} readOnly={!authorized} loadError={Boolean(collections.error || photos.error)} />
 }

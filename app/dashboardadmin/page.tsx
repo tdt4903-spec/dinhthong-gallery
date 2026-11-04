@@ -15,6 +15,7 @@ export default function GalleryPage() {
   const [showNameModal, setShowNameModal] = useState(false)
   const [nameInput, setNameInput] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [approved, setApproved] = useState(false)
   const [savingName, setSavingName] = useState(false)
 
   const supabase = useMemo(
@@ -79,6 +80,7 @@ export default function GalleryPage() {
           return
         }
 
+        if (mounted) setApproved(true)
         const savedName =
           typeof whitelist.full_name === 'string'
             ? whitelist.full_name.trim()
@@ -238,7 +240,7 @@ export default function GalleryPage() {
   return (
     <>
       <AppPopupHost popup={popup} onResolve={resolvePopup} />
-      <GalleryClient displayName={displayName} />
+      <GalleryClient displayName={displayName} approved={approved} />
     </>
   )
 }

@@ -1,5 +1,6 @@
 'use client'
 
+import ApprovedAdminBadge from '@/components/ui/ApprovedAdminBadge'
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
@@ -224,10 +225,11 @@ const triggerDirectBrowserDownload = (fileId: string, fileName: string) => {
 }
 
 interface GalleryClientProps {
+  approved?: boolean
   displayName?: string
 }
 
-export default function GalleryClient({ displayName = '' }: GalleryClientProps) {
+export default function GalleryClient({ displayName = '', approved = false }: GalleryClientProps) {
   useAlbumScrollGuard()
   const router = useRouter()
   const [user, setUser] = useState<any>(null)
@@ -3465,7 +3467,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               <div className={styles.overviewHeading}>
                 <div>
                   <p className={styles.eyebrow}>KHÔNG GIAN SÁNG TẠO</p>
-                  <h1 id="gallery-overview-title">Xin chào, {displayName.trim() || 'bạn'}<span className={styles.greetingDot}>.</span></h1>
+                  <h1 id="gallery-overview-title">Xin chào, {displayName.trim() || 'bạn'}{approved && <> <ApprovedAdminBadge /></>}<span className={styles.greetingDot}>.</span></h1>
                   <p className={styles.overviewNote}>Mỗi bộ ảnh là một câu chuyện. Cùng chăm chút những câu chuyện của bạn.</p>
                 </div>
                 <button type="button" onClick={handleOpenAddAlbum} className={styles.primaryButton}>

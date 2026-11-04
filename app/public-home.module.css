@@ -275,3 +275,9 @@
   .page *, .page *::before, .page *::after { scroll-behavior: auto !important; transition: none !important; }
   .spinner { animation: none; }
 }
+
+.portraits { display: flex; flex-wrap: wrap; gap: 18px; }
+.portraits li { display: grid; justify-items: start; gap: 8px; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.portraits img { width: 82px; height: 82px; border-radius: 50%; object-fit: cover; }
+.aboutLabel:has(.portraits) { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; }
+.aboutLabel:has(.portraits) .eyebrow { order: -1; margin: 0; }
