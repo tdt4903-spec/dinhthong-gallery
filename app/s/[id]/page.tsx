@@ -39,7 +39,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const secretKey = getSecretKey()
 
-  let title = 'DinhThong Gallery'
+  let title = 'Dinh Thong Gallery'
 
   if (supabaseUrl && secretKey && sharedId) {
     try {
@@ -78,10 +78,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const ogImageUrl = SITE_SHARE_IMAGE_URL
 
   return {
-    title: `${title} - DinhThong Gallery`,
+    title: `${title} - Dinh Thong Gallery`,
     description: `Xem và chọn ảnh chất lượng cao trong album ${title}`,
     openGraph: {
-      title: `${title} - DinhThong Gallery`,
+      title: `${title} - Dinh Thong Gallery`,
       description: `Xem và chọn ảnh chất lượng cao trong album ${title}`,
       images: [
         {
@@ -96,7 +96,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     },
     twitter: {
       card: 'summary_large_image',
-      title: `${title} - DinhThong Gallery`,
+      title: `${title} - Dinh Thong Gallery`,
       description: `Xem và chọn ảnh chất lượng cao trong album ${title}`,
       images: [ogImageUrl],
     },

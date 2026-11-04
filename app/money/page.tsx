@@ -1811,7 +1811,7 @@ export default function MoneyManagerPage() {
       )}
 
       {/* THANH ĐIỀU HƯỚNG DƯỚI CÙNG CHO MOBILE */}
-      <div className="xl:hidden fixed bottom-0 inset-x-0 lg:left-[232px] bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 z-40 flex items-center justify-around shadow-lg">
+      <div className="xl:hidden fixed bottom-0 inset-x-0 lg:left-[var(--sidebar-width,232px)] bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 z-40 flex items-center justify-around shadow-lg">
         <button
           type="button"
           onClick={() => setMobileTab('input')}

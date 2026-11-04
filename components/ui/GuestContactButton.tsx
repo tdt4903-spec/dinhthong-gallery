@@ -53,11 +53,11 @@ export default function GuestContactButton({ isDarkMode, hasMobileToolbar, deskt
       {open && (
         <section
           id={panelId}
-          aria-label="Liên hệ DinhThong"
+          aria-label="Liên hệ Dinh Thong Gallery"
           className={`w-72 max-w-[calc(100vw-32px)] overflow-y-auto rounded-3xl border p-4 shadow-2xl ${isDarkMode ? 'border-white/15 bg-[#0d2119] text-white' : 'border-emerald-950/10 bg-white text-[#102b20]'}`}
           style={{ maxHeight: 'calc(100dvh - var(--contact-bottom) - 100px)' }}
         >
-          <p className="text-sm font-bold">Liên hệ DinhThong</p>
+          <p className="text-sm font-bold">Liên hệ Dinh Thong Gallery</p>
           <p className={`mt-1 text-xs leading-5 ${isDarkMode ? 'text-white/60' : 'text-slate-500'}`}>Bạn cần hỗ trợ về album?</p>
 
           <div className="mt-3 flex flex-col gap-2">
@@ -68,12 +68,12 @@ export default function GuestContactButton({ isDarkMode, hasMobileToolbar, deskt
               rel="noopener noreferrer"
               onClick={closeAndFocus}
               className={`flex min-h-14 items-center gap-3 rounded-2xl border p-3 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 ${isDarkMode ? 'border-sky-400/20 bg-sky-400/10 hover:bg-sky-400/20' : 'border-sky-100 bg-sky-50 hover:bg-sky-100'}`}
-              aria-label="Liên hệ Zalo DinhThong, mở trong tab mới"
+              aria-label="Liên hệ Zalo Dinh Thong Gallery, mở trong tab mới"
             >
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0068ff] text-[11px] font-extrabold text-white" aria-hidden="true">Zalo</span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-bold">Zalo</span>
-                <span className={`mt-0.5 block text-xs ${isDarkMode ? 'text-white/60' : 'text-slate-500'}`}>DinhThong</span>
+                <span className={`mt-0.5 block text-xs ${isDarkMode ? 'text-white/60' : 'text-slate-500'}`}>Dinh Thong Gallery</span>
               </span>
               <ArrowUpRight className="h-4 w-4 shrink-0 text-sky-500" aria-hidden="true" />
             </a>
@@ -83,7 +83,7 @@ export default function GuestContactButton({ isDarkMode, hasMobileToolbar, deskt
               rel="noopener noreferrer"
               onClick={closeAndFocus}
               className={`flex min-h-14 items-center gap-3 rounded-2xl border p-3 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${isDarkMode ? 'border-blue-400/20 bg-blue-400/10 hover:bg-blue-400/20' : 'border-blue-100 bg-blue-50 hover:bg-blue-100'}`}
-              aria-label="Mở trang Facebook DinhThong trong tab mới"
+              aria-label="Mở trang Facebook Dinh Thong Gallery trong tab mới"
             >
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#1877f2] text-white" aria-hidden="true">
                 <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
@@ -92,7 +92,7 @@ export default function GuestContactButton({ isDarkMode, hasMobileToolbar, deskt
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-bold">Facebook</span>
-                <span className={`mt-0.5 block text-xs ${isDarkMode ? 'text-white/60' : 'text-slate-500'}`}>DinhThong</span>
+                <span className={`mt-0.5 block text-xs ${isDarkMode ? 'text-white/60' : 'text-slate-500'}`}>Dinh Thong Gallery</span>
               </span>
               <ArrowUpRight className="h-4 w-4 shrink-0 text-blue-500" aria-hidden="true" />
             </a>
@@ -102,10 +102,10 @@ export default function GuestContactButton({ isDarkMode, hasMobileToolbar, deskt
       <button
         ref={buttonRef}
         type="button"
-        aria-label={open ? 'Đóng liên hệ' : 'Liên hệ DinhThong qua Zalo hoặc Facebook'}
+        aria-label={open ? 'Đóng liên hệ' : 'Liên hệ Dinh Thong Gallery qua Zalo hoặc Facebook'}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        title={open ? 'Đóng liên hệ' : 'Liên hệ DinhThong'}
+        title={open ? 'Đóng liên hệ' : 'Liên hệ Dinh Thong Gallery'}
         onClick={() => setOpen(previous => !previous)}
         className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-white/20 bg-emerald-700 text-white shadow-[0_8px_28px_rgba(0,80,55,0.3)] transition hover:bg-emerald-600 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-500"
       >

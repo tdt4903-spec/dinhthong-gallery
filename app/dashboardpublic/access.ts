@@ -21,9 +21,6 @@ export async function getPortfolioAccess() {
       },
     },
   )
-  const { data: { user } } = await supabase.auth.getUser()
-  const email = user?.email?.trim().toLowerCase()
-  if (!email) return { supabase, authorized: false }
-  const { data } = await supabase.from('allowed_emails').select('email').eq('email', email).maybeSingle()
-  return { supabase, authorized: Boolean(data) }
+  const { data } = await supabase.rpc('is_gallery_admin')
+  return { supabase, authorized: data === true }
 }

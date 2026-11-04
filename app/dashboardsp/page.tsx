@@ -105,7 +105,7 @@ type FormState = {
   is_featured: boolean
 }
 
-const ALBUM_DESCRIPTION_TEMPLATE = 'Location : .....\nProduced by DinhThong'
+const ALBUM_DESCRIPTION_TEMPLATE = 'Location : .....\nProduced by Dinh Thong Gallery'
 
 const emptyForm: FormState = {
   title: '',

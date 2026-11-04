@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Dashboard Booking - DinhThong Gallery',
+  title: 'Dashboard Booking - Dinh Thong Gallery',
 }
 
 export default function DashboardBookingLayout({

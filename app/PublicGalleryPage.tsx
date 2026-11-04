@@ -21,7 +21,6 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
   const [loadError, setLoadError] = useState(false)
   const [query, setQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
-  const [showAll, setShowAll] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -56,7 +55,7 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
 
   useEffect(() => { void loadData() }, [loadData])
   useEffect(() => {
-    document.title = category ? `${category.name} — DinhThong Gallery` : 'DinhThong Gallery — Khoảnh khắc còn mãi'
+    document.title = category ? `${category.name} — Dinh Thong Gallery` : 'Dinh Thong Gallery — Khoảnh khắc còn mãi'
   }, [category])
 
   const matchingAlbums = useMemo(() => {
@@ -64,27 +63,26 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
     return albums.filter(album => (selectedCategory === 'all' || album.category_id === selectedCategory)
       && (!search || `${album.title} ${album.description || ''}`.toLocaleLowerCase('vi').includes(search)))
   }, [albums, query, selectedCategory])
-  const visibleAlbums = category || showAll || query || selectedCategory !== 'all' ? matchingAlbums : matchingAlbums.slice(0, 6)
+  const visibleAlbums = category || query || selectedCategory !== 'all' ? matchingAlbums : matchingAlbums.slice(0, 6)
 
   return (
     <main className={styles.page} data-site-theme={isDarkMode ? 'dark' : 'light'}>
       <a href="#portfolio" className={styles.skipLink}>Đến nội dung bộ ảnh</a>
       <header className={styles.header}>
         <div className={styles.headerInner}>
-          <Link href="/" className={styles.brand} aria-label="DinhThong Gallery — Trang chủ">
+          <Link href="/" className={styles.brand} aria-label="Dinh Thong Gallery — Trang chủ">
             <span className={styles.brandIcon}><Camera size={21} strokeWidth={1.5} aria-hidden="true" /></span>
-            <span>DinhThong<span className={styles.brandSubtitle}>PHOTOGRAPHY & STORIES</span></span>
+            <span>Dinh Thong Gallery<span className={styles.brandSubtitle}>PHOTOGRAPHY & STORIES</span></span>
           </Link>
           <nav className={styles.nav} aria-label="Điều hướng portfolio">
             <Link href="/#portfolio" className={styles.active}>Portfolio</Link>
-            <Link href="/#about">Về DinhThong</Link>
-            <Link href="/booking" prefetch={false}>Đặt lịch chụp</Link>
+            <Link href="/#about">Về Dinh Thong Gallery</Link>
           </nav>
           <div className={styles.headerActions}>
             <button type="button" onClick={toggleTheme} className={styles.iconButton} aria-label={isDarkMode ? 'Chuyển giao diện sáng' : 'Chuyển giao diện tối'} title="Đổi giao diện sáng / tối">
               {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <Link href="/booking" prefetch={false} className={styles.bookingButton}>Đặt lịch <ArrowUpRight size={16} aria-hidden="true" /></Link>
+            <Link href="/booking" prefetch={false} className={styles.bookingButton}>Đặt lịch chụp <ArrowUpRight size={16} aria-hidden="true" /></Link>
           </div>
         </div>
       </header>
@@ -92,14 +90,14 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
       {!category && <>
         <section className={styles.hero} aria-labelledby="hero-title">
           <div className={styles.heroCopy}>
-            <p className={styles.eyebrow}><span /> DINHTHONG GALLERY</p>
+            <p className={styles.eyebrow}><span /> Dinh Thong Gallery</p>
             <h1 id="hero-title" className={styles.heroTitle}>Lưu giữ<br />những điều<br /><em>thật đẹp.</em></h1>
-            <p className={styles.heroDescription}>Một ánh nhìn, một nụ cười, một khoảnh khắc.<br />Những câu chuyện được kể bằng hình ảnh,<br className={styles.desktopBreak} /> qua góc nhìn của DinhThong Photos.</p>
+            <p className={styles.heroDescription}>Một ánh nhìn, một nụ cười, một khoảnh khắc.<br />Những câu chuyện được kể bằng hình ảnh,<br className={styles.desktopBreak} /> qua góc nhìn của Dinh Thong Gallery.</p>
             <a href="#portfolio" className={styles.primaryButton}>Khám phá portfolio <ArrowUpRight size={18} aria-hidden="true" /></a>
             <div className={styles.heroFootnote}><span className={styles.footnoteLine} /><p>Những khoảnh khắc trôi qua.<br /><strong>Cảm xúc ở lại.</strong></p></div>
           </div>
           <div className={styles.heroVisual}>
-            <img src={SITE_BANNER_URL} alt="Khoảnh khắc qua góc nhìn của DinhThong Photos" className={styles.heroImage} fetchPriority="high" />
+            <img src={SITE_BANNER_URL} alt="Khoảnh khắc qua góc nhìn của Dinh Thong Gallery" className={styles.heroImage} fetchPriority="high" />
             <div className={styles.heroImageCaption}><span>THE ART OF REMEMBERING</span><Camera size={19} strokeWidth={1.5} aria-hidden="true" /></div>
             <div className={styles.photoNote}><span>Moments,</span><em>for a lifetime.</em></div>
           </div>
@@ -112,7 +110,7 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
         {category && <Link href="/#portfolio" className={styles.backLink}><ArrowLeft size={16} aria-hidden="true" /> Tất cả bộ sưu tập</Link>}
         <div className={styles.sectionHeader}>
           <div><p className={styles.eyebrow}>{category ? 'BỘ SƯU TẬP' : 'QUA TỪNG KHUNG HÌNH'}</p><h2 id="portfolio-title" className={styles.sectionTitle}>{category ? category.name : <>Mỗi bộ ảnh,<br /><em>một câu chuyện.</em></>}</h2></div>
-          <p className={styles.sectionDescription}>{category ? 'Những khoảnh khắc được lưu giữ trong bộ sưu tập này. Chọn một album để xem trọn câu chuyện.' : 'Có những cảm xúc không cần nói thành lời. Hãy cùng khám phá những câu chuyện được DinhThong kể qua từng bộ ảnh.'}</p>
+          <p className={styles.sectionDescription}>{category ? 'Những khoảnh khắc được lưu giữ trong bộ sưu tập này. Chọn một album để xem trọn câu chuyện.' : 'Có những cảm xúc không cần nói thành lời. Hãy cùng khám phá những câu chuyện được Dinh Thong Gallery kể qua từng bộ ảnh.'}</p>
         </div>
 
         {loading ? <div className={styles.loadingState} role="status"><Loader2 size={26} className={styles.spinner} aria-hidden="true" /><span>Đang mở những câu chuyện…</span></div>
@@ -124,22 +122,20 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
                 <div><p className={styles.eyebrow}>{category ? 'KHÁM PHÁ ALBUM' : 'PORTFOLIO'}</p><h3 className={styles.albumHeading}>{category ? 'Tất cả bộ ảnh' : 'Những bộ ảnh gần đây'}</h3></div>
                 <label className={styles.search}><Search size={17} aria-hidden="true" /><span className="sr-only">Tìm bộ ảnh</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Tìm một câu chuyện…" />{query && <button type="button" onClick={() => setQuery('')} aria-label="Xóa tìm kiếm"><X size={15} /></button>}</label>
               </div>
-              {!category && categories.length > 0 && <div className={styles.filters} role="group" aria-label="Lọc album theo bộ sưu tập"><button type="button" aria-pressed={selectedCategory === 'all'} onClick={() => setSelectedCategory('all')}>Tất cả<span>{albums.length}</span></button>{categories.map(item => <button key={item.id} type="button" aria-pressed={selectedCategory === item.id} onClick={() => setSelectedCategory(item.id)}>{item.name}</button>)}</div>}
+              {!category && categories.length > 0 && <div className={styles.filters} role="group" aria-label="Lọc album theo bộ sưu tập">{categories.map(item => <button key={item.id} type="button" aria-pressed={selectedCategory === item.id} onClick={() => setSelectedCategory(selectedCategory === item.id ? 'all' : item.id)}>{item.name}</button>)}</div>}
               <p className={styles.resultCount} aria-live="polite">{query || selectedCategory !== 'all' ? `${matchingAlbums.length} bộ ảnh phù hợp` : `${albums.length} bộ ảnh`}</p>
               {visibleAlbums.length > 0 ? <div className={styles.albumGrid}>{visibleAlbums.map((album, index) => <Link key={album.id} href={`/${encodeURIComponent(album.slug)}`} prefetch={false} className={styles.albumCard}>
                 <div className={styles.albumImage}>{album.cover_url ? <ProductPreviewImage src={album.cover_url} alt={album.title} className={styles.coverImage} /> : <ImageIcon size={32} aria-hidden="true" />}{album.is_featured && <span className={styles.featured}>Nổi bật</span>}<span className={styles.imageCounter}>{String(index + 1).padStart(2, '0')}</span></div>
-                <div className={styles.albumMeta}><div><p className={styles.albumCategory}>{categories.find(item => item.id === album.category_id)?.name || 'DINHTHONG PHOTOS'}</p><h4>{album.title}</h4>{album.shoot_date && <p className={styles.albumDate}>{new Date(album.shoot_date).toLocaleDateString('vi-VN')}</p>}</div><span className={styles.cardArrow}><ArrowUpRight size={19} aria-hidden="true" /></span></div>
-              </Link>)}</div> : <div className={styles.emptyState}><ImageIcon size={28} aria-hidden="true" /><h3>{query || selectedCategory !== 'all' ? 'Chưa tìm thấy bộ ảnh' : 'Câu chuyện mới đang được chuẩn bị'}</h3><p>{query || selectedCategory !== 'all' ? 'Thử một từ khóa hoặc bộ sưu tập khác.' : 'Những khoảnh khắc mới sẽ sớm xuất hiện tại đây.'}</p>{(query || selectedCategory !== 'all') && <button type="button" className={styles.secondaryButton} onClick={() => { setQuery(''); setSelectedCategory('all') }}>Xem tất cả bộ ảnh <ArrowRight size={16} /></button>}</div>}
-              {!category && !query && selectedCategory === 'all' && matchingAlbums.length > 6 && <div className={styles.viewMore}><button type="button" className={styles.secondaryButton} onClick={() => setShowAll(!showAll)}>{showAll ? 'Thu gọn bộ ảnh' : `Xem tất cả ${matchingAlbums.length} bộ ảnh`}<ArrowDown size={16} aria-hidden="true" /></button></div>}
+                <div className={styles.albumMeta}><div><p className={styles.albumCategory}>{categories.find(item => item.id === album.category_id)?.name || 'Dinh Thong Gallery'}</p><h4>{album.title}</h4>{album.shoot_date && <p className={styles.albumDate}>{new Date(album.shoot_date).toLocaleDateString('vi-VN')}</p>}</div><span className={styles.cardArrow}><ArrowUpRight size={19} aria-hidden="true" /></span></div>
+              </Link>)}</div> : <div className={styles.emptyState}><ImageIcon size={28} aria-hidden="true" /><h3>{query || selectedCategory !== 'all' ? 'Chưa tìm thấy bộ ảnh' : 'Câu chuyện mới đang được chuẩn bị'}</h3><p>{query || selectedCategory !== 'all' ? 'Thử một từ khóa hoặc bộ sưu tập khác.' : 'Những khoảnh khắc mới sẽ sớm xuất hiện tại đây.'}</p>{(query || selectedCategory !== 'all') && <button type="button" className={styles.secondaryButton} onClick={() => { setQuery(''); setSelectedCategory('all') }}>Xóa bộ lọc <ArrowRight size={16} /></button>}</div>}
             </div>}
-            {!category && !albums.length && !categories.length && <div className={styles.emptyState}><Camera size={30} aria-hidden="true" /><h3>Câu chuyện mới đang được chuẩn bị</h3><p>Những bộ ảnh mới sẽ sớm được giới thiệu tại đây.</p><Link href="/booking" className={styles.secondaryButton}>Đặt lịch cho câu chuyện của bạn <ArrowUpRight size={16} /></Link></div>}
+            {!category && !albums.length && !categories.length && <div className={styles.emptyState}><Camera size={30} aria-hidden="true" /><h3>Câu chuyện mới đang được chuẩn bị</h3><p>Những bộ ảnh mới sẽ sớm được giới thiệu tại đây.</p></div>}
           </>}
       </section>
 
-      {!category && <section id="about" className={styles.about} aria-labelledby="about-title"><div className={styles.aboutLabel}><Camera size={26} strokeWidth={1.3} aria-hidden="true" /><p className={styles.eyebrow}>VỀ DINHTHONG</p></div><div><h2 id="about-title">Đẹp nhất là khi<br /><em>bạn được là chính mình.</em></h2><p>DinhThong Photos lưu giữ những câu chuyện thật và những cảm xúc tự nhiên. Từ ý tưởng đầu tiên đến khung hình cuối cùng, mỗi bộ ảnh là một cách để nhớ về những điều có ý nghĩa với bạn.</p><Link href="/booking" prefetch={false} className={styles.textLink}>Cùng kể câu chuyện của bạn <ArrowUpRight size={18} aria-hidden="true" /></Link></div></section>}
+      {!category && <section id="about" className={styles.about} aria-labelledby="about-title"><div className={styles.aboutLabel}><Camera size={26} strokeWidth={1.3} aria-hidden="true" /><p className={styles.eyebrow}>VỀ Dinh Thong Gallery</p></div><div><h2 id="about-title">Đẹp nhất là khi<br /><em>bạn được là chính mình.</em></h2><p>Dinh Thong Gallery lưu giữ những câu chuyện thật và những cảm xúc tự nhiên. Từ ý tưởng đầu tiên đến khung hình cuối cùng, mỗi bộ ảnh là một cách để nhớ về những điều có ý nghĩa với bạn.</p></div></section>}
 
-      <section className={styles.bookingCta} aria-labelledby="booking-title"><div><p className={styles.eyebrow}>HẸN GẶP BẠN TRONG KHUNG HÌNH</p><h2 id="booking-title">Một câu chuyện mới,<br /><em>bắt đầu từ bạn.</em></h2></div><Link href="/booking" prefetch={false} className={styles.ctaButton}>Đặt lịch chụp ảnh <ArrowUpRight size={22} aria-hidden="true" /></Link></section>
-      <footer className={styles.footer}><Link href="/" className={styles.footerBrand}>DinhThong<span>GALLERY</span></Link><p>© {new Date().getFullYear()} DinhThong Photos.<br className={styles.mobileBreak} /> Khoảnh khắc lưu giữ cảm xúc.</p><Link href="/booking" prefetch={false}>Hẹn một buổi chụp <ArrowUpRight size={14} aria-hidden="true" /></Link></footer>
+      <footer className={styles.footer}><Link href="/" className={styles.footerBrand}>Dinh Thong Gallery</Link><p>© {new Date().getFullYear()} Dinh Thong Gallery.<br className={styles.mobileBreak} /> Khoảnh khắc lưu giữ cảm xúc.</p></footer>
     </main>
   )
 }

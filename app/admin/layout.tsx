@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Đăng nhập - DinhThong Gallery',
+  title: 'Đăng nhập - Dinh Thong Gallery',
 }
 
 export default function AdminLayout({

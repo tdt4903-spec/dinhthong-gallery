@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     locale: 'vi_VN',
     title: 'Dinh Thong Gallery',
     description: 'Khoảnh khắc lưu giữ cảm xúc',
-    images: [{ url: SITE_SHARE_IMAGE_URL, width: 512, height: 512, type: 'image/png', alt: 'Dinh Thong Photos' }],
+    images: [{ url: SITE_SHARE_IMAGE_URL, width: 512, height: 512, type: 'image/png', alt: 'Dinh Thong Gallery' }],
   },
   twitter: {
     card: 'summary_large_image',

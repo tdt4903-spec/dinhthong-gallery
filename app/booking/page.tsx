@@ -3,6 +3,7 @@
 import {
   FormEvent,
   useEffect,
+  useId,
   useMemo,
   useState,
 } from 'react'
@@ -12,6 +13,8 @@ import type {
 } from 'react'
 
 import Link from 'next/link'
+import { SITE_BANNER_URL } from '@/lib/site-assets'
+import styles from './booking.module.css'
 
 import {
   ArrowLeft,
@@ -141,6 +144,7 @@ export default function BookingPage() {
   const [loading, setLoading] =
     useState(true)
 
+  const [loadError, setLoadError] = useState(false)
   const [sending, setSending] =
     useState(false)
 
@@ -339,6 +343,7 @@ export default function BookingPage() {
       ])
 
 
+      setLoadError(Boolean(serviceResult.error || packageResult.error || paymentResult.error))
       setServices(
         Array.isArray(
           serviceResult.data
@@ -753,7 +758,7 @@ export default function BookingPage() {
       <ResultPage
         dark={isDarkMode}
         title="Đã nhận yêu cầu"
-        text="DinhThong Photos sẽ liên hệ để xác nhận lịch chụp với bạn."
+        text="Dinh Thong Gallery sẽ liên hệ để xác nhận lịch chụp với bạn."
         success
       />
     )
@@ -804,7 +809,7 @@ export default function BookingPage() {
 
             <ArrowLeft className="h-3.5 w-3.5" />
 
-            <span className="text-base font-semibold">Trang chủ</span>
+            <span className="text-base font-semibold">Dinh Thong Gallery</span>
 
           </Link>
 
@@ -812,6 +817,7 @@ export default function BookingPage() {
           <button
             type="button"
             onClick={toggleTheme}
+            aria-label="Đổi giao diện sáng hoặc tối"
             className="flex h-8 w-8 items-center justify-center rounded-full border border-current/10"
           >
 
@@ -831,30 +837,27 @@ export default function BookingPage() {
       </header>
 
 
-      <form
-        onSubmit={submit}
-        className="mx-auto grid max-w-[1320px] gap-7 px-4 py-7 sm:px-6 lg:grid-cols-[minmax(0,1fr)_350px]"
-      >
-
-        <div className="min-w-0">
-
-          <div>
-
-            <div className="text-[8px] font-bold uppercase tracking-[0.22em] opacity-35">
-              Booking
-            </div>
-
-            <h1 className="mt-1 font-serif text-3xl sm:text-4xl">
-              Lên lịch cho khoảnh khắc của bạn
-            </h1>
-            <p className="studio-section-note">Chọn thể loại, thời gian và để lại thông tin để studio liên hệ xác nhận.</p>
-
+      <div className={styles.container}>
+        <section className={styles.hero} aria-labelledby="booking-title">
+          <div className={styles.heroCopy}>
+            <p className={styles.kicker}>ĐẶT LỊCH CHỤP</p>
+            <h1 id="booking-title">Hẹn một<br /><em>buổi chụp.</em></h1>
+            <p>Chọn gói chụp và ngày bạn mong muốn. Dinh Thong Gallery sẽ liên hệ để thống nhất chi tiết và xác nhận lịch.</p>
           </div>
+          <img src={SITE_BANNER_URL} alt="" className={styles.heroPhoto} />
+        </section>
+        <nav aria-label="Các bước đặt lịch" className={styles.steps}>
+          <a href="#booking-service"><b>01</b> Chọn gói</a>
+          <a href="#booking-session"><b>02</b> Buổi chụp</a>
+          <a href="#booking-contact"><b>03</b> Liên hệ</a>
+        </nav>
+      </div>
 
-
+      <form onSubmit={submit} className={styles.form}>
+        <div className={styles.fields}>
           {/* THỂ LOẠI */}
 
-          <section className="mt-7">
+          <section id="booking-service" className={styles.panel}>
 
             <Title>
               Chọn thể loại
@@ -862,6 +865,8 @@ export default function BookingPage() {
             </Title>
 
 
+            {loadError && <p role="alert" className={styles.notice}>Chưa tải đủ thông tin đặt lịch. <button type="button" onClick={() => window.location.reload()}>Tải lại</button></p>}
+            {!loadError && !loading && services.length === 0 && <p className={styles.notice}>Hiện chưa có thể loại chụp mở đặt lịch.</p>}
             {loading ? (
 
               <div className="flex h-36 items-center justify-center">
@@ -882,6 +887,7 @@ export default function BookingPage() {
                     return (
                       <button
                         key={service.id}
+                        aria-pressed={selected}
                         type="button"
                         onClick={() =>
                           chooseService(
@@ -963,7 +969,7 @@ export default function BookingPage() {
 
           {selectedService && (
 
-            <section className="mt-7">
+            <section className={styles.panel}>
 
               <Title>
                 Chọn gói chụp
@@ -973,6 +979,7 @@ export default function BookingPage() {
 
               <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
 
+                {servicePackages.length === 0 && <p className={styles.notice}>Thể loại này chưa có gói mở đặt lịch. Bạn có thể chọn thể loại khác.</p>}
                 {servicePackages.map(
                   pkg => {
 
@@ -983,6 +990,7 @@ export default function BookingPage() {
                     return (
                       <button
                         key={pkg.id}
+                        aria-pressed={selected}
                         type="button"
                         onClick={() =>
                           choosePackage(
@@ -1051,7 +1059,7 @@ export default function BookingPage() {
 
           {/* BUỔI CHỤP */}
 
-          <section className="mt-8">
+          <section id="booking-session" className={styles.panel}>
 
             <Title>
               Thông tin buổi chụp
@@ -1062,7 +1070,7 @@ export default function BookingPage() {
 
               <div>
 
-                <Label>
+                <Label htmlFor="event-date">
                   Ngày chụp dự kiến
                   <Required />
                 </Label>
@@ -1071,7 +1079,7 @@ export default function BookingPage() {
 
                   <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-30" />
 
-                  <input
+                  <input id="event-date"
                     required
                     type="date"
                     value={
@@ -1096,7 +1104,7 @@ export default function BookingPage() {
 
               <div>
 
-                <Label>
+                <Label htmlFor="location">
                   Địa chỉ liên hệ
                   <Required />
                 </Label>
@@ -1105,7 +1113,7 @@ export default function BookingPage() {
 
                   <MapPin className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-30" />
 
-                  <input
+                  <input id="location"
                     required
                     value={
                       form.location
@@ -1134,11 +1142,11 @@ export default function BookingPage() {
 
               <div>
 
-                <Label>
+                <Label htmlFor="session-title">
                   Tiêu đề buổi chụp
                 </Label>
 
-                <input
+                <input id="session-title" placeholder="Ví dụ: Ảnh gia đình cuối năm"
                   value={form.title}
                   onChange={e =>
                     setForm({
@@ -1157,13 +1165,13 @@ export default function BookingPage() {
 
               <div>
 
-                <Label>
+                <Label htmlFor="notes">
                   Nội dung / yêu cầu
                 </Label>
 
-                <input
-                autoComplete="email"
-                type="email"
+                <textarea id="notes"
+                  rows={2}
+                  placeholder="Ý tưởng, phong cách hoặc điều bạn muốn trao đổi…"
                   value={form.note}
                   onChange={e =>
                     setForm({
@@ -1186,17 +1194,17 @@ export default function BookingPage() {
 
           {/* KHÁCH */}
 
-          <section className="mt-8">
+          <section id="booking-contact" className={styles.panel}>
 
             <Title>
               Thông tin khách hàng
             </Title>
 
 
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
 
               <InputField
-                title="Họ và tên"
+                title="Họ và tên" autoComplete="name"
                 required
                 value={
                   form.full_name
@@ -1213,7 +1221,7 @@ export default function BookingPage() {
 
 
               <InputField
-                title="Số điện thoại"
+                title="Số điện thoại" type="tel" autoComplete="tel"
                 required
                 value={form.phone}
                 dark={isDarkMode}
@@ -1243,7 +1251,7 @@ export default function BookingPage() {
 
 
               <InputField
-                title="Email"
+                title="Email" type="email" autoComplete="email"
                 value={form.email}
                 required
                 dark={isDarkMode}
@@ -1280,7 +1288,7 @@ export default function BookingPage() {
         {/* TÓM TẮT */}
 
 
-        <aside className="space-y-3 lg:pt-[58px]">
+        <aside className={styles.aside}>
 
           {/* PAYMENT CARD */}
 
@@ -1520,11 +1528,11 @@ export default function BookingPage() {
           >
 
             <div className="text-[8px] font-bold uppercase tracking-[0.18em] opacity-35">
-              Yêu cầu Booking
+              KIỂM TRA TRƯỚC KHI GỬI
             </div>
 
             <h2 className="mt-1 font-serif text-2xl">
-              Thông tin đặt lịch
+              Buổi chụp của bạn
             </h2>
 
 
@@ -1617,7 +1625,7 @@ export default function BookingPage() {
 
             {errorText && (
 
-              <div className="mt-4 rounded-xl bg-red-500/10 p-2.5 text-[11px] text-red-500">
+              <div role="alert" className="mt-4 rounded-xl bg-red-500/10 p-2.5 text-[11px] text-red-500">
                 {errorText}
               </div>
 
@@ -1626,7 +1634,7 @@ export default function BookingPage() {
 
             <button
               type="submit"
-              disabled={sending}
+              disabled={sending || loading || loadError || !services.length}
               className="mt-5 flex w-full items-center justify-center gap-2 rounded-[13px] bg-emerald-600 px-4 py-3 text-xs font-bold text-white disabled:opacity-50"
             >
 
@@ -1636,7 +1644,7 @@ export default function BookingPage() {
                 )
                 : (
                   <>
-                    Xác nhận yêu cầu
+                    Gửi yêu cầu đặt lịch
                     <ChevronRight className="h-3.5 w-3.5" />
                   </>
                 )
@@ -1653,7 +1661,7 @@ export default function BookingPage() {
               <div className="mt-5 border-t border-current/10 pt-4">
 
                 <div className="text-[8px] font-bold uppercase tracking-[0.15em] opacity-35">
-                  Liên hệ Admin
+                  Liên hệ Dinh Thong Gallery
                 </div>
 
                 <div className="mt-2 flex flex-wrap gap-2">
@@ -1797,13 +1805,14 @@ function Required() {
 
 
 function Label({
-  children,
+  htmlFor, children,
 }: {
+  htmlFor: string
   children: ReactNode
 }) {
 
   return (
-    <label className="mb-1.5 block text-[10px] font-semibold opacity-60">
+    <label htmlFor={htmlFor} className="mb-1.5 block text-[10px] font-semibold opacity-60">
       {children}
     </label>
   )
@@ -1815,7 +1824,7 @@ function InputField({
   value,
   setValue,
   dark,
-  required = false,
+  required = false, type = 'text', autoComplete,
 }: {
   title: string
   value: string
@@ -1824,19 +1833,22 @@ function InputField({
   ) => void
   dark: boolean
   required?: boolean
+  type?: string
+  autoComplete?: string
 }) {
+  const id = useId()
 
   return (
     <div>
 
-      <Label>
+      <Label htmlFor={id}>
         {title}
         {required && (
           <Required />
         )}
       </Label>
 
-      <input
+      <input id={id} type={type} autoComplete={autoComplete}
         required={required}
         value={value}
         onChange={e =>

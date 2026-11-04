@@ -76,18 +76,18 @@ export default function LoginPage() {
 
   return (
     <main className={styles.page}>
-      <section className={styles.story} aria-label="DinhThong Studio">
-        <img src={SITE_BANNER_URL} alt="Khoảnh khắc được lưu giữ qua ống kính DinhThong" className={styles.cover} />
-        <Link href="/" className={styles.brand}><Aperture size={31} strokeWidth={1.2} /><span>DinhThong<small>GALLERY & STUDIO</small></span></Link>
+      <section className={styles.story} aria-label="Dinh Thong Gallery">
+        <img src={SITE_BANNER_URL} alt="Khoảnh khắc được lưu giữ qua ống kính Dinh Thong Gallery" className={styles.cover} />
+        <Link href="/" className={styles.brand}><Aperture size={31} strokeWidth={1.2} /><span>Dinh Thong Gallery</span></Link>
         <div className={styles.storyText}><p>PHOTOGRAPHY · FILM · STORIES</p><h1>Nơi những{' '}<br />khoảnh khắc{' '}<br /><em>trở thành ký ức.</em></h1><span>Một không gian cho hình ảnh, cảm hứng<br />và những câu chuyện của bạn.</span></div>
-        <div className={styles.storyFooter}><span>Moments for a lifetime.</span><span>DINHTHONG PHOTOS <ArrowUpRight size={13} /></span></div>
+        <div className={styles.storyFooter}><span>Moments for a lifetime.</span><span>Dinh Thong Gallery <ArrowUpRight size={13} /></span></div>
       </section>
 
       <section className={styles.signIn} aria-labelledby="login-title">
         <Link href="/" className={styles.back}><ArrowLeft size={15} />Về portfolio</Link>
         <div className={styles.loginBody}>
           <div className={styles.loginMark}><Aperture size={24} strokeWidth={1.3} /></div>
-          <p className={styles.eyebrow}>STUDIO WORKSPACE</p>
+          <p className={styles.eyebrow}>Dinh Thong Gallery Workspace</p>
           <h2 id="login-title">Chào mừng{' '}<br /><em>trở lại.</em></h2>
           <p className={styles.description}>Mọi công việc của studio, trong cùng một không gian. Đăng nhập để bắt đầu.</p>
           <button type="button" onClick={handleGoogleLogin} disabled={loading} className={styles.googleButton}>
@@ -102,7 +102,7 @@ export default function LoginPage() {
           {loginError && <p className={styles.error} role="alert">{loginError}</p>}
           <div className={styles.permission}><LockKeyhole size={14} /><p>Dành cho tài khoản đã được studio cấp quyền truy cập.</p></div>
         </div>
-        <footer className={styles.footer}>© {new Date().getFullYear()} DinhThong Gallery<span>Made for moments.</span></footer>
+        <footer className={styles.footer}>© {new Date().getFullYear()} Dinh Thong Gallery<span>Made for moments.</span></footer>
       </section>
     </main>
   )

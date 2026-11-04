@@ -69,7 +69,7 @@ async function sendEmail({
 
   return transporter.sendMail({
     from:
-      `DinhThong Gallery <${gmailUser}>`,
+      `Dinh Thong Gallery <${gmailUser}>`,
 
     to,
     subject,
@@ -476,7 +476,7 @@ export async function POST(
             </p>
 
             <p>
-              Dinh Thong Photos cảm ơn Anh/Chị
+              Dinh Thong Gallery cảm ơn Anh/Chị
               <b>${esc(booking.full_name)}</b>
               đã tin tưởng và đặt lịch bên chúng tôi.
             </p>

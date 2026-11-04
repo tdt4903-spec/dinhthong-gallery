@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 're
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
-import { Aperture, ArrowUpRight, CalendarDays, ChevronRight, FolderOpen, Image, KeyRound, Menu, PanelsTopLeft, ShieldCheck, Wallet, X } from 'lucide-react'
+import { Aperture, ArrowUpRight, CalendarDays, ChevronRight, FolderOpen, Image, KeyRound, Menu, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, ShieldCheck, Wallet, X } from 'lucide-react'
 import StudioAccount from './StudioAccount'
 
 const navigation = [
@@ -19,6 +19,18 @@ const navigation = [
 export default function StudioWorkspace({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
+  useEffect(() => {
+    try { setCollapsed(localStorage.getItem('gallery-sidebar-hidden') === 'true') } catch {}
+    const desktop = matchMedia('(min-width: 1024px)')
+    const closeMobileMenu = () => { if (desktop.matches) setMenuOpen(false) }
+    desktop.addEventListener('change', closeMobileMenu)
+    return () => desktop.removeEventListener('change', closeMobileMenu)
+  }, [])
+  function toggleSidebar() {
+    setCollapsed(!collapsed)
+    try { localStorage.setItem('gallery-sidebar-hidden', String(!collapsed)) } catch {}
+  }
   const [keyPanelOpen, setKeyPanelOpen] = useState(false)
   const menuRef = useRef<HTMLElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
@@ -79,14 +91,14 @@ export default function StudioWorkspace({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="studio-workspace">
+    <div className="studio-workspace" data-sidebar-hidden={collapsed}>
       <a className="workspace-skip" href="#studio-workspace-content">Đến nội dung chính</a>
       {menuOpen && <button type="button" className="workspace-backdrop" onClick={() => setMenuOpen(false)} aria-label="Đóng menu quản trị" />}
       <aside ref={menuRef} id="studio-navigation" className={`workspace-sidebar ${menuOpen ? 'workspace-sidebar-open' : ''}`} aria-label="Điều hướng quản trị" role={menuOpen ? 'dialog' : undefined} aria-modal={menuOpen ? true : undefined}>
         <div className="workspace-brand-row">
-          <Link href="/dashboardadmin" className="workspace-brand" onClick={() => setMenuOpen(false)} aria-label="DinhThong Studio — Gallery nội bộ">
+          <Link href="/dashboardadmin" className="workspace-brand" onClick={() => setMenuOpen(false)} aria-label="Dinh Thong Gallery — Gallery nội bộ">
             <span className="workspace-brand-mark"><Aperture size={25} strokeWidth={1.4} aria-hidden="true" /></span>
-            <span><strong>DinhThong</strong><small>GALLERY & STUDIO</small></span>
+            <span><strong>Dinh Thong Gallery</strong></span>
           </Link>
           <button type="button" className="workspace-close" onClick={() => setMenuOpen(false)} aria-label="Đóng menu"><X size={20} /></button>
         </div>
@@ -101,7 +113,7 @@ export default function StudioWorkspace({ children }: { children: ReactNode }) {
             return item.href.includes('?') || (item.href === '/dashboardadmin' && keyPanelOpen) ? (
               <a key={item.href} href={item.href} className={className} aria-current={isActive(item.href) ? 'page' : undefined} onClick={item.href.includes('?') ? openKeyPanel : () => setMenuOpen(false)}>{content}</a>
             ) : (
-              <Link key={item.href} href={item.href} prefetch={false} className={className} aria-current={isActive(item.href) ? 'page' : undefined} onClick={() => setMenuOpen(false)}>{content}</Link>
+              <Link key={item.href} href={item.href} prefetch={item.href === '/dashboardpublic' ? null : false} className={className} aria-current={isActive(item.href) ? 'page' : undefined} onClick={() => setMenuOpen(false)}>{content}</Link>
             )
           })}
         </nav>
@@ -111,7 +123,7 @@ export default function StudioWorkspace({ children }: { children: ReactNode }) {
 
       <div className="workspace-body">
         <div className="workspace-topbar">
-          <div className="workspace-breadcrumb"><button ref={menuButtonRef} type="button" className="workspace-menu" onClick={() => setMenuOpen(true)} aria-label="Mở menu quản trị" aria-controls="studio-navigation" aria-expanded={menuOpen}><Menu size={21} /></button><span>Studio</span><ChevronRight size={13} aria-hidden="true" /><strong>{current.label}</strong></div>
+          <div className="workspace-breadcrumb"><button ref={menuButtonRef} type="button" className="workspace-menu" onClick={() => setMenuOpen(true)} aria-label="Mở menu quản trị" aria-controls="studio-navigation" aria-expanded={menuOpen}><Menu size={21} /></button><button type="button" className="workspace-desktop-toggle" onClick={toggleSidebar} aria-expanded={!collapsed} aria-controls="studio-navigation" aria-label={collapsed ? 'Hiện sidebar' : 'Ẩn sidebar'} title={collapsed ? 'Hiện sidebar' : 'Ẩn sidebar'}>{collapsed ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}</button><span>Quản trị</span><ChevronRight size={13} aria-hidden="true" /><strong>{current.label}</strong></div>
           <div className="workspace-topbar-actions"><span className="workspace-admin-badge"><ShieldCheck size={12} aria-hidden="true" />Quản trị</span><Link href="/" target="_blank" rel="noopener noreferrer">Portfolio<ArrowUpRight size={14} aria-hidden="true" /></Link></div>
         </div>
         <div id="studio-workspace-content" className="workspace-content" tabIndex={-1}>{children}</div>

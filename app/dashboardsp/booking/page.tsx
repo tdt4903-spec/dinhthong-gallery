@@ -114,7 +114,10 @@ function money(value?: number) {
   )
 }
 
+const bookingViews = ['Yêu cầu', 'Lịch chụp', 'Dịch vụ và gói', 'Thanh toán'] as const
+
 export default function DashboardBooking() {
+  const [view, setView] = useState<typeof bookingViews[number]>('Yêu cầu')
   const router = useRouter()
 
   const supabase = useMemo(
@@ -933,7 +936,7 @@ export default function DashboardBooking() {
             target="_blank"
             className="inline-flex items-center gap-2 rounded-xl border border-current/10 px-3 py-2 text-[10px] font-semibold sm:px-4 sm:py-2.5 sm:text-xs"
           >
-            <span className="hidden sm:inline">Xem Booking Public</span>
+            <span className="hidden sm:inline">Xem trang đặt lịch</span>
             <span className="sm:hidden">Booking</span>
             <ExternalLink className="h-4 w-4" />
           </Link>
@@ -944,11 +947,10 @@ export default function DashboardBooking() {
       <div className={styles.content}>
         <div className={styles.intro}>
           <div>
-            <p className={styles.eyebrow}>STUDIO / BOOKING</p>
-            <h1 className={styles.title}>Lịch hẹn & booking</h1>
+            <p className={styles.eyebrow}>QUẢN TRỊ LỊCH CHỤP</p>
+            <h1 className={styles.title}>Lịch hẹn chụp ảnh</h1>
             <p className={styles.description}>Theo dõi lịch chụp, chăm sóc từng yêu cầu và quản lý dịch vụ của studio.</p>
           </div>
-          <a href="#booking-requests" className={styles.secondaryAction}>Xem yêu cầu <ArrowLeft className="h-4 w-4 rotate-[-90deg]" /></a>
         </div>
 
         <section aria-label="Tổng quan booking" className={styles.stats}>
@@ -958,17 +960,20 @@ export default function DashboardBooking() {
           <div className={`studio-stat ${styles.metric}`}><span className={styles.metricLabel}>Gói chụp <CircleDollarSign className="h-4 w-4" /></span><strong>{packages.length}</strong><small>Trong {services.length} thể loại ảnh</small></div>
         </section>
 
-        <BookingCalendar
+        <div className={styles.bookingViews} role="group" aria-label="Nội dung quản trị booking">
+          {bookingViews.map(item => <button key={item} type="button" aria-pressed={view === item} onClick={() => setView(item)}>{item}</button>)}
+        </div>
+        {view === 'Lịch chụp' && <BookingCalendar
           bookings={bookings}
           isDarkMode={isDarkMode}
-        />
+        />}
 
 
         {/* =========================
             THỂ LOẠI
         ========================== */}
 
-        <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+        {view === 'Dịch vụ và gói' && <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
 
         <section className={sectionClass(isDarkMode)}>
 
@@ -1210,14 +1215,14 @@ export default function DashboardBooking() {
 
         </section>
 
-        </div>
+        </div>}
 
 
         {/* =========================
             CHUYỂN KHOẢN
         ========================== */}
 
-        <section className={sectionClass(isDarkMode)}>
+        {view === 'Thanh toán' && <section className={sectionClass(isDarkMode)}>
 
           <SectionHead
             title="Quản lý chuyển khoản"
@@ -1455,14 +1460,14 @@ export default function DashboardBooking() {
 
           </div>
 
-        </section>
+        </section>}
 
 
         {/* =========================
             BOOKING
         ========================== */}
 
-        <section id="booking-requests" className={sectionClass(isDarkMode)}>
+        {view === 'Yêu cầu' && <section id="booking-requests" className={sectionClass(isDarkMode)}>
 
           <SectionHead
             title="Yêu cầu từ khách hàng"
@@ -1730,7 +1735,7 @@ export default function DashboardBooking() {
             </div>
           )}
 
-        </section>
+        </section>}
 
       </div>
 

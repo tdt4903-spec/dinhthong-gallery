@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import StudioWorkspace from '@/components/studio/StudioWorkspace'
 
 export const metadata: Metadata = {
-  title: 'Admin - DinhThong Gallery',
+  title: 'Admin - Dinh Thong Gallery',
 }
 
 export default function DashboardAdminLayout({

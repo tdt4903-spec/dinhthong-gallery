@@ -124,7 +124,7 @@ export default function KeyGenModal({ isOpen, onClose }: KeyGenModalProps) {
         {/* Header Modal */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50/50">
           <div>
-            <h2 className="text-base font-bold text-gray-900 tracking-tight">DINH THONG RETOUCH</h2>
+            <h2 className="text-base font-bold text-gray-900 tracking-tight">Dinh Thong Gallery</h2>
             <p className="text-xs text-gray-500">Quản lý & Cấp mã kích hoạt bản quyền Panel</p>
           </div>
           <button

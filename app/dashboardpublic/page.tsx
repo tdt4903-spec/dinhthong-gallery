@@ -1,11 +1,10 @@
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
-import StudioWorkspace from '@/components/studio/StudioWorkspace'
 import PortfolioDashboard from './PortfolioDashboard'
 import { getPortfolioAccess } from './access'
 
-export const metadata: Metadata = { title: 'Quản trị web public — DinhThong Studio', robots: { index: false } }
+export const metadata: Metadata = { title: 'Quản trị web public — Dinh Thong Gallery', robots: { index: false } }
 
 export default async function PublicManagementPage() {
   const { supabase, authorized } = await getPortfolioAccess()
@@ -23,5 +22,5 @@ export default async function PublicManagementPage() {
   const items = collections.data ?? []
   const visibleIds = new Set(items.map(item => item.id))
   const albumRows = photos.data ?? []
-  return <StudioWorkspace><PortfolioDashboard categories={items} albums={authorized ? albumRows : albumRows.filter(album => visibleIds.has(album.category_id))} readOnly={!authorized} loadError={Boolean(collections.error || photos.error)} /></StudioWorkspace>
+  return <PortfolioDashboard categories={items} albums={authorized ? albumRows : albumRows.filter(album => visibleIds.has(album.category_id))} readOnly={!authorized} loadError={Boolean(collections.error || photos.error)} />
 }

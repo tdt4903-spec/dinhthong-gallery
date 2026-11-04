@@ -145,8 +145,6 @@
   .studio-category-image img { transition: none; }
 }
 .studio-ui .studio-panel { border-radius: 16px; border-color: var(--studio-line); }
-.studio-ui .studio-booking form > div > section { padding-top: 24px; margin-top: 28px; border-top: 1px solid var(--studio-line); }
-.studio-ui .studio-booking form > div > div > h1 { font-size: clamp(28px, 3vw, 40px); line-height: 1.2; max-width: 600px; }
 .studio-ui .studio-overview { border-radius: 16px; box-shadow: none; border-color: var(--studio-line); background: var(--studio-panel); }
 .studio-ui .studio-overview > .absolute { opacity: .2; }
 .studio-ui .studio-overview > .relative { min-height: 0; padding: 28px; }
@@ -156,5 +154,4 @@
 .studio-ui .studio-overview > .relative > .grid > div span { color: var(--studio-accent); }
 @media (max-width: 767px) {
   .studio-ui .studio-overview > .relative { padding: 18px; }
-  .studio-ui .studio-booking form > div > section { padding-top: 18px; margin-top: 22px; }
 }

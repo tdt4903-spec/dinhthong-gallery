@@ -640,7 +640,7 @@ export default function PublicAlbumPage() {
         </div>
 
         <div className="max-w-xl text-right leading-5">
-          Mỗi bức ảnh là một câu chuyện, cảm ơn bạn đã tiếp tục hành trình cùng DinhThong Photos.
+          Mỗi bức ảnh là một câu chuyện, cảm ơn bạn đã tiếp tục hành trình cùng Dinh Thong Gallery.
         </div>
       </footer>
 

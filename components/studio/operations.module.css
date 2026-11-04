@@ -71,3 +71,8 @@
   .categoryForm label { width: 100%; }
   .categoryForm input { width: 100%; flex-basis: 100%; }
 }
+
+.bookingViews { display: flex; flex-wrap: wrap; gap: 5px; padding: 5px; width: fit-content; max-width: 100%; margin: 18px 0; border: 1px solid var(--studio-line); background: var(--studio-panel); border-radius: 12px; }
+.bookingViews button { padding: 10px 15px; border-radius: 8px; color: var(--studio-muted); font-size: 13px; }
+.bookingViews button[aria-pressed=true] { background: #205140; color: white; }
+@media (max-width: 560px) { .bookingViews { width: 100%; display: grid; grid-template-columns: 1fr 1fr; } }

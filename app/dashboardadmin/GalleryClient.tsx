@@ -157,7 +157,7 @@ function CustomFolderGraphic({ className = "w-16 h-16" }: { className?: string }
   )
 }
 
-const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'DINHTHONG GALLERY'): Promise<Blob> => {
+const applyWatermarkToImageBlob = async (blob: Blob, watermarkText = 'Dinh Thong Gallery'): Promise<Blob> => {
   if (typeof window === 'undefined') return blob
   return new Promise((resolve) => {
     const img = new window.Image()
@@ -882,7 +882,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
     setNotificationTab('selected')
   }
 
-  const getNotificationTitle = (albumId: string, fallback = 'DinhThong Album') => {
+  const getNotificationTitle = (albumId: string, fallback = 'Dinh Thong Gallery') => {
     const id = String(albumId || '')
     return customNames[id] || albums.find(a => String(a.id) === id)?.title || id || fallback
   }
@@ -2841,7 +2841,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
           return {
             id: folderId,
             driveUrl,
-            title: String(customNames[folderId] || matched.name || 'DinhThong Album'),
+            title: String(customNames[folderId] || matched.name || 'Dinh Thong Gallery'),
           }
         }
       }
@@ -2877,7 +2877,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         visited.add(current.id)
 
         if (current.id === code || toNumericCode(current.id) === code) {
-          const title = String(customNames[current.id] || current.name || 'DinhThong Album')
+          const title = String(customNames[current.id] || current.name || 'Dinh Thong Gallery')
           try {
             await supabase
               .from('known_drive_folders')
@@ -2915,7 +2915,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       return {
         id: code,
         driveUrl: `https://drive.google.com/drive/folders/${code}`,
-        title: customNames[code] || 'DinhThong Album',
+        title: customNames[code] || 'Dinh Thong Gallery',
       }
     }
 
@@ -2962,7 +2962,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
               if (known) {
                 matchedAlbum = {
                   id: String(known.id),
-                  title: String(customNames[String(known.id)] || known.name || 'DinhThong Album'),
+                  title: String(customNames[String(known.id)] || known.name || 'Dinh Thong Gallery'),
                   coverUrl: '',
                   driveUrl: String(known.parent_url || `https://drive.google.com/drive/folders/${known.id}`),
                 }
@@ -3048,7 +3048,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
             const matchedAlbum = fAlbums.find(a => String(a.id) === String(saved.id))
             const restoredAlbum: Album = matchedAlbum || {
               id: String(saved.id),
-              title: String(saved.title || customNames[String(saved.id)] || 'DinhThong Album'),
+              title: String(saved.title || customNames[String(saved.id)] || 'Dinh Thong Gallery'),
               coverUrl: '',
               driveUrl: String(saved.driveUrl || `https://drive.google.com/drive/folders/${saved.id}`),
             }
@@ -3158,11 +3158,11 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
       setCurrentCommentInput(comments[previewMedia.id] || '')
     } else if (folderHistory.length > 0) {
       const currentFolder = folderHistory[folderHistory.length - 1]
-      document.title = (customNames[currentFolder.id] || currentFolder.title || 'DinhThong Gallery').trim()
+      document.title = (customNames[currentFolder.id] || currentFolder.title || 'Dinh Thong Gallery').trim()
     } else if (selectedAlbum) {
-      document.title = (customNames[selectedAlbum.id] || selectedAlbum.title || 'DinhThong Gallery').trim()
+      document.title = (customNames[selectedAlbum.id] || selectedAlbum.title || 'Dinh Thong Gallery').trim()
     } else {
-      document.title = 'Admin - DinhThong Gallery'
+      document.title = 'Admin - Dinh Thong Gallery'
     }
   }, [previewMedia, folderHistory, selectedAlbum, customNames, comments])
 
@@ -3732,7 +3732,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                       <div className={`mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] sm:text-[11px] ${isDarkMode ? 'text-white/48' : 'text-gray-500'}`}>
                         <span>{mediaFiles.length} ảnh</span>
                         {subFolders.length > 0 && <><span>•</span><span>{subFolders.length} thư mục</span></>}
-                        <span>•</span><span>Bởi DinhThong</span>
+                        <span>•</span><span>Bởi Dinh Thong Gallery</span>
                       </div>
                     </div>
                   </div>
@@ -4096,7 +4096,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                                     {activeSetting.enable_watermark && (
                                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-30 select-none">
                                         <span className="font-serif font-black text-white text-xs sm:text-sm tracking-widest uppercase -rotate-12 border border-white/50 px-2 py-0.5 rounded">
-                                          DINHTHONG GALLERY
+                                          Dinh Thong Gallery
                                         </span>
                                       </div>
                                     )}
@@ -4303,7 +4303,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
                   {activeSetting.enable_watermark && (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 opacity-35 select-none">
                       <span className="font-serif font-black text-white text-2xl sm:text-4xl tracking-widest uppercase -rotate-12 border-2 border-white/60 px-6 py-2 rounded-2xl shadow-2xl">
-                        DINHTHONG GALLERY
+                        Dinh Thong Gallery
                       </span>
                     </div>
                   )}
@@ -5311,7 +5311,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         <div className={styles.keyOverlay} onClick={(event) => { if (event.target === event.currentTarget) closeKeyPanel() }}>
           <div ref={keyDialogRef} role="dialog" aria-modal="true" aria-labelledby="key-panel-title" tabIndex={-1} className={styles.keyDialog}>
             <div className={styles.keyHeader}>
-              <div className={styles.keyBrand}><span><KeyRound aria-hidden="true" size={23} /></span><div><p>DINHTHONG RETOUCH</p><h2 id="key-panel-title">Quản lý Key Panel</h2></div></div>
+              <div className={styles.keyBrand}><span><KeyRound aria-hidden="true" size={23} /></span><div><p>Dinh Thong Gallery</p><h2 id="key-panel-title">Quản lý Key Panel</h2></div></div>
               <button type="button" onClick={closeKeyPanel} aria-label="Đóng Key Panel" className={styles.closeButton}><X aria-hidden="true" size={20} /></button>
             </div>
             <div className={styles.keyBody}>
@@ -5422,7 +5422,7 @@ export default function GalleryClient({ displayName = '' }: GalleryClientProps) 
         isDarkMode ? 'border-white/10 text-gray-500' : 'border-gray-100 text-gray-400'
       }`}>
         <div className="max-w-7xl mx-auto px-6 text-center">
-          <p>© 2026 DinhThong Gallery</p>
+          <p>© 2026 Dinh Thong Gallery</p>
         </div>
       </footer>
 
