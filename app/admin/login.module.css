@@ -1,0 +1,38 @@
+.page { display: grid; grid-template-columns: 1.08fr 1fr; min-height: 100dvh; background: transparent; color: #173d32; }
+.story { position: relative; isolation: isolate; display: flex; flex-direction: column; justify-content: space-between; min-height: 100dvh; padding: 44px 52px 30px; overflow: hidden; background: #173d32; color: #fcfaf1; }
+.cover { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; object-position: 58% center; }
+.story::after { position: absolute; inset: 0; z-index: -1; content: ''; background: linear-gradient(180deg, #0c271b45, #0d291e55 30%, #0b241be0); }
+.brand { display: inline-flex; align-items: center; gap: 12px; width: fit-content; }
+.brand > span { font-size: 23px; font-weight: 500; letter-spacing: -.9px; }
+.brand small { display: block; margin-top: 5px; font-size: 7px; font-weight: 400; letter-spacing: 3px; }
+.storyText { margin-top: auto; padding: 90px 0 70px; }
+.storyText > p { margin-bottom: 24px; font-size: 9px; letter-spacing: 2.8px; color: #d4ddc5; }
+.storyText h1 { font-family: Georgia, 'Times New Roman', serif; font-size: clamp(46px, 4.3vw, 74px); font-weight: 400; line-height: 1.12; letter-spacing: -2.4px; }
+.storyText h1 em { color: #d9e2c4; }
+.storyText > span { display: block; margin-top: 28px; font-size: 12px; line-height: 1.9; color: #e0e7dcbd; }
+.storyFooter { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding-top: 22px; border-top: 1px solid #ffffff32; font-size: 10px; color: #e2e9d9b0; }
+.storyFooter > span:last-child { display: flex; align-items: center; gap: 8px; font-size: 8px; letter-spacing: 1.5px; }
+.signIn { display: flex; flex-direction: column; min-width: 0; padding: 40px 48px 27px; }
+.back { display: inline-flex; align-items: center; gap: 9px; width: fit-content; color: #6c7e6c; font-size: 11px; }
+.back:hover { color: #173d32; }
+.loginBody { width: 100%; max-width: 355px; margin: auto; padding: 60px 0; }
+.loginMark { display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 29px; border: 1px solid #dce0d3; border-radius: 13px; background: #edf0e5; }
+.eyebrow { margin-bottom: 18px; font-size: 8px; font-weight: 600; letter-spacing: 2.6px; color: #7c8a73; }
+.loginBody h2 { font-family: Georgia, 'Times New Roman', serif; font-size: clamp(46px, 4.5vw, 65px); font-weight: 400; line-height: 1.1; letter-spacing: -2px; }
+.loginBody h2 em { color: #7c8e66; }
+.description { max-width: 310px; margin-top: 21px; font-size: 12px; line-height: 1.9; color: #7b8374; }
+.googleButton { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 51px; width: 100%; margin-top: 33px; padding: 14px 18px; border: 1px solid #dbe0d4; border-radius: 7px; background: #fffefa; color: #263e31; font-size: 12px; font-weight: 500; transition: border-color .2s, background .2s; }
+.googleButton > svg:last-child { margin-left: auto; color: #85927b; }
+.googleButton > svg:first-child { margin-right: auto; }
+.googleButton:hover { background: #edf1e5; border-color: #a4b18e; }
+.googleButton:disabled { opacity: .65; }
+.permission { display: flex; align-items: center; gap: 9px; margin-top: 16px; color: #8b9284; font-size: 9px; line-height: 1.6; }
+.permission > svg { flex-shrink: 0; }
+.footer { display: flex; justify-content: space-between; gap: 16px; color: #929989; font-size: 9px; }
+.footer span { font-family: Georgia, serif; font-style: italic; }
+.error { margin-top: 14px; padding: 10px; border: 1px solid #e9c7b6; border-radius: 5px; color: #a14730; font-size: 11px; line-height: 1.6; }
+.loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; min-height: 100dvh; background: transparent; color: #59724e; }
+.loading p { font-size: 11px; color: #7b8374; }
+@media (max-width: 1023px) { .story { padding: 34px; } .signIn { padding: 35px 32px 25px; } .storyText h1 { font-size: 52px; } .storyFooter > span:last-child { display: none; } }
+@media (max-width: 767px) { .page { display: flex; flex-direction: column; } .story { min-height: 270px; padding: 26px; } .brand > span { font-size: 20px; } .storyText { padding: 43px 0 0; } .storyText > p, .storyText > span, .storyFooter { display: none; } .storyText h1 { font-size: 34px; line-height: 1.15; letter-spacing: -1px; } .storyText h1 br:first-child { display: none; } .signIn { flex: 1; min-height: 500px; padding: 22px 26px; } .back { margin-left: auto; font-size: 10px; } .loginBody { max-width: 400px; padding: 25px 0 40px; } .loginMark { display: none; } .eyebrow { margin-bottom: 13px; } .loginBody h2 { font-size: 45px; } .loginBody h2 br { display: none; } .description { margin-top: 16px; } .googleButton { margin-top: 24px; } }
+@media (prefers-reduced-motion: reduce) { .googleButton { transition: none; } }

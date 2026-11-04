@@ -2,6 +2,7 @@
 
 import React, { useCallback, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, CircleAlert, Info, Trash2, X } from 'lucide-react'
+import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
 
 type PopupVariant = 'success' | 'error' | 'warning' | 'info' | 'danger'
 type PopupMode = 'alert' | 'confirm'
@@ -158,11 +159,26 @@ export function AppPopupHost({
   popup: PopupState
   onResolve: (value: boolean) => void
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  usePageScrollLock(popup.open)
   if (!popup.open) return null
   const cfg = variantConfig[popup.variant]
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="app-popup-title">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="app-popup-title" onKeyDown={event => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        event.nativeEvent.stopImmediatePropagation()
+        onResolve(false)
+      }
+      if (event.key !== 'Tab') return
+      const controls = dialogRef.current?.querySelectorAll<HTMLButtonElement>('button:not([disabled])')
+      if (!controls?.length) return
+      const first = controls[0], last = controls[controls.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }}>
       <button
         type="button"
         aria-label="Đóng thông báo"
@@ -170,7 +186,7 @@ export function AppPopupHost({
         onClick={() => onResolve(false)}
       />
 
-      <div className="relative w-full max-w-[620px] overflow-hidden rounded-[28px] border border-white/70 bg-[#fbfcf7] text-[#10261d] shadow-[0_32px_100px_rgba(0,0,0,.38)] animate-in fade-in zoom-in-95 duration-150">
+      <div ref={dialogRef} className="relative w-full max-w-[620px] overflow-hidden rounded-[28px] border border-white/70 bg-[#fbfcf7] text-[#10261d] shadow-[0_32px_100px_rgba(0,0,0,.38)] animate-in fade-in zoom-in-95 duration-150">
         <div className={`h-1.5 w-full ${cfg.stripe}`} />
         <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-emerald-100/45 blur-2xl" />
         <div className="pointer-events-none absolute -bottom-20 -left-16 h-44 w-44 rounded-full bg-amber-50/80 blur-3xl" />

@@ -41,11 +41,13 @@ import {
 } from '@/lib/customer-products'
 
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
+import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
 import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import ProductPreviewImage from '@/components/ui/ProductPreviewImage'
 import AlbumOrderDialog from '@/components/ui/AlbumOrderDialog'
 import CategoryNameDialog from '@/components/ui/CategoryNameDialog'
 import { prepareAlbumCover, uploadAlbumCover } from '@/lib/album-cover-upload'
+import styles from '@/components/studio/operations.module.css'
 
 type Category = {
   id: string
@@ -164,6 +166,30 @@ export default function CustomerProductsDashboard() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  usePageScrollLock(mobileSidebarOpen)
+
+  useEffect(() => {
+    if (!mobileSidebarOpen) return
+    const previousFocus = document.activeElement as HTMLElement | null
+    const drawer = document.getElementById('product-category-manager')
+    const focusable = () => drawer?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')
+    focusable()?.[0]?.focus()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileSidebarOpen(false)
+      if (event.key !== 'Tab') return
+      const elements = focusable()
+      if (!elements?.length) return
+      const first = elements[0]
+      const last = elements[elements.length - 1]
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      if (previousFocus?.isConnected) previousFocus.focus()
+    }
+  }, [mobileSidebarOpen])
 
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
@@ -847,7 +873,7 @@ export default function CustomerProductsDashboard() {
 
   function renderRenameCategoryButton(category: Category, withLabel = false) {
     return (
-      <button type="button" onClick={() => setRenamingCategory(category)} disabled={deletingCategoryId !== null}
+      <button type="button" onClick={() => { setMobileSidebarOpen(false); setRenamingCategory(category) }} disabled={deletingCategoryId !== null}
         aria-label={`Sửa tên danh mục ${category.name}`} title={`Sửa tên danh mục ${category.name}`}
         className={withLabel
           ? 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 text-xs font-semibold text-emerald-600 disabled:opacity-40'
@@ -895,7 +921,7 @@ export default function CustomerProductsDashboard() {
 
   function renderDeleteCategoryButton(category: Category, withLabel = false) {
     return (
-      <button type="button" onClick={() => void deleteCategory(category)} disabled={deletingCategoryId !== null}
+      <button type="button" onClick={() => { setMobileSidebarOpen(false); void deleteCategory(category) }} disabled={deletingCategoryId !== null}
         aria-label={`Xoá danh mục ${category.name}`} title={`Xoá danh mục ${category.name}`}
         className={withLabel
           ? 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-red-500/25 bg-red-500/10 px-4 text-xs font-semibold text-red-500 disabled:opacity-40'
@@ -915,206 +941,13 @@ export default function CustomerProductsDashboard() {
   return (
     <main
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`site-page-surface studio-products min-h-screen transition-colors ${
+      className={`${styles.page} studio-management-page site-page-surface studio-products min-h-screen transition-colors ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#1c1d21]'
       }`}
     >
       <div className="flex min-h-screen">
-        <aside
-          className={`studio-sidebar hidden w-[252px] shrink-0 border-r lg:flex lg:flex-col ${
-            isDarkMode
-              ? 'border-white/10 bg-[#071710]'
-              : 'border-black/[0.07] bg-[#fbfdf9]'
-          }`}
-        >
-          <div
-            className={`flex h-[66px] items-center border-b px-5 ${
-              isDarkMode
-                ? 'border-white/10'
-                : 'border-black/[0.07]'
-            }`}
-          >
-            <div>
-              <div className="font-serif text-lg font-semibold">
-                Dinh Thong
-              </div>
-
-              <div className="text-[8px] uppercase tracking-[0.28em] opacity-40">
-                Gallery Dashboard
-              </div>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="mb-3 text-[9px] font-bold uppercase tracking-[0.2em] opacity-35">
-              Danh mục
-            </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                setCategoryFilter('all')
-              }
-              className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-xs ${
-                categoryFilter === 'all'
-                  ? isDarkMode
-                    ? 'bg-white/10'
-                    : 'bg-black/[0.06]'
-                  : ''
-              }`}
-            >
-              <span>Tất cả album</span>
-              <span className="opacity-40">
-                {albums.length}
-              </span>
-            </button>
-
-            {categories.map((category) => (
-              <div key={category.id} className="mb-1 flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() =>
-                  setCategoryFilter(
-                    category.id
-                  )
-                }
-                className={`flex min-w-0 flex-1 items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-xs ${
-                  categoryFilter ===
-                  category.id
-                    ? isDarkMode
-                      ? 'bg-white/10'
-                      : 'bg-black/[0.06]'
-                    : ''
-                }`}
-              >
-                <span className="min-w-0 break-words">{category.name}</span>
-
-                <span className="opacity-40">
-                  {
-                    albums.filter(
-                      (album) =>
-                        album.category_id ===
-                        category.id
-                    ).length
-                  }
-                </span>
-              </button>
-              {renderRenameCategoryButton(category)}{renderDeleteCategoryButton(category)}
-              </div>
-            ))}
-
-            {showCategoryForm ? (
-              <div className="mt-3 space-y-2">
-                <input
-                  autoFocus
-                  value={newCategoryName}
-                  onChange={(event) =>
-                    setNewCategoryName(
-                      event.target.value
-                    )
-                  }
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === 'Enter'
-                    ) {
-                      void addCategory()
-                    }
-                  }}
-                  placeholder="Tên danh mục"
-                  className={`h-10 w-full rounded-xl border px-3 text-xs outline-none ${
-                    isDarkMode
-                      ? 'border-white/10 bg-white/[0.04]'
-                      : 'border-black/10 bg-white'
-                  }`}
-                />
-
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void addCategory()
-                    }
-                    className="flex-1 rounded-lg bg-emerald-500 px-3 py-2 text-[10px] font-bold text-white"
-                  >
-                    Lưu
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowCategoryForm(false)
-                    }
-                    className="rounded-lg border border-current/10 px-3 py-2 text-[10px]"
-                  >
-                    Hủy
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() =>
-                  setShowCategoryForm(true)
-                }
-                className="mt-3 flex w-full items-center gap-2 rounded-xl border border-dashed border-current/15 px-3 py-2.5 text-xs opacity-60"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Thêm danh mục
-              </button>
-            )}
-          </div>
-
-          <div
-            className={`space-y-2 border-t p-4 ${
-              isDarkMode
-                ? 'border-white/10'
-                : 'border-black/[0.07]'
-            }`}
-          >
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={resetAutoTheme}
-                className="flex-1 rounded-xl border border-current/10 px-3 py-2 text-[9px] uppercase tracking-wider opacity-60"
-              >
-                Tự động
-              </button>
-
-              <button
-                type="button"
-                onClick={toggleTheme}
-                className="flex h-9 w-9 items-center justify-center rounded-xl border border-current/10"
-              >
-                {isDarkMode ? (
-                  <Sun className="h-4 w-4" />
-                ) : (
-                  <Moon className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-
-            <Link
-              href="/dashboardadmin"
-              className="flex w-full items-center gap-2 rounded-xl border border-current/10 px-3 py-2.5 text-xs"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Quay lại Gallery
-            </Link>
-
-
-            <Link
-              href="/"
-              target="_blank"
-              className="flex w-full items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2.5 text-xs font-bold text-white"
-            >
-              <ExternalLink className="h-4 w-4" />
-              Web Public
-            </Link>
-          </div>
-        </aside>
-
         <div className="min-w-0 flex-1">
           <header
             className={`sticky top-0 z-40 border-b backdrop-blur-xl ${
@@ -1125,9 +958,9 @@ export default function CustomerProductsDashboard() {
           >
             <div className="flex min-h-[66px] items-center justify-between gap-3 px-4 sm:px-6">
               <div>
-                <h1 className="font-serif text-xl font-semibold">
-                  Sản phẩm khách hàng
-                </h1>
+                <p className="text-sm font-semibold">
+                  Quản lý sản phẩm
+                </p>
 
                 <div className="mt-0.5 text-[9px] uppercase tracking-[0.16em] opacity-40">
                   Quản lý album & ảnh Public
@@ -1137,15 +970,18 @@ export default function CustomerProductsDashboard() {
               <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
-                aria-label="Mở menu quản trị"
+                aria-label="Quản lý danh mục"
+                aria-expanded={mobileSidebarOpen}
+                aria-controls="product-category-manager"
                 onClick={() => setMobileSidebarOpen(true)}
-                className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border lg:hidden ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-black/10 bg-white'}`}
+                className={`inline-flex h-10 w-10 items-center justify-center rounded-xl border ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-black/10 bg-white'}`}
               >
                 <Menu className="h-4 w-4" />
               </button>
               <button
                 type="button"
                 onClick={openCreateAlbum}
+                aria-label="Tạo album mới"
                 className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-500 px-3 sm:px-4 text-xs font-bold text-white"
               >
                 <Plus className="h-4 w-4" />
@@ -1157,8 +993,8 @@ export default function CustomerProductsDashboard() {
 
           {mobileSidebarOpen && (
             <>
-              <button type="button" aria-label="Đóng menu quản trị" onClick={() => setMobileSidebarOpen(false)} className="fixed inset-0 z-[110] bg-black/45 backdrop-blur-[1px] lg:hidden" />
-              <aside className={`fixed inset-y-0 left-0 z-[120] flex w-[300px] max-w-[88vw] flex-col border-r shadow-2xl lg:hidden ${isDarkMode ? 'border-white/10 bg-[#071710]' : 'border-black/[0.07] bg-[#fbfdf9]'}`}>
+              <button type="button" aria-label="Đóng menu quản trị" onClick={() => setMobileSidebarOpen(false)} className="fixed inset-0 z-[110] bg-black/45 backdrop-blur-[1px]" />
+              <aside id="product-category-manager" role="dialog" aria-modal="true" aria-label="Quản lý danh mục" className={`fixed inset-y-0 left-0 z-[120] flex w-[300px] max-w-[88vw] flex-col border-r shadow-2xl ${isDarkMode ? 'border-white/10 bg-[#071710]' : 'border-black/[0.07] bg-[#fbfdf9]'}`}>
                 <div className={`flex h-[66px] shrink-0 items-center justify-between border-b px-5 ${isDarkMode ? 'border-white/10' : 'border-black/[0.07]'}`}>
                   <div><div className="font-serif text-lg font-semibold">Dinh Thong</div><div className="text-[8px] uppercase tracking-[0.28em] opacity-40">Gallery Dashboard</div></div>
                   <button type="button" aria-label="Đóng menu" onClick={() => setMobileSidebarOpen(false)} className="rounded-lg border border-current/10 px-3 py-2 text-xs">Đóng</button>
@@ -1174,6 +1010,7 @@ export default function CustomerProductsDashboard() {
                   <Link onClick={() => setMobileSidebarOpen(false)} href="/money" className="mb-1 flex items-center gap-3 rounded-xl px-3 py-3 text-xs"><Layers3 className="h-4 w-4 text-emerald-500" />Thu Chi</Link>
                 </div>
                 <div className={`space-y-2 border-t p-4 ${isDarkMode ? 'border-white/10' : 'border-black/[0.07]'}`}>
+                  <button type="button" onClick={resetAutoTheme} className="flex w-full items-center gap-2 rounded-xl border border-current/10 px-3 py-3 text-xs">Giao diện tự động theo thời gian</button>
                   <button type="button" onClick={toggleTheme} className="flex w-full items-center gap-2 rounded-xl border border-current/10 px-3 py-3 text-xs">{isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}Đổi giao diện</button>
                   <Link onClick={() => setMobileSidebarOpen(false)} href="/" target="_blank" className="flex items-center gap-2 rounded-xl bg-emerald-500 px-3 py-3 text-xs font-bold text-white"><ExternalLink className="h-4 w-4" />Web Public</Link>
                 </div>
@@ -1181,9 +1018,17 @@ export default function CustomerProductsDashboard() {
             </>
           )}
 
-          <div className="p-4 sm:p-6">
-            <nav
-            className={`sticky top-[66px] z-30 border-b lg:hidden ${
+          <div className={styles.content}>
+            <div className={styles.intro}>
+              <div>
+                <p className={styles.eyebrow}>PORTFOLIO / SẢN PHẨM</p>
+                <h1 className={styles.title}>Sản phẩm & album</h1>
+                <p className={styles.description}>Sắp xếp bộ ảnh, quản lý danh mục và chọn những câu chuyện xuất hiện trên portfolio.</p>
+              </div>
+              <Link href="/" target="_blank" rel="noopener noreferrer" className={styles.secondaryAction}>Xem portfolio <ExternalLink className="h-4 w-4" /></Link>
+            </div>
+            <nav aria-label="Lọc album theo danh mục"
+            className={`${styles.categoryBar} ${
               isDarkMode
                 ? 'border-white/10 bg-[#071710]/95'
                 : 'border-black/[0.07] bg-[#fbfdf9]/95'
@@ -1194,6 +1039,7 @@ export default function CustomerProductsDashboard() {
                 <button
                   type="button"
                   onClick={() => setCategoryFilter('all')}
+                  aria-pressed={categoryFilter === 'all'}
                   className={`shrink-0 rounded-xl border px-3 py-2 text-[10px] font-semibold ${
                     categoryFilter === 'all'
                       ? isDarkMode
@@ -1210,6 +1056,7 @@ export default function CustomerProductsDashboard() {
                     key={category.id}
                     type="button"
                     onClick={() => setCategoryFilter(category.id)}
+                    aria-pressed={categoryFilter === category.id}
                     className={`shrink-0 rounded-xl border px-3 py-2 text-[10px] font-semibold ${
                       categoryFilter === category.id
                         ? isDarkMode
@@ -1230,34 +1077,20 @@ export default function CustomerProductsDashboard() {
                   + Danh mục
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => router.push('/dashboardadmin')}
-                  className="shrink-0 rounded-xl border border-current/10 px-3 py-2 text-[10px] font-semibold"
-                >
-                  Gallery
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push('/dashboardsp/booking')}
-                  className="shrink-0 rounded-xl border border-current/10 px-3 py-2 text-[10px] font-semibold"
-                >
-                  Booking
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => window.open('/', '_blank', 'noopener,noreferrer')}
-                  className="shrink-0 rounded-xl bg-emerald-500 px-3 py-2 text-[10px] font-bold text-white"
-                >
-                  Web Public
-                </button>
               </div>
             </div>
           </nav>
 
-          <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          {showCategoryForm && (
+            <form className={styles.categoryForm} onSubmit={event => { event.preventDefault(); void addCategory() }}>
+              <label htmlFor="new-product-category" className="text-xs font-semibold">Danh mục mới</label>
+              <input id="new-product-category" autoFocus value={newCategoryName} onChange={event => setNewCategoryName(event.target.value)} placeholder="Tên danh mục" className="min-w-0 flex-1 rounded-lg border border-current/15 bg-transparent px-3 py-2.5 text-sm" />
+              <button type="submit" className={styles.primaryAction}>Lưu danh mục</button>
+              <button type="button" onClick={() => setShowCategoryForm(false)} className={styles.secondaryAction}>Hủy</button>
+            </form>
+          )}
+
+          <section aria-label="Tổng quan sản phẩm" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
               <Stat
                 title="Tổng album"
                 value={albums.length}
@@ -1330,7 +1163,8 @@ export default function CustomerProductsDashboard() {
                         event.target.value
                       )
                     }
-                    placeholder="Tìm album..."
+                    aria-label="Tìm album"
+                    placeholder="Tìm tên album..."
                     className="w-full bg-transparent text-xs outline-none"
                   />
                 </div>
@@ -1349,6 +1183,7 @@ export default function CustomerProductsDashboard() {
                 )}
 
                 <select
+                  aria-label="Lọc theo trạng thái công khai"
                   value={statusFilter}
                   onChange={(event) =>
                     setStatusFilter(
@@ -1381,20 +1216,21 @@ export default function CustomerProductsDashboard() {
                 <div className="flex min-h-[320px] flex-col items-center justify-center text-center">
                   <Images className="h-8 w-8 opacity-20" />
 
-                  <h3 className="mt-4 font-serif text-2xl">
-                    Chưa có album
+                  <h3 className="mt-4 text-xl font-semibold">
+                    {albums.length === 0 ? 'Bắt đầu bộ sưu tập của bạn' : 'Không tìm thấy album'}
                   </h3>
+                  <p className="mx-4 mt-2 max-w-sm text-sm opacity-55">{albums.length === 0 ? 'Thêm album đầu tiên, chọn ảnh bìa và đưa bộ ảnh lên portfolio.' : 'Thử tên khác hoặc thay đổi bộ lọc để tìm bộ ảnh bạn cần.'}</p>
 
                   <button
                     type="button"
                     onClick={openCreateAlbum}
                     className="mt-5 rounded-xl bg-emerald-500 px-4 py-2.5 text-xs font-bold text-white"
                   >
-                    Tạo album đầu tiên
+                    {albums.length === 0 ? 'Tạo album đầu tiên' : 'Tạo album mới'}
                   </button>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto" role="region" aria-label="Danh sách album" tabIndex={0}>
                   <table className="w-full min-w-[1050px]">
                     <thead>
                       <tr
@@ -1513,6 +1349,8 @@ export default function CustomerProductsDashboard() {
                                 <Link
                                   href={`/${album.slug}`}
                                   target="_blank"
+                                  rel="noopener noreferrer"
+                                  aria-label={`Xem album ${album.title}`}
                                   className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-black/5"
                                 >
                                   <ExternalLink className="h-4 w-4" />
@@ -1525,6 +1363,7 @@ export default function CustomerProductsDashboard() {
                                       album
                                     )
                                   }
+                                  aria-label={`${album.is_featured ? 'Bỏ nổi bật' : 'Đặt nổi bật'} album ${album.title}`}
                                   className={`flex h-8 w-8 items-center justify-center rounded-lg ${
                                     album.is_featured
                                       ? 'text-amber-500'
@@ -1541,6 +1380,7 @@ export default function CustomerProductsDashboard() {
                                       album
                                     )
                                   }
+                                  aria-label={`Chỉnh sửa album ${album.title}`}
                                   className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-black/5"
                                 >
                                   <Pencil className="h-4 w-4" />
@@ -1553,6 +1393,7 @@ export default function CustomerProductsDashboard() {
                                       album
                                     )
                                   }
+                                  aria-label={`Xóa album ${album.title}`}
                                   className="flex h-8 w-8 items-center justify-center rounded-lg text-red-500/70 hover:bg-red-500/10"
                                 >
                                   <Trash2 className="h-4 w-4" />

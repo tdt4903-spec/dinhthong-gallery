@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import StudioWorkspace from '@/components/studio/StudioWorkspace'
 
 export const metadata: Metadata = {
   title: 'Admin - DinhThong Gallery',
@@ -9,5 +10,5 @@ export default function DashboardAdminLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  return children
+  return <StudioWorkspace>{children}</StudioWorkspace>
 }

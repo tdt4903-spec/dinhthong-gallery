@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { AppPopupHost, useAppPopup } from '../../components/ui/AppPopup'
 import * as XLSX from 'xlsx'
+import styles from '@/components/studio/operations.module.css'
 import { 
   Plus, ChevronLeft, ChevronRight, Download, 
   Upload, Trash2, Calendar, Wallet, ArrowLeft, ArrowUpRight, 
   ArrowDownLeft, BarChart3, TrendingUp, Tag, X, Check,
-  ChevronDown, ChevronUp, PieChart, Filter, Loader2, LogOut, User as UserIcon,
+  ChevronDown, ChevronUp, PieChart, Filter, Loader2,
   Sparkles, RotateCcw, PenSquare, History, Eye, EyeOff, Calculator, Equal, Search, FileSpreadsheet, FileText, Edit3
 } from 'lucide-react'
 
@@ -221,7 +222,6 @@ export default function MoneyManagerPage() {
   const router = useRouter()
   const { popup, showAlert, showConfirm, resolvePopup } = useAppPopup()
   const [mounted, setMounted] = useState(false)
-  const [user, setUser] = useState<any>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
   const [mobileTab, setMobileTab] = useState<'input' | 'charts' | 'history'>('input')
@@ -350,7 +350,6 @@ export default function MoneyManagerPage() {
         }
 
         if (isSubscribed) {
-          setUser(data.session.user)
           setAuthLoading(false)
           fetchTransactions()
         }
@@ -818,11 +817,6 @@ export default function MoneyManagerPage() {
     }
   }
 
-  const handleSignOut = async () => {
-    if (supabase) await supabase.auth.signOut()
-    router.replace('/')
-  }
-
   const totalAllExpense = useMemo(() => {
     return transactions.filter(t => t && t.type === 'expense').reduce((sum, t) => sum + Number(t.amount || 0), 0)
   }, [transactions])
@@ -922,6 +916,7 @@ export default function MoneyManagerPage() {
   if (!mounted || authLoading) {
     return (
       <div data-site-theme="dark" className="site-page-surface studio-finance min-h-screen bg-[#0f1115] flex flex-col items-center justify-center text-white">
+        <AppPopupHost popup={popup} onResolve={resolvePopup} />
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500 mb-3" />
         <p className="text-xs font-light text-white/70 tracking-widest uppercase">Đang tải dữ liệu...</p>
       </div>
@@ -929,10 +924,10 @@ export default function MoneyManagerPage() {
   }
 
   return (
-    <div data-site-theme="light" className="site-page-surface studio-finance min-h-screen bg-[#f8fafc] text-slate-800 pb-28 sm:pb-12">
-      
+    <div data-site-theme="light" className={`${styles.page} studio-management-page site-page-surface studio-finance min-h-screen bg-[#f8fafc] text-slate-800 pb-28 sm:pb-12`}>
+      <AppPopupHost popup={popup} onResolve={resolvePopup} />
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200 shadow-2xs">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-2">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 min-h-14 py-2 sm:h-16 sm:py-0 flex items-center justify-between gap-2">
           
           <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <button
@@ -942,13 +937,13 @@ export default function MoneyManagerPage() {
             >
               <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
-            <h1 className="font-bold text-xs sm:text-base text-slate-900 tracking-tight flex items-center gap-1.5 truncate">
+            <p className="hidden sm:flex font-semibold text-xs sm:text-sm text-slate-900 tracking-tight items-center gap-1.5 truncate">
               <Wallet className="w-4 h-4 text-orange-500 flex-shrink-0" />
-              <span className="truncate">Sổ Thu Chi</span>
-            </h1>
+              <span className="truncate">Quản lý thu chi</span>
+            </p>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none py-1 flex-nowrap max-w-[62vw] sm:max-w-none justify-end">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2 py-1 flex-wrap sm:flex-nowrap justify-end">
             
             <div className="relative flex-shrink-0">
               <div className="flex items-center bg-slate-100 hover:bg-slate-200 rounded-xl border border-slate-200 transition shadow-2xs">
@@ -973,7 +968,7 @@ export default function MoneyManagerPage() {
               </div>
 
               {showSummaryDropdown && (
-                <div className="absolute right-0 mt-2 w-64 sm:w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-4 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-2.5 text-xs">
+                <div className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-64 sm:w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-4 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-2.5 text-xs">
                   <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                     <span className="font-bold text-slate-700">Tổng quan toàn bộ</span>
                     <span className="text-[10px] text-slate-400">Từ năm 2023 đến nay</span>
@@ -1061,37 +1056,30 @@ export default function MoneyManagerPage() {
               className="hidden" 
             />
 
-            <div className="flex items-center gap-1 pl-1 sm:pl-1.5 border-l border-slate-200 flex-shrink-0">
-              {user?.user_metadata?.avatar_url ? (
-                <img 
-                  src={user.user_metadata.avatar_url} 
-                  alt="Avatar" 
-                  className="w-6 h-6 sm:w-7 sm:h-7 rounded-full object-cover border border-emerald-500/50 flex-shrink-0"
-                  title={user.email}
-                />
-              ) : (
-                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center text-[10px] font-bold flex-shrink-0">
-                  <UserIcon className="w-3 h-3" />
-                </div>
-              )}
-              <button
-                onClick={handleSignOut}
-                className="p-1 text-slate-400 hover:text-red-500 transition cursor-pointer flex-shrink-0"
-                title="Đăng xuất"
-              >
-                <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              </button>
-            </div>
+
 
           </div>
         </div>
       </header>
 
       {/* Main Dashboard */}
-      <main className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6">
+      <main className={styles.content}>
+        <div className={styles.intro}>
+          <div>
+            <p className={styles.eyebrow}>STUDIO / TÀI CHÍNH</p>
+            <h1 className={styles.title}>Sổ thu chi</h1>
+            <p className={styles.description}>Ghi chép mỗi giao dịch, theo dõi dòng tiền và nắm rõ tình hình tài chính.</p>
+          </div>
+          <span className={styles.periodLabel}><Calendar className="h-4 w-4" />{formatDateDisplay(currentDateStr)}</span>
+        </div>
+        <section aria-label="Tổng quan thu chi toàn bộ thời gian" className={`${styles.stats} ${styles.financeStats}`}>
+          <div className={`studio-stat ${styles.metric} ${styles.income}`}><span className={styles.metricLabel}>Tổng thu <ArrowUpRight className="h-4 w-4" /></span><strong>{formatDisplayCurrencyOrHidden(totalAllIncome)}</strong><small>Toàn bộ khoản thu đã ghi nhận</small></div>
+          <div className={`studio-stat ${styles.metric} ${styles.expense}`}><span className={styles.metricLabel}>Tổng chi <ArrowDownLeft className="h-4 w-4" /></span><strong>{formatDisplayCurrencyOrHidden(totalAllExpense)}</strong><small>Toàn bộ khoản chi đã ghi nhận</small></div>
+          <div className={`studio-stat ${styles.metric} ${styles.balance}`}><span className={styles.metricLabel}>Số dư tích lũy <Wallet className="h-4 w-4" /></span><strong>{formatDisplayCurrencyOrHidden(totalBalance)}</strong><small>Tổng thu trừ tổng chi</small></div>
+        </section>
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 sm:gap-6">
           
-          <div className={`lg:col-span-5 bg-white p-4 sm:p-7 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between ${mobileTab !== 'input' ? 'hidden lg:flex' : 'flex'}`}>
+          <div className={`xl:col-span-5 bg-white p-4 sm:p-7 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between ${mobileTab !== 'input' ? 'hidden xl:flex' : 'flex'}`}>
             <div>
               <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 mb-4 sm:mb-5">
                 <h2 className="font-bold text-sm sm:text-base text-slate-900 flex items-center gap-1.5">
@@ -1129,7 +1117,7 @@ export default function MoneyManagerPage() {
                 
                 <div>
                   <label className="block text-[11px] sm:text-xs font-bold text-slate-700 mb-1">Ngày thực hiện:</label>
-                  <div className="flex items-center justify-between bg-[#fff9db]/90 border border-[#ffe066] px-3.5 py-2.5 sm:py-3 rounded-2xl font-bold text-slate-800 relative shadow-2xs">
+                  <div className="flex items-center justify-between bg-[#f5f4ed] border border-[#dfdfd2] px-3.5 py-2.5 sm:py-3 rounded-2xl font-bold text-slate-800 relative shadow-2xs">
                     <button type="button" onClick={handlePrevDay} className="p-1 hover:text-orange-600 cursor-pointer">
                       <ChevronLeft className="w-4 h-4" />
                     </button>
@@ -1359,8 +1347,8 @@ export default function MoneyManagerPage() {
                     type="submit"
                     className={`w-full py-3.5 sm:py-4 rounded-2xl font-extrabold text-white text-sm sm:text-base shadow-md transition active:scale-95 cursor-pointer ${
                       type === 'expense' 
-                        ? 'bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 shadow-orange-500/20' 
-                        : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-emerald-500/20'
+                        ? 'bg-[#b76d4b] hover:bg-[#9c5839] shadow-none'
+                        : 'bg-[#173d32] hover:bg-[#235341] shadow-none'
                     }`}
                   >
                     {type === 'expense' ? 'Nhập Khoản Chi' : 'Nhập Khoản Thu'}
@@ -1370,9 +1358,9 @@ export default function MoneyManagerPage() {
             </div>
           </div>
 
-          <div className={`lg:col-span-7 space-y-5 sm:space-y-6 ${mobileTab === 'input' ? 'hidden lg:block' : 'block'}`}>
+          <div className={`xl:col-span-7 space-y-5 sm:space-y-6 ${mobileTab === 'input' ? 'hidden xl:block' : 'block'}`}>
             
-            <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm transition-all ${mobileTab === 'history' ? 'hidden lg:block' : 'block'}`}>
+            <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm transition-all ${mobileTab === 'history' ? 'hidden xl:block' : 'block'}`}>
               
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3.5 border-b border-slate-100 mb-3.5">
                 
@@ -1555,7 +1543,7 @@ export default function MoneyManagerPage() {
 
             </div>
 
-            <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm ${mobileTab === 'charts' ? 'hidden lg:block' : 'block'}`}>
+            <div className={`bg-white p-4 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm ${mobileTab === 'charts' ? 'hidden xl:block' : 'block'}`}>
               
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3.5 border-b border-slate-100 mb-3.5">
                 <div className="flex items-center gap-1.5">
@@ -1693,17 +1681,18 @@ export default function MoneyManagerPage() {
 
       {/* POPUP SỬA GIAO DỊCH */}
       {editingTransaction && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+        <div role="dialog" aria-modal="true" aria-labelledby="edit-transaction-title" className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
           <div className="w-full max-w-lg bg-white rounded-3xl p-5 sm:p-7 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
                   <Edit3 className="w-5 h-5" />
                 </div>
-                <h3 className="font-bold text-base text-slate-900">Sửa Giao Dịch</h3>
+                <h3 id="edit-transaction-title" className="font-bold text-base text-slate-900">Sửa Giao Dịch</h3>
               </div>
               <button 
                 onClick={() => setEditingTransaction(null)}
+                aria-label="Đóng cửa sổ sửa giao dịch"
                 className="p-1 text-slate-400 hover:text-slate-600 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -1822,7 +1811,7 @@ export default function MoneyManagerPage() {
       )}
 
       {/* THANH ĐIỀU HƯỚNG DƯỚI CÙNG CHO MOBILE */}
-      <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 z-40 flex items-center justify-around shadow-lg">
+      <div className="xl:hidden fixed bottom-0 inset-x-0 lg:left-[232px] bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 z-40 flex items-center justify-around shadow-lg">
         <button
           type="button"
           onClick={() => setMobileTab('input')}

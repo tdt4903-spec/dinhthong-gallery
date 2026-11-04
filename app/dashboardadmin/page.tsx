@@ -35,6 +35,18 @@ export default function GalleryPage() {
         const session = sessionData.session
 
         if (!session) {
+          if (
+            process.env.NODE_ENV === 'development' &&
+            typeof window !== 'undefined' &&
+            (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+          ) {
+            if (mounted) {
+              setDisplayName('Admin (Local)')
+              setShowNameModal(false)
+              setChecking(false)
+            }
+            return
+          }
           router.replace('/admin')
           return
         }
@@ -138,6 +150,7 @@ export default function GalleryPage() {
       }
 
       setDisplayName(cleanName)
+      window.dispatchEvent(new Event('studio:profile-updated'))
       setShowNameModal(false)
     } catch (error: any) {
       console.error('Lỗi lưu tên:', error)

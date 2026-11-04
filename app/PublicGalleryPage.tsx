@@ -1,437 +1,145 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import {
-  ArrowRight,
-  ArrowLeft,
-  ImageIcon,
-  Loader2,
-  Moon,
-  Sun,
-} from 'lucide-react'
-
-import {
-  getCustomerProductsSupabase,
-  type CustomerAlbum,
-  type CustomerCategory,
-} from '@/lib/customer-products'
-
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Camera, ImageIcon, Loader2, Moon, RefreshCw, Search, Sun, X } from 'lucide-react'
+import { getCustomerProductsSupabase, type CustomerAlbum, type CustomerCategory } from '@/lib/customer-products'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { SITE_BANNER_URL } from '@/lib/site-assets'
 import PublicCategoryCards from '@/components/PublicCategoryCards'
-import SiteLogo from '@/components/SiteLogo'
-
-
-function publicWebImage(input: string) {
-  const value = String(input || '').trim()
-
-  if (!value) return ''
-
-  const match =
-    value.match(/\/d\/([a-zA-Z0-9_-]+)/) ||
-    value.match(/[?&]id=([a-zA-Z0-9_-]+)/) ||
-    value.match(/\/folders\/([a-zA-Z0-9_-]+)/)
-
-  if (!match?.[1]) return value
-
-  return `https://lh3.googleusercontent.com/d/${match[1]}=s1500`
-}
+import ProductPreviewImage from '@/components/ui/ProductPreviewImage'
+import styles from './public-home.module.css'
 
 type PublicCategory = Pick<CustomerCategory, 'id' | 'name' | 'slug'>
 
-export default function AlbumPublicPage({ category }: { category?: PublicCategory }) {
-  const supabase = useMemo(
-    () => getCustomerProductsSupabase(),
-    []
-  )
-
-  const {
-    isDarkMode,
-    toggleTheme,
-  } = useGalleryTheme()
-
+export default function PublicGalleryPage({ category }: { category?: PublicCategory }) {
+  const supabase = useMemo(() => getCustomerProductsSupabase(), [])
+  const { isDarkMode, toggleTheme } = useGalleryTheme()
   const [categories, setCategories] = useState<PublicCategory[]>([])
   const [albums, setAlbums] = useState<CustomerAlbum[]>([])
   const [loading, setLoading] = useState(true)
-  const heroRef = useRef<HTMLDivElement>(null)
-  const [heroVisible, setHeroVisible] = useState(true)
-
-  useEffect(() => {
-    const element = heroRef.current
-    if (!element) return
-    let intersects = true
-    const updateVisibility = () => setHeroVisible(intersects && !document.hidden)
-    const observer = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(([entry]) => {
-      intersects = entry.isIntersecting
-      updateVisibility()
-    })
-    observer?.observe(element)
-    document.addEventListener('visibilitychange', updateVisibility)
-    updateVisibility()
-    return () => {
-      observer?.disconnect()
-      document.removeEventListener('visibilitychange', updateVisibility)
-    }
-  }, [])
+  const [loadError, setLoadError] = useState(false)
+  const [query, setQuery] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('all')
+  const [showAll, setShowAll] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
-
-    let albumQuery = supabase
-      .from('customer_product_albums')
-      .select('*')
-      .eq('is_public', true)
-      .order('position', { ascending: true })
-      .order('created_at', { ascending: false })
-    if (category) albumQuery = albumQuery.eq('category_id', category.id)
-
-    const [categoryResult, albumResult] = await Promise.all([
-      category ? Promise.resolve({ data: [category], error: null }) : supabase
-        .from('customer_product_categories')
-        .select('id,name,slug')
-        .eq('visible', true)
-        .order('position', { ascending: true }),
-
-      albumQuery,
-    ])
-
-    if (categoryResult.error) {
-      console.error(categoryResult.error)
+    setLoadError(false)
+    try {
+      let albumQuery = supabase.from('customer_product_albums').select('*').eq('is_public', true)
+        .order('position', { ascending: true }).order('created_at', { ascending: false })
+      if (category) albumQuery = albumQuery.eq('category_id', category.id)
+      const [categoryResult, albumResult] = await Promise.all([
+        category ? Promise.resolve({ data: [category], error: null }) : supabase.from('customer_product_categories')
+          .select('id,name,slug').eq('visible', true).order('position', { ascending: true }),
+        albumQuery,
+      ])
+      if (categoryResult.error || albumResult.error) {
+        console.error(categoryResult.error || albumResult.error)
+        setLoadError(true)
+        return
+      }
+      const visibleCategories = (categoryResult.data || []) as PublicCategory[]
+      const visibleCategoryIds = new Set(visibleCategories.map(item => item.id))
+      const publicAlbums = (albumResult.data || []) as CustomerAlbum[]
+      setCategories(visibleCategories)
+      // Home only showcases albums from visible collections, preserving category visibility.
+      setAlbums(category ? publicAlbums : publicAlbums.filter(album => album.category_id !== null && visibleCategoryIds.has(album.category_id)))
+    } catch (error) {
+      console.error(error)
+      setLoadError(true)
+    } finally {
+      setLoading(false)
     }
-
-    if (albumResult.error) {
-      console.error(albumResult.error)
-    }
-
-    const categoryData =
-      (categoryResult.data || []) as PublicCategory[]
-
-    const albumData =
-      (albumResult.data || []) as CustomerAlbum[]
-
-    setCategories(categoryData)
-    setAlbums(albumData)
-
-    setLoading(false)
   }, [supabase, category])
 
+  useEffect(() => { void loadData() }, [loadData])
   useEffect(() => {
-    void loadData()
-  }, [loadData])
-
-  const filteredAlbums = albums
-
-  useEffect(() => {
-    document.title = category ? `${category.name} - Dinh Thong Gallery` : 'Dinh Thong Gallery'
-    if (!category && window.location.hash === '#categories') {
-      window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
-    }
+    document.title = category ? `${category.name} — DinhThong Gallery` : 'DinhThong Gallery — Khoảnh khắc còn mãi'
   }, [category])
 
+  const matchingAlbums = useMemo(() => {
+    const search = query.trim().toLocaleLowerCase('vi')
+    return albums.filter(album => (selectedCategory === 'all' || album.category_id === selectedCategory)
+      && (!search || `${album.title} ${album.description || ''}`.toLocaleLowerCase('vi').includes(search)))
+  }, [albums, query, selectedCategory])
+  const visibleAlbums = category || showAll || query || selectedCategory !== 'all' ? matchingAlbums : matchingAlbums.slice(0, 6)
+
   return (
-    <main
-      data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`public-compact site-page-surface studio-public min-h-screen transition-colors duration-300 ${
-        isDarkMode
-          ? 'bg-[#06140f] text-white'
-          : 'bg-[#f5f7f3] text-[#1c1d21]'
-      }`}
-    >
-
-      {/* HEADER */}
-      <header
-        className={`sticky top-0 z-40 border-b backdrop-blur-xl transition-colors duration-300 ${
-          isDarkMode
-            ? 'border-white/10 bg-[#071710]/94'
-            : 'border-emerald-950/8 bg-[#fbfdf9]/94'
-        }`}
-      >
-        <div className={`mx-auto min-h-[68px] max-w-[1500px] items-center gap-2 px-4 py-2 sm:gap-3 sm:px-6 ${category ? 'grid grid-cols-[49px_minmax(0,1fr)_49px] sm:grid-cols-[120px_minmax(0,1fr)_120px]' : 'flex'}`}>
-          <Link href="/" prefetch={false} aria-label="Quay lại trang chủ" className={`inline-flex shrink-0 items-center gap-1 ${category ? '' : 'mr-auto'}`}>
-            {category ? <>
-              <ArrowLeft className="h-4 w-4 shrink-0" />
-              <span className="hidden text-sm font-semibold sm:inline">Trang chủ</span>
-            </> : <SiteLogo isDarkMode={isDarkMode} />}
+    <main className={styles.page} data-site-theme={isDarkMode ? 'dark' : 'light'}>
+      <a href="#portfolio" className={styles.skipLink}>Đến nội dung bộ ảnh</a>
+      <header className={styles.header}>
+        <div className={styles.headerInner}>
+          <Link href="/" className={styles.brand} aria-label="DinhThong Gallery — Trang chủ">
+            <span className={styles.brandIcon}><Camera size={21} strokeWidth={1.5} aria-hidden="true" /></span>
+            <span>DinhThong<span className={styles.brandSubtitle}>PHOTOGRAPHY & STORIES</span></span>
           </Link>
-          {category ? (
-            <p className="min-w-0 break-words text-center text-sm font-semibold uppercase tracking-wide sm:text-lg">{category.name}</p>
-          ) : (
-            <Link href="/booking" prefetch={false} className="inline-flex min-h-11 items-center justify-center rounded-full bg-[#075b43] px-4 text-[10px] sm:px-6 font-bold uppercase tracking-[0.15em] text-white transition hover:bg-[#064c38]">Booking</Link>
-          )}
-
-          <button
-            type="button"
-            onClick={toggleTheme}
-            title="Giao diện: tự động 06:00–18:00 sáng / 18:00–06:00 tối"
-            aria-label="Đổi giao diện sáng tối"
-            className={`flex h-11 w-11 shrink-0 items-center justify-center justify-self-end rounded-full border transition ${
-              isDarkMode
-                ? 'border-white/10 text-emerald-400 hover:bg-white/10'
-                : 'border-gray-200 text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            {isDarkMode ? (
-              <Sun className="h-4 w-4" />
-            ) : (
-              <Moon className="h-4 w-4" />
-            )}
-          </button>
+          <nav className={styles.nav} aria-label="Điều hướng portfolio">
+            <Link href="/#portfolio" className={styles.active}>Portfolio</Link>
+            <Link href="/#about">Về DinhThong</Link>
+            <Link href="/booking" prefetch={false}>Đặt lịch chụp</Link>
+          </nav>
+          <div className={styles.headerActions}>
+            <button type="button" onClick={toggleTheme} className={styles.iconButton} aria-label={isDarkMode ? 'Chuyển giao diện sáng' : 'Chuyển giao diện tối'} title="Đổi giao diện sáng / tối">
+              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+            <Link href="/booking" prefetch={false} className={styles.bookingButton}>Đặt lịch <ArrowUpRight size={16} aria-hidden="true" /></Link>
+          </div>
         </div>
       </header>
 
-      {/* HERO */}
-      {!category && <section className="px-3 pt-3 sm:px-5 sm:pt-5">
-        <div ref={heroRef} data-motion-paused={!heroVisible} className="public-hero relative mx-auto h-[560px] max-w-[1500px] overflow-hidden rounded-[30px] sm:h-[640px]">
-
-          <img
-            src={SITE_BANNER_URL}
-            alt="Dinh Thong Gallery"
-            className="public-hero-image absolute inset-0 block h-full w-full max-w-none object-cover object-center"
-            style={{
-              width: '100%',
-              height: '100%',
-              maxWidth: 'none',
-              objectFit: 'cover',
-              objectPosition: 'center',
-            }}
-          />
-
-          <div
-            className={`absolute inset-0 ${
-              isDarkMode
-                ? 'bg-[linear-gradient(90deg,rgba(2,18,12,.90),rgba(3,24,16,.48),rgba(3,20,13,.12))]'
-                : 'bg-[linear-gradient(90deg,rgba(7,20,14,.76),rgba(7,20,14,.34),rgba(7,20,14,.05))]'
-            }`}
-          />
-
-          <div className="studio-hero-content relative z-10 flex h-full items-end p-6 sm:p-12 lg:p-16">
-            <div className="w-full min-w-0 max-w-[820px] text-white">
-
-              <div className="public-hero-reveal text-[9px] font-bold uppercase tracking-[0.32em] text-white/60">
-                Dinh Thong Gallery
-              </div>
-
-              <h1 className="public-hero-reveal studio-hero-heading mt-5">
-                Khoảnh khắc.<br /><span>Còn mãi.</span>
-              </h1>
-
-              <div className="public-hero-reveal public-hero-description mt-5 max-w-[760px] text-[10px] font-medium uppercase leading-6 tracking-[0.1em] text-white/70 sm:mt-6 sm:text-[11px] sm:leading-7 lg:text-xs">
-                <div className="whitespace-normal">
-                  Những câu chuyện thật, khoảnh khắc thật và những bộ ảnh
-                </div>
-
-                <div className="whitespace-normal">
-                  được thực hiện bởi DinhThong Photos.
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() =>
-                  document
-                    .getElementById('categories')
-                    ?.scrollIntoView({
-                      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
-                    })
-                }
-                className="public-hero-reveal public-hero-cta mt-6 inline-flex items-center gap-3 rounded-full border border-white/25 bg-black/15 px-5 py-3 text-[10px] font-bold uppercase tracking-[0.14em] text-white backdrop-blur-md transition hover:bg-white hover:text-black sm:mt-7"
-              >
-                Khám phá album
-
-                <ArrowRight className="h-3.5 w-3.5 shrink-0" />
-              </button>
-
-            </div>
+      {!category && <>
+        <section className={styles.hero} aria-labelledby="hero-title">
+          <div className={styles.heroCopy}>
+            <p className={styles.eyebrow}><span /> DINHTHONG GALLERY</p>
+            <h1 id="hero-title" className={styles.heroTitle}>Lưu giữ<br />những điều<br /><em>thật đẹp.</em></h1>
+            <p className={styles.heroDescription}>Một ánh nhìn, một nụ cười, một khoảnh khắc.<br />Những câu chuyện được kể bằng hình ảnh,<br className={styles.desktopBreak} /> qua góc nhìn của DinhThong Photos.</p>
+            <a href="#portfolio" className={styles.primaryButton}>Khám phá portfolio <ArrowUpRight size={18} aria-hidden="true" /></a>
+            <div className={styles.heroFootnote}><span className={styles.footnoteLine} /><p>Những khoảnh khắc trôi qua.<br /><strong>Cảm xúc ở lại.</strong></p></div>
           </div>
-
-          {/* HERO FOOTNOTE — GÓC PHẢI DƯỚI */}
-          <div className="public-hero-reveal public-hero-footnote absolute bottom-8 right-8 z-20 hidden max-w-[380px] text-right text-[9px] font-medium uppercase leading-5 tracking-[0.08em] text-white/55 lg:block">
-            Mỗi bức ảnh là một câu chuyện, cảm ơn bạn đã tiếp tục hành trình cùng DinhThong Photos.
+          <div className={styles.heroVisual}>
+            <img src={SITE_BANNER_URL} alt="Khoảnh khắc qua góc nhìn của DinhThong Photos" className={styles.heroImage} fetchPriority="high" />
+            <div className={styles.heroImageCaption}><span>THE ART OF REMEMBERING</span><Camera size={19} strokeWidth={1.5} aria-hidden="true" /></div>
+            <div className={styles.photoNote}><span>Moments,</span><em>for a lifetime.</em></div>
           </div>
+          <a href="#portfolio" className={styles.scrollLink}><ArrowDown size={16} aria-hidden="true" /> CUỘN ĐỂ KHÁM PHÁ</a>
+        </section>
+        <div className={styles.statementBar}><span>REAL MOMENTS.</span><span className={styles.statementStar} aria-hidden="true">✳</span><span>HONEST STORIES.</span><span className={styles.statementStar} aria-hidden="true">✳</span><span>TIMELESS MEMORIES.</span></div>
+      </>}
 
-        </div>
-      </section>}
-
-      {/* ALBUM SECTION */}
-      <section
-        id={category ? 'albums' : 'categories'}
-        className={`mx-auto max-w-[1500px] scroll-mt-20 px-4 sm:px-6 ${category ? 'py-16 sm:py-24' : 'py-10 sm:py-14'}`}
-      >
-        <div className="studio-collection-heading">
-
-          {category ? (
-            <>
-              <div className={`text-[9px] font-bold uppercase tracking-[0.32em] ${isDarkMode ? 'text-white/30' : 'text-emerald-950/38'}`}>
-                Bộ sưu tập
-              </div>
-              <h2 className="mt-4 font-serif text-3xl font-medium uppercase tracking-[0.02em] sm:text-5xl">
-                {category.name}
-              </h2>
-            </>
-          ) : (
-            <div><p className="studio-eyebrow">DINHTHONG · PORTFOLIO</p><h2 className="studio-section-title">Bộ sưu tập</h2><p className="studio-section-note">Chọn một bộ sưu tập để khám phá những câu chuyện qua ảnh.</p></div>
-          )}
-
-          <div
-            className={`mx-auto mt-5 h-px w-16 ${
-              isDarkMode
-                ? 'bg-emerald-300/30'
-                : 'bg-emerald-950/15'
-            }`}
-          />
-
+      <section id="portfolio" className={styles.portfolio} aria-labelledby="portfolio-title">
+        {category && <Link href="/#portfolio" className={styles.backLink}><ArrowLeft size={16} aria-hidden="true" /> Tất cả bộ sưu tập</Link>}
+        <div className={styles.sectionHeader}>
+          <div><p className={styles.eyebrow}>{category ? 'BỘ SƯU TẬP' : 'QUA TỪNG KHUNG HÌNH'}</p><h2 id="portfolio-title" className={styles.sectionTitle}>{category ? category.name : <>Mỗi bộ ảnh,<br /><em>một câu chuyện.</em></>}</h2></div>
+          <p className={styles.sectionDescription}>{category ? 'Những khoảnh khắc được lưu giữ trong bộ sưu tập này. Chọn một album để xem trọn câu chuyện.' : 'Có những cảm xúc không cần nói thành lời. Hãy cùng khám phá những câu chuyện được DinhThong kể qua từng bộ ảnh.'}</p>
         </div>
 
-        {loading ? (
-          <div className="flex min-h-[350px] items-center justify-center">
-            <Loader2 className="h-7 w-7 animate-spin text-emerald-500" />
-          </div>
-        ) : !category && categories.length > 0 ? (
-          <PublicCategoryCards categories={categories} albums={albums} />
-        ) : category && filteredAlbums.length > 0 ? (
-          <div className="studio-album-grid mt-12 grid gap-x-5 gap-y-12 sm:grid-cols-2 lg:grid-cols-3">
-
-            {filteredAlbums.map((album) => (
-              <a
-                key={album.id}
-                href={`/${album.slug}`}
-                className="studio-album-card group block"
-              >
-
-                <div
-                  className={`relative aspect-[4/5] overflow-hidden rounded-[24px] border ${
-                    isDarkMode
-                      ? 'border-white/10 bg-white/5'
-                      : 'border-emerald-950/8 bg-[#e9ede8]'
-                  }`}
-                >
-                  {album.cover_url ? (
-                    <img
-                      src={publicWebImage(album.cover_url)}
-                      alt={album.title}
-                      className="h-full w-full object-cover transition duration-700 group-hover:scale-[1.025]"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center">
-                      <ImageIcon
-                        className={`h-10 w-10 ${
-                          isDarkMode
-                            ? 'text-white/15'
-                            : 'text-black/15'
-                        }`}
-                      />
-                    </div>
-                  )}
-
-                  {album.is_featured && (
-                    <div
-                      className={`absolute left-4 top-4 rounded-full border px-3 py-1.5 text-[8px] font-bold uppercase tracking-[0.14em] backdrop-blur-xl ${
-                        isDarkMode
-                          ? 'border-white/10 bg-black/35 text-white/75'
-                          : 'border-white/50 bg-white/85 text-black/55'
-                      }`}
-                    >
-                      Nổi bật
-                    </div>
-                  )}
-                </div>
-
-                <div className="px-1 pt-5">
-                  <div className="flex items-start justify-between gap-5">
-
-                    <div className="min-w-0">
-                      <h3 className="font-serif text-xl font-semibold uppercase tracking-[0.025em] sm:text-2xl">
-                        {album.title}
-                      </h3>
-
-                      {album.description && (
-                        <p
-                          className={`mt-2 whitespace-pre-wrap break-words text-[10px] uppercase leading-5 tracking-[0.08em] ${
-                            isDarkMode
-                              ? 'text-white/38'
-                              : 'text-gray-500'
-                          }`}
-                        >
-                          {album.description}
-                        </p>
-                      )}
-                    </div>
-
-                    <span
-                      className={`mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition ${
-                        isDarkMode
-                          ? 'border-white/10 text-white/60 group-hover:bg-white group-hover:text-[#06140f]'
-                          : 'border-emerald-950/10 text-emerald-950/60 group-hover:bg-[#173426] group-hover:text-white'
-                      }`}
-                    >
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </span>
-
-                  </div>
-
-                  <div
-                    className={`mt-4 text-[8px] font-bold uppercase tracking-[0.18em] ${
-                      isDarkMode
-                        ? 'text-white/25'
-                        : 'text-gray-400'
-                    }`}
-                  >
-                    {album.shoot_date
-                      ? new Date(
-                          album.shoot_date
-                        ).toLocaleDateString('vi-VN')
-                      : 'Dinh Thong Gallery'}
-                  </div>
-                </div>
-              </a>
-            ))}
-
-          </div>
-        ) : (
-          <div
-            className={`mt-12 rounded-[30px] border px-6 py-20 text-center ${
-              isDarkMode
-                ? 'border-white/10 bg-[#0b1711]/72'
-                : 'border-emerald-950/8 bg-white/80 shadow-sm'
-            }`}
-          >
-            <div
-              className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl ${
-                isDarkMode
-                  ? 'bg-white/5 text-white/20'
-                  : 'bg-[#edf3ee] text-emerald-950/25'
-              }`}
-            >
-              <ImageIcon className="h-7 w-7" />
-            </div>
-
-            <h3 className="mt-5 font-serif text-2xl font-semibold uppercase">
-              Album đang được cập nhật
-            </h3>
-
-            <p
-              className={`mt-3 text-[9px] font-semibold uppercase tracking-[0.14em] ${
-                isDarkMode
-                  ? 'text-white/30'
-                  : 'text-gray-400'
-              }`}
-            >
-              Nội dung mới sẽ sớm được giới thiệu tại đây.
-            </p>
-          </div>
-        )}
+        {loading ? <div className={styles.loadingState} role="status"><Loader2 size={26} className={styles.spinner} aria-hidden="true" /><span>Đang mở những câu chuyện…</span></div>
+          : loadError ? <div className={styles.emptyState} role="alert"><ImageIcon size={28} aria-hidden="true" /><h3>Chưa thể tải bộ ảnh</h3><p>Vui lòng thử lại để xem portfolio.</p><button type="button" className={styles.secondaryButton} onClick={() => void loadData()}><RefreshCw size={16} /> Tải lại</button></div>
+          : <>
+            {!category && categories.length > 0 && <PublicCategoryCards categories={categories} albums={albums} />}
+            {(albums.length > 0 || category) && <div className={styles.albumSection}>
+              <div className={styles.albumToolbar}>
+                <div><p className={styles.eyebrow}>{category ? 'KHÁM PHÁ ALBUM' : 'PORTFOLIO'}</p><h3 className={styles.albumHeading}>{category ? 'Tất cả bộ ảnh' : 'Những bộ ảnh gần đây'}</h3></div>
+                <label className={styles.search}><Search size={17} aria-hidden="true" /><span className="sr-only">Tìm bộ ảnh</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Tìm một câu chuyện…" />{query && <button type="button" onClick={() => setQuery('')} aria-label="Xóa tìm kiếm"><X size={15} /></button>}</label>
+              </div>
+              {!category && categories.length > 0 && <div className={styles.filters} role="group" aria-label="Lọc album theo bộ sưu tập"><button type="button" aria-pressed={selectedCategory === 'all'} onClick={() => setSelectedCategory('all')}>Tất cả<span>{albums.length}</span></button>{categories.map(item => <button key={item.id} type="button" aria-pressed={selectedCategory === item.id} onClick={() => setSelectedCategory(item.id)}>{item.name}</button>)}</div>}
+              <p className={styles.resultCount} aria-live="polite">{query || selectedCategory !== 'all' ? `${matchingAlbums.length} bộ ảnh phù hợp` : `${albums.length} bộ ảnh`}</p>
+              {visibleAlbums.length > 0 ? <div className={styles.albumGrid}>{visibleAlbums.map((album, index) => <Link key={album.id} href={`/${encodeURIComponent(album.slug)}`} prefetch={false} className={styles.albumCard}>
+                <div className={styles.albumImage}>{album.cover_url ? <ProductPreviewImage src={album.cover_url} alt={album.title} className={styles.coverImage} /> : <ImageIcon size={32} aria-hidden="true" />}{album.is_featured && <span className={styles.featured}>Nổi bật</span>}<span className={styles.imageCounter}>{String(index + 1).padStart(2, '0')}</span></div>
+                <div className={styles.albumMeta}><div><p className={styles.albumCategory}>{categories.find(item => item.id === album.category_id)?.name || 'DINHTHONG PHOTOS'}</p><h4>{album.title}</h4>{album.shoot_date && <p className={styles.albumDate}>{new Date(album.shoot_date).toLocaleDateString('vi-VN')}</p>}</div><span className={styles.cardArrow}><ArrowUpRight size={19} aria-hidden="true" /></span></div>
+              </Link>)}</div> : <div className={styles.emptyState}><ImageIcon size={28} aria-hidden="true" /><h3>{query || selectedCategory !== 'all' ? 'Chưa tìm thấy bộ ảnh' : 'Câu chuyện mới đang được chuẩn bị'}</h3><p>{query || selectedCategory !== 'all' ? 'Thử một từ khóa hoặc bộ sưu tập khác.' : 'Những khoảnh khắc mới sẽ sớm xuất hiện tại đây.'}</p>{(query || selectedCategory !== 'all') && <button type="button" className={styles.secondaryButton} onClick={() => { setQuery(''); setSelectedCategory('all') }}>Xem tất cả bộ ảnh <ArrowRight size={16} /></button>}</div>}
+              {!category && !query && selectedCategory === 'all' && matchingAlbums.length > 6 && <div className={styles.viewMore}><button type="button" className={styles.secondaryButton} onClick={() => setShowAll(!showAll)}>{showAll ? 'Thu gọn bộ ảnh' : `Xem tất cả ${matchingAlbums.length} bộ ảnh`}<ArrowDown size={16} aria-hidden="true" /></button></div>}
+            </div>}
+            {!category && !albums.length && !categories.length && <div className={styles.emptyState}><Camera size={30} aria-hidden="true" /><h3>Câu chuyện mới đang được chuẩn bị</h3><p>Những bộ ảnh mới sẽ sớm được giới thiệu tại đây.</p><Link href="/booking" className={styles.secondaryButton}>Đặt lịch cho câu chuyện của bạn <ArrowUpRight size={16} /></Link></div>}
+          </>}
       </section>
 
-      <footer
-        className={`border-t px-5 py-8 text-center text-[8px] font-semibold uppercase tracking-[0.25em] ${
-          isDarkMode
-            ? 'border-white/10 text-white/25'
-            : 'border-emerald-950/8 text-gray-400'
-        }`}
-      >
-        © 2026 Dinh Thong Gallery
-      </footer>
+      {!category && <section id="about" className={styles.about} aria-labelledby="about-title"><div className={styles.aboutLabel}><Camera size={26} strokeWidth={1.3} aria-hidden="true" /><p className={styles.eyebrow}>VỀ DINHTHONG</p></div><div><h2 id="about-title">Đẹp nhất là khi<br /><em>bạn được là chính mình.</em></h2><p>DinhThong Photos lưu giữ những câu chuyện thật và những cảm xúc tự nhiên. Từ ý tưởng đầu tiên đến khung hình cuối cùng, mỗi bộ ảnh là một cách để nhớ về những điều có ý nghĩa với bạn.</p><Link href="/booking" prefetch={false} className={styles.textLink}>Cùng kể câu chuyện của bạn <ArrowUpRight size={18} aria-hidden="true" /></Link></div></section>}
+
+      <section className={styles.bookingCta} aria-labelledby="booking-title"><div><p className={styles.eyebrow}>HẸN GẶP BẠN TRONG KHUNG HÌNH</p><h2 id="booking-title">Một câu chuyện mới,<br /><em>bắt đầu từ bạn.</em></h2></div><Link href="/booking" prefetch={false} className={styles.ctaButton}>Đặt lịch chụp ảnh <ArrowUpRight size={22} aria-hidden="true" /></Link></section>
+      <footer className={styles.footer}><Link href="/" className={styles.footerBrand}>DinhThong<span>GALLERY</span></Link><p>© {new Date().getFullYear()} DinhThong Photos.<br className={styles.mobileBreak} /> Khoảnh khắc lưu giữ cảm xúc.</p><Link href="/booking" prefetch={false}>Hẹn một buổi chụp <ArrowUpRight size={14} aria-hidden="true" /></Link></footer>
     </main>
   )
 }

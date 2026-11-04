@@ -16,9 +16,10 @@
   --studio-soft: #1b2e26;
   --studio-accent: #6de0b8;
 }
-.studio-ui .site-background::before { opacity: .22; filter: blur(8px); }
-.studio-ui .site-background::after { background: rgb(246 247 241 / 91%); }
-.studio-ui:has([data-site-theme='dark']) .site-background::after { background: rgb(12 23 19 / 95%); }
+/* Keep the user's photograph visible beneath the page content, softened by blur. */
+.studio-ui .site-background::before { opacity: .78; filter: blur(8px); }
+.studio-ui .site-background::after { background: linear-gradient(180deg, rgb(247 250 246 / 76%), rgb(244 248 242 / 66%)); }
+.studio-ui:has([data-site-theme='dark']) .site-background::after { background: linear-gradient(180deg, rgb(3 17 12 / 87%), rgb(3 16 11 / 83%)); }
 .studio-ui :where(button, a, input, select, textarea):focus-visible {
   outline: 2px solid #24af87;
   outline-offset: 4px;

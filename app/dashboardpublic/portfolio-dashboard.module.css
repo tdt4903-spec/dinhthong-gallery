@@ -1,0 +1,92 @@
+.page { --portfolio-ink: #173d32; --portfolio-muted: #7b877c; --portfolio-panel: #fffefa; --portfolio-soft: #eff1e8; --portfolio-line: #e1e5d9; color: var(--portfolio-ink); min-height: calc(100dvh - 52px); background: transparent; }
+.page[data-site-theme='dark'] { --portfolio-ink: #ecf1e4; --portfolio-muted: #a1b19f; --portfolio-panel: #14251c; --portfolio-soft: #203329; --portfolio-line: #2d4032; }
+.header { position: sticky; top: 52px; z-index: 30; border-bottom: 1px solid var(--portfolio-line); background: var(--portfolio-panel); }
+.header > div { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 66px; padding: 13px 30px; }
+.headerLabel { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 500; }
+.headerActions { display: flex; align-items: center; gap: 11px; }
+.iconButton { display: grid; place-items: center; width: 34px; height: 34px; background: transparent; color: var(--portfolio-muted); border: 1px solid var(--portfolio-line); border-radius: 7px; }
+.previewLink { display: inline-flex; align-items: center; gap: 13px; min-height: 35px; border: 1px solid var(--portfolio-line); border-radius: 5px; padding: 9px 13px; font-size: 10px; color: var(--portfolio-ink); }
+.content { padding: 34px 30px 60px; max-width: 1560px; margin: auto; }
+.intro { display: flex; align-items: center; justify-content: space-between; gap: 30px; margin-bottom: 29px; }
+.eyebrow { margin: 0 0 13px; font-size: 8px; font-weight: 600; letter-spacing: 1.7px; color: var(--portfolio-muted); }
+.intro h1 { font-family: Georgia, 'Times New Roman', serif; font-size: clamp(32px, 3.3vw, 47px); font-weight: 400; letter-spacing: -1.7px; line-height: 1.16; margin: 0; }
+.intro h1 em { color: #839370; }
+.intro > div > p:last-child { margin-top: 16px; font-size: 11px; line-height: 1.8; color: var(--portfolio-muted); }
+.primaryButton, .secondaryButton { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 42px; border: 1px solid #173d32; background: #173d32; color: #fff; border-radius: 5px; padding: 12px 16px; font-size: 10px; white-space: nowrap; }
+.primaryButton:hover { background: #285a45; }
+.secondaryButton { border-color: var(--portfolio-line); background: var(--portfolio-panel); color: var(--portfolio-ink); }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 15px; margin-bottom: 29px; }
+.stat { padding: 19px; background: var(--portfolio-panel); border: 1px solid var(--portfolio-line); border-radius: 9px; }
+.stat > div { display: flex; justify-content: space-between; align-items: center; gap: 9px; font-size: 10px; color: var(--portfolio-muted); }
+.stat > div > svg { color: #859873; flex-shrink: 0; }
+.stat > strong { display: block; font-size: 32px; font-weight: 400; letter-spacing: -1.7px; line-height: 1.2; margin-top: 13px; }
+.stat > p { margin-top: 11px; font-size: 8px; line-height: 1.6; color: var(--portfolio-muted); }
+.noticeSuccess, .noticeError { display: flex; align-items: center; gap: 11px; margin-bottom: 20px; border: 1px solid #b8cead; background: #f3f7ee; color: #305128; padding: 13px 15px; border-radius: 6px; font-size: 11px; line-height: 1.7; }
+.noticeSuccess > svg, .noticeError > svg { flex-shrink: 0; }
+.noticeError { border-color: #dcbfac; background: #fff8f0; color: #965839; }
+.noticeSuccess > button, .noticeError > button { margin-left: auto; background: transparent; border: none; color: inherit; padding: 4px; }
+.mainGrid { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 22px; align-items: start; }
+.collections { min-width: 0; border: 1px solid var(--portfolio-line); background: var(--portfolio-panel); border-radius: 10px; padding: 23px 19px 17px; }
+.panelHeading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.panelHeading .eyebrow, .albumHeading .eyebrow { font-size: 7px; margin-bottom: 10px; }
+.panelHeading h2, .albumHeading h2 { margin: 0; font-size: 21px; font-weight: 500; letter-spacing: -.6px; }
+.panelHeading > span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: var(--portfolio-soft); font-size: 10px; color: var(--portfolio-muted); }
+.panelDescription { margin: 15px 0 21px; font-size: 9px; line-height: 1.9; color: var(--portfolio-muted); }
+.collectionList { border-top: 1px solid var(--portfolio-line); }
+.collection { padding: 18px 0 14px; border-bottom: 1px solid var(--portfolio-line); }
+.collectionTop { display: flex; align-items: center; gap: 10px; }
+.collectionIcon { display: grid; place-items: center; flex-shrink: 0; height: 34px; width: 34px; border: 1px solid var(--portfolio-line); border-radius: 8px; color: #829774; background: var(--portfolio-soft); }
+.collectionTop > div { flex: 1; min-width: 0; }
+.collection h3 { font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }
+.collectionTop p { margin-top: 4px; font-size: 8px; color: var(--portfolio-muted); line-height: 1.6; }
+.toggle { display: flex; align-items: center; width: 31px; height: 18px; flex-shrink: 0; padding: 3px; border: none; border-radius: 100px; background: #cad0c4; color: white; }
+.toggle > span { width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0001; }
+.toggle[aria-checked='true'] { background: #577446; justify-content: flex-end; }
+.collectionFooter { display: flex; justify-content: space-between; align-items: center; gap: 9px; margin-top: 12px; padding-left: 44px; }
+.collectionFooter > button, .collectionFooter > a { display: flex; align-items: center; gap: 5px; color: var(--portfolio-muted); font-size: 8px; border: none; background: transparent; padding: 3px 0; }
+.collectionFooter > button[aria-pressed='true'] { color: var(--portfolio-ink); text-decoration: underline; text-underline-offset: 4px; }
+.manageCategories { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding-top: 18px; font-size: 9px; }
+.albums { min-width: 0; }
+.albumHeading { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 8px 0 20px; }
+.albumHeading > a { display: inline-flex; align-items: center; gap: 6px; font-size: 9px; color: var(--portfolio-muted); }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.filters > button { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--portfolio-line); background: var(--portfolio-panel); color: var(--portfolio-muted); border-radius: 5px; padding: 9px 11px; font-size: 9px; }
+.filters > button[aria-pressed='true'] { background: #173d32; border-color: #173d32; color: #fff; }
+.filters > button > span { font-size: 8px; opacity: .6; }
+.searchRow { display: flex; gap: 12px; margin-top: 18px; }
+.search { display: flex; align-items: center; flex: 1; min-width: 0; gap: 9px; background: var(--portfolio-panel); border: 1px solid var(--portfolio-line); border-radius: 5px; padding: 10px 12px; color: var(--portfolio-muted); }
+.search > svg { flex-shrink: 0; }
+.search > input { min-width: 0; width: 100%; background: transparent; border: none; color: var(--portfolio-ink); font-size: 10px; outline: none; }
+.search > input::placeholder { color: var(--portfolio-muted); }
+.searchRow > select { min-width: 0; max-width: 43%; padding: 10px; border: 1px solid var(--portfolio-line); border-radius: 5px; background: var(--portfolio-panel); color: var(--portfolio-ink); font-size: 9px; }
+.resultCount { font-size: 9px; color: var(--portfolio-muted); margin: 17px 0 13px; }
+.albumGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 17px; }
+.albumCard { min-width: 0; background: var(--portfolio-panel); border: 1px solid var(--portfolio-line); border-radius: 8px; overflow: hidden; }
+.albumImage { position: relative; display: grid; place-items: center; aspect-ratio: 4/2.8; overflow: hidden; background: var(--portfolio-soft); color: var(--portfolio-muted); }
+.coverImage { display: block; object-fit: cover; width: 100%; height: 100%; }
+.visibleBadge, .hiddenBadge { position: absolute; left: 10px; top: 10px; display: inline-flex; align-items: center; gap: 5px; border-radius: 4px; padding: 6px 8px; background: #f6f8efee; color: #35552b; font-size: 7px; backdrop-filter: blur(5px); }
+.hiddenBadge { background: #fffdf3e6; color: #776c5a; }
+.featureButton { position: absolute; right: 10px; top: 10px; display: grid; place-items: center; height: 28px; width: 28px; border-radius: 5px; border: 1px solid #ffffff80; background: #ffffffd9; color: #a7a78d; }
+.featureButton[aria-pressed='true'] { color: #96763b; background: #fff7dbeb; }
+.albumBody { padding: 15px; }
+.albumCategory { text-transform: uppercase; font-size: 7px; letter-spacing: 1.1px; color: var(--portfolio-muted); margin: 0 0 7px; }
+.albumBody h3 { font-size: 13px; font-weight: 500; line-height: 1.6; overflow-wrap: anywhere; }
+.visibilityNote { margin-top: 7px; color: #aa875a; font-size: 8px; line-height: 1.7; }
+.albumActions { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--portfolio-line); }
+.albumActions > button, .albumActions > a { display: inline-flex; align-items: center; gap: 5px; background: transparent; color: var(--portfolio-muted); border: none; padding: 3px 0; font-size: 8px; }
+.albumActions > button:hover, .albumActions > a:hover { color: var(--portfolio-ink); }
+.page button:disabled { opacity: .55; cursor: wait; }
+.emptyCollections { padding: 25px 0; display: flex; flex-direction: column; align-items: center; gap: 14px; color: var(--portfolio-muted); font-size: 10px; }
+.emptyCollections a { display: inline-flex; gap: 8px; align-items: center; }
+.emptyAlbums, .loadError { min-height: 280px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; padding: 35px 20px; border: 1px dashed var(--portfolio-line); background: var(--portfolio-panel); border-radius: 8px; text-align: center; color: var(--portfolio-muted); }
+.emptyAlbums h3, .loadError h2 { font-family: Georgia, serif; color: var(--portfolio-ink); font-size: 24px; font-weight: 400; }
+.emptyAlbums p, .loadError p { max-width: 330px; font-size: 10px; line-height: 1.8; }
+.emptyAlbums .secondaryButton, .loadError .secondaryButton { margin-top: 6px; }
+.spinner { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (min-width: 1440px) { .mainGrid { grid-template-columns: 300px minmax(0, 1fr); gap: 27px; } .albumGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1150px) { .mainGrid { grid-template-columns: 235px minmax(0, 1fr); gap: 18px; } .collections { padding: 20px 15px 15px; } .stat { padding: 16px; } .stat > div { font-size: 9px; } .stat > p { font-size: 7px; } .albumImage { aspect-ratio: 4/3.5; } .albumBody { padding: 13px; } .collectionFooter { padding-left: 0; } }
+@media (max-width: 767px) { .content { padding: 27px 20px 45px; } .header > div { padding-inline: 20px; } .intro { gap: 20px; align-items: flex-end; } .intro h1 { font-size: 34px; } .intro > div > p:last-child { max-width: 340px; font-size: 10px; } .intro .primaryButton { font-size: 9px; padding: 11px; } .stats { gap: 11px; } .stat { padding: 14px; } .stat > div { align-items: flex-start; font-size: 8px; line-height: 1.6; } .stat > div > svg { width: 14px; } .stat > strong { font-size: 29px; } .mainGrid { grid-template-columns: 1fr; } .collections { padding: 21px; } .collectionList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 25px; } .collectionFooter { padding-left: 44px; } .albumGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .albumImage { aspect-ratio: 4/3.7; } .albumHeading { padding-top: 12px; } .search > input, .searchRow > select { font-size: 16px; } .searchRow > select { max-width: 42%; } }
+@media (max-width: 560px) { .headerLabel { font-size: 10px; gap: 7px; } .headerActions { gap: 7px; } .iconButton { width: 31px; height: 31px; } .previewLink { padding: 8px 10px; font-size: 8px; gap: 7px; min-height: 32px; } .header > div { padding-inline: 16px; min-height: 59px; } .content { padding-inline: 16px; } .intro { display: block; margin-bottom: 23px; } .intro h1 { font-size: 37px; } .intro > div > p:last-child { font-size: 10px; margin-top: 14px; } .intro .primaryButton { margin-top: 19px; font-size: 10px; padding: 11px 15px; min-height: 39px; } .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; margin-bottom: 24px; } .stat { padding: 16px; } .stat > div { font-size: 9px; } .stat > p { font-size: 8px; margin-top: 7px; } .stat > strong { margin-top: 10px; font-size: 31px; } .collections { padding: 19px 16px 16px; } .collectionList { grid-template-columns: 1fr; } .collectionFooter { padding-left: 44px; } .panelDescription { font-size: 10px; } .collection h3 { font-size: 12px; } .collectionTop p { font-size: 9px; } .collectionFooter > button, .collectionFooter > a { min-height: 30px; font-size: 9px; } .toggle { width: 38px; height: 24px; padding: 4px; } .toggle > span { width: 16px; height: 16px; } .albumHeading h2 { font-size: 23px; } .albumHeading > a { font-size: 8px; gap: 3px; } .filters { gap: 6px; } .filters > button { font-size: 9px; padding: 9px; min-height: 34px; gap: 6px; } .searchRow { display: block; margin-top: 15px; } .search { padding: 12px; } .searchRow > select { width: 100%; max-width: none; margin-top: 11px; padding: 10px 12px; } .albumGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .albumImage { aspect-ratio: 3/3.7; } .albumBody { padding: 12px; } .albumBody h3 { font-size: 12px; } .albumCategory { font-size: 6px; } .visibleBadge, .hiddenBadge { left: 8px; top: 8px; padding: 5px 6px; font-size: 6px; } .featureButton { right: 8px; top: 8px; width: 24px; height: 24px; } .featureButton svg { width: 13px; } .albumActions { gap: 7px; margin-top: 11px; padding-top: 8px; } .albumActions > button, .albumActions > a { min-height: 29px; font-size: 8px; } .noticeSuccess, .noticeError { font-size: 10px; } }
+@media (max-width: 350px) { .headerLabel > svg { display: none; } .headerActions { gap: 5px; } .previewLink { padding-inline: 8px; } .albumGrid { grid-template-columns: 1fr; } .albumImage { aspect-ratio: 4/3; } .albumCategory { font-size: 8px; } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

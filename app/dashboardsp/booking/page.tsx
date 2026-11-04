@@ -1,6 +1,7 @@
 'use client'
 
 import BookingCalendar from "./BookingCalendar"
+import styles from '@/components/studio/operations.module.css'
 
 import {
   useCallback,
@@ -17,6 +18,9 @@ import {
   ArrowLeft,
   Check,
   CircleDollarSign,
+  CalendarDays,
+  Clock3,
+  CheckCircle2,
   ExternalLink,
   Loader2,
   Pencil,
@@ -901,7 +905,7 @@ export default function DashboardBooking() {
   return (
     <main
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`site-page-surface studio-bookings min-h-screen ${
+      className={`${styles.page} studio-management-page site-page-surface studio-bookings min-h-screen ${
         isDarkMode
           ? 'bg-[#06140f] text-white'
           : 'bg-[#f5f7f3] text-[#202520]'
@@ -937,19 +941,22 @@ export default function DashboardBooking() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-[1280px] px-3 py-4 sm:px-6 sm:py-6">
-
-        <div className="text-[9px] font-bold uppercase tracking-[0.2em] opacity-40">
-          Dinh Thong Gallery
+      <div className={styles.content}>
+        <div className={styles.intro}>
+          <div>
+            <p className={styles.eyebrow}>STUDIO / BOOKING</p>
+            <h1 className={styles.title}>Lịch hẹn & booking</h1>
+            <p className={styles.description}>Theo dõi lịch chụp, chăm sóc từng yêu cầu và quản lý dịch vụ của studio.</p>
+          </div>
+          <a href="#booking-requests" className={styles.secondaryAction}>Xem yêu cầu <ArrowLeft className="h-4 w-4 rotate-[-90deg]" /></a>
         </div>
 
-        <h1 className="mt-1 font-serif text-2xl sm:mt-2 sm:text-3xl">
-          Dashboard Booking
-        </h1>
-
-        <p className="mt-1 text-xs opacity-55">
-          Quản lý lịch, gói chụp và yêu cầu của khách hàng.
-        </p>
+        <section aria-label="Tổng quan booking" className={styles.stats}>
+          <div className={`studio-stat ${styles.metric}`}><span className={styles.metricLabel}>Tổng yêu cầu <CalendarDays className="h-4 w-4" /></span><strong>{bookings.length}</strong><small>Tất cả booking của studio</small></div>
+          <div className={`studio-stat ${styles.metric}`}><span className={styles.metricLabel}>Cần liên hệ <Clock3 className="h-4 w-4" /></span><strong>{bookings.filter(booking => booking.status === 'new').length}</strong><small>Yêu cầu mới từ khách hàng</small></div>
+          <div className={`studio-stat ${styles.metric}`}><span className={styles.metricLabel}>Đã xác nhận <CheckCircle2 className="h-4 w-4" /></span><strong>{bookings.filter(booking => booking.status === 'confirmed').length}</strong><small>Sẵn sàng cho buổi chụp</small></div>
+          <div className={`studio-stat ${styles.metric}`}><span className={styles.metricLabel}>Gói chụp <CircleDollarSign className="h-4 w-4" /></span><strong>{packages.length}</strong><small>Trong {services.length} thể loại ảnh</small></div>
+        </section>
 
         <BookingCalendar
           bookings={bookings}
@@ -982,7 +989,8 @@ export default function DashboardBooking() {
           </SectionHead>
 
 
-          <div className="grid gap-3 p-3 sm:grid-cols-2 sm:p-4">
+          <div className="grid gap-3 p-3 sm:grid-cols-2 sm:p-4 xl:grid-cols-1 2xl:grid-cols-2">
+            {!loading && services.length === 0 && <div className={styles.emptyState}><CalendarDays className="h-7 w-7 opacity-40" /><h3>Thiết lập dịch vụ đầu tiên</h3><p>Thêm thể loại ảnh để bắt đầu tạo các gói chụp cho khách hàng.</p><button type="button" onClick={newService} className={styles.primaryAction}><Plus className="h-4 w-4" />Thêm thể loại ảnh</button></div>}
 
             {services.map(service => (
 
@@ -1036,6 +1044,7 @@ export default function DashboardBooking() {
 
                     <button
                       type="button"
+                      aria-label={`Chỉnh sửa thể loại ${service.name}`}
                       onClick={() =>
                         editService(service)
                       }
@@ -1046,6 +1055,7 @@ export default function DashboardBooking() {
 
                     <button
                       type="button"
+                      aria-label={`Xóa thể loại ${service.name}`}
                       onClick={() =>
                         void deleteService(
                           service
@@ -1121,7 +1131,7 @@ export default function DashboardBooking() {
                 {list.length === 0 ? (
 
                   <div className="px-4 py-4 text-xs opacity-35 sm:px-5 sm:py-5">
-                    Chưa có gói chụp.
+                    Chưa có gói chụp. Thêm gói để thiết lập giá và nội dung cho thể loại này.
                   </div>
 
                 ) : (
@@ -1452,10 +1462,10 @@ export default function DashboardBooking() {
             BOOKING
         ========================== */}
 
-        <section className={sectionClass(isDarkMode)}>
+        <section id="booking-requests" className={sectionClass(isDarkMode)}>
 
           <SectionHead
-            title="Booking khách hàng"
+            title="Yêu cầu từ khách hàng"
             description={`${bookings.length} yêu cầu`}
           />
 
@@ -1468,8 +1478,11 @@ export default function DashboardBooking() {
 
           ) : bookings.length === 0 ? (
 
-            <div className="p-10 text-center text-sm opacity-40">
-              Chưa có Booking.
+            <div className={styles.emptyState}>
+              <CalendarDays className="h-8 w-8 opacity-40" />
+              <h3>Lịch hẹn tiếp theo bắt đầu từ đây</h3>
+              <p>Các yêu cầu từ trang booking sẽ xuất hiện tại đây để bạn liên hệ và xác nhận.</p>
+              <Link href="/booking" target="_blank" rel="noopener noreferrer" className={styles.secondaryAction}>Xem trang booking <ExternalLink className="h-4 w-4" /></Link>
             </div>
 
           ) : (
@@ -1557,6 +1570,7 @@ export default function DashboardBooking() {
                     <div className="space-y-2.5">
 
                       <select
+                        aria-label={`Trạng thái booking của ${booking.full_name}`}
                         value={booking.status}
                         onChange={e =>
                           void updateBooking(
