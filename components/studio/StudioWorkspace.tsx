@@ -4,8 +4,10 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 're
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
-import { Aperture, ArrowUpRight, CalendarDays, ChevronRight, FolderOpen, Image, KeyRound, Menu, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, ShieldCheck, Wallet, X } from 'lucide-react'
+import { Aperture, ArrowUpRight, BadgeCheck, CalendarDays, ChevronRight, FolderOpen, Image, KeyRound, Menu, PanelLeftClose, PanelLeftOpen, PanelsTopLeft, ShieldCheck, Wallet, X } from 'lucide-react'
 import StudioAccount from './StudioAccount'
+
+const panelOf = (href: string) => new URLSearchParams(href.split('?')[1] || '').get('panel') || ''
 
 const navigation = [
   { href: '/dashboardadmin', label: 'Gallery nội bộ', description: 'Album & lựa chọn ảnh', icon: FolderOpen },
@@ -14,6 +16,7 @@ const navigation = [
   { href: '/dashboardsp/booking', label: 'Booking', description: 'Lịch chụp & khách hàng', icon: CalendarDays },
   { href: '/money', label: 'Thu chi', description: 'Giao dịch & báo cáo', icon: Wallet },
   { href: '/dashboardadmin?panel=keys', label: 'Key Panel', description: 'Bản quyền & thiết bị', icon: KeyRound },
+  { href: '/dashboardadmin?panel=snapselect', label: 'Key DinhThong SnapSelect Pro', description: 'Bản quyền app lọc ảnh macOS', icon: BadgeCheck },
 ]
 
 export default function StudioWorkspace({ children }: { children: ReactNode }) {
@@ -31,23 +34,19 @@ export default function StudioWorkspace({ children }: { children: ReactNode }) {
     setCollapsed(!collapsed)
     try { localStorage.setItem('gallery-sidebar-hidden', String(!collapsed)) } catch {}
   }
-  const [keyPanelOpen, setKeyPanelOpen] = useState(false)
+  // Popup quản trị đang mở trên /dashboardadmin: 'keys' (Key Panel) hoặc 'snapselect'.
+  const [openPanel, setOpenPanel] = useState('')
   const menuRef = useRef<HTMLElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   usePageScrollLock(menuOpen)
 
   useEffect(() => {
-    const update = () => setKeyPanelOpen(pathname === '/dashboardadmin' && new URLSearchParams(window.location.search).get('panel') === 'keys')
-    const openKeys = () => setKeyPanelOpen(true)
-    const closeKeys = () => setKeyPanelOpen(false)
+    const update = () => setOpenPanel(pathname === '/dashboardadmin' ? new URLSearchParams(window.location.search).get('panel') || '' : '')
+    const events = ['popstate', 'studio:open-key-panel', 'studio:close-key-panel', 'studio:open-snapselect-panel', 'studio:close-snapselect-panel']
     update()
-    window.addEventListener('popstate', update)
-    window.addEventListener('studio:open-key-panel', openKeys)
-    window.addEventListener('studio:close-key-panel', closeKeys)
+    for (const name of events) window.addEventListener(name, update)
     return () => {
-      window.removeEventListener('popstate', update)
-      window.removeEventListener('studio:open-key-panel', openKeys)
-      window.removeEventListener('studio:close-key-panel', closeKeys)
+      for (const name of events) window.removeEventListener(name, update)
     }
   }, [pathname])
 
@@ -73,21 +72,24 @@ export default function StudioWorkspace({ children }: { children: ReactNode }) {
   }, [menuOpen])
 
   const isActive = (href: string) => {
-    if (href.includes('?')) return pathname === '/dashboardadmin' && keyPanelOpen
-    if (href === '/dashboardadmin') return pathname === href && !keyPanelOpen
+    if (href.includes('?')) return pathname === '/dashboardadmin' && openPanel === panelOf(href)
+    if (href === '/dashboardadmin') return pathname === href && !openPanel
     if (href === '/dashboardsp') return pathname === href || pathname.startsWith('/dashboardsp/photos')
     return pathname === href
   }
   const current = navigation.find(item => isActive(item.href)) || navigation[0]
 
-  const openKeyPanel = (event: MouseEvent<HTMLAnchorElement>) => {
+  const openPanelLink = (event: MouseEvent<HTMLAnchorElement>, href: string) => {
     setMenuOpen(false)
     if (pathname !== '/dashboardadmin' || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     event.preventDefault()
+    const panel = panelOf(href)
     const url = new URL(window.location.href)
-    url.searchParams.set('panel', 'keys')
+    url.searchParams.set('panel', panel)
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
-    window.dispatchEvent(new Event('studio:open-key-panel'))
+    // popstate cho mỗi popup tự đọc lại ?panel=… (đóng popup kia, mở popup này).
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    window.dispatchEvent(new Event(panel === 'snapselect' ? 'studio:open-snapselect-panel' : 'studio:open-key-panel'))
   }
 
   return (
@@ -110,8 +112,8 @@ export default function StudioWorkspace({ children }: { children: ReactNode }) {
             const Icon = item.icon
             const content = <><Icon size={19} strokeWidth={1.6} aria-hidden="true" /><span><strong>{item.label}</strong><small>{item.description}</small></span><ChevronRight size={14} aria-hidden="true" /></>
             const className = `workspace-nav-item ${isActive(item.href) ? 'workspace-nav-active' : ''}`
-            return item.href.includes('?') || (item.href === '/dashboardadmin' && keyPanelOpen) ? (
-              <a key={item.href} href={item.href} className={className} aria-current={isActive(item.href) ? 'page' : undefined} onClick={item.href.includes('?') ? openKeyPanel : () => setMenuOpen(false)}>{content}</a>
+            return item.href.includes('?') || (item.href === '/dashboardadmin' && openPanel) ? (
+              <a key={item.href} href={item.href} className={className} aria-current={isActive(item.href) ? 'page' : undefined} onClick={item.href.includes('?') ? (event) => openPanelLink(event, item.href) : () => setMenuOpen(false)}>{content}</a>
             ) : (
               <Link key={item.href} href={item.href} prefetch={item.href === '/dashboardpublic' ? null : false} className={className} aria-current={isActive(item.href) ? 'page' : undefined} onClick={() => setMenuOpen(false)}>{content}</Link>
             )
