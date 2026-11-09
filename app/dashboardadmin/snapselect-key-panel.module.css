@@ -8,6 +8,9 @@
 .meta { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
 .metaSub { display: block; margin-top: 4px; color: #98a18d; font-size: 9px; }
 .more { gap: 3px; }
+td .more { color: #7c8e6e; }
+td .danger { color: #bf7c66; }
+td .danger:hover { color: #a2442b; }
 .more[aria-expanded='true'] svg { transform: rotate(180deg); }
 .detailRow td { background: #fafbf7; }
 .detail { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 6px; }

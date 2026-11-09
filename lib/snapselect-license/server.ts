@@ -42,6 +42,12 @@ export class SupabaseLicenseStore implements LicenseStore {
     return (data as Row[]).map(fromRow)
   }
 
+  async remove(lid: string) {
+    const { data, error } = await this.db.from(TABLE).delete().eq('lid', lid).select('lid')
+    if (error) throw error
+    return Boolean(data?.length)
+  }
+
   async put(record: LicenseRecord) {
     if (record.version === undefined) {
       const { error } = await this.db.from(TABLE).insert({ ...toRow(record), version: 1 })

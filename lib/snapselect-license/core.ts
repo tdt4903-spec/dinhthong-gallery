@@ -43,6 +43,8 @@ export interface LicenseStore {
   /** Ghi bản ghi; ném ConflictError nếu bản ghi đã bị ghi bởi yêu cầu khác (so version). */
   put(record: LicenseRecord): Promise<void>
   list(): Promise<LicenseRecord[]>
+  /** Xoá hẳn bản quyền; trả false nếu không có. */
+  remove(lid: string): Promise<boolean>
 }
 
 export type Signer = { kid: string; privateKey: KeyObject; publicKey: KeyObject; publicKeyRaw: string }
@@ -275,6 +277,11 @@ export class LicenseService {
   }
 
   // --- Quản trị (cấp tay) ---------------------------------------------------------
+  /** Xoá hẳn key: app đang dùng key này sẽ khoá ở lần xác minh online kế tiếp (unknown_license). */
+  async remove(lid: string) {
+    if (!(await this.store.remove(lid))) throw new LicenseError('unknown_license', 'Không tìm thấy bản quyền này.', 404)
+  }
+
   async setStatus(lid: string, status: 'active' | 'revoked', reason = '') {
     return (await this.mutate(lid, (record) => {
       record.status = status

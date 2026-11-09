@@ -60,6 +60,10 @@ export async function setLicenseStatus(lid: string, status: 'active' | 'revoked'
   })
 }
 
+export async function deleteLicense(lid: string) {
+  return guarded(async () => { await getLicenseService().remove(String(lid)); return {} })
+}
+
 export async function setLicenseSeats(lid: string, seats: number) {
   return guarded(async () => { await getLicenseService().setSeats(String(lid), seats); return {} })
 }

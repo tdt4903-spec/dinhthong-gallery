@@ -3,11 +3,11 @@
 // Popup "Key DinhThong SnapSelect Pro" — cùng kiểu với Key Panel, mở bằng /dashboardadmin?panel=snapselect.
 // Tách riêng khỏi Key Panel (panel_licenses); dữ liệu ở bảng snapselect_licenses qua server actions.
 import { Fragment, useCallback, useEffect, useRef, useState, useTransition } from 'react'
-import { BadgeCheck, ChevronDown, Copy, KeyRound, Laptop, Loader2, LockIcon, Plus, RefreshCw, Search, X } from 'lucide-react'
+import { BadgeCheck, ChevronDown, Copy, KeyRound, Laptop, Loader2, LockIcon, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import { AppPopupHost, useAppPopup } from '@/components/ui/AppPopup'
 import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
 import {
-  createOfflineActivation, extendLicense, getLicenseKey, issueLicense, listLicenses, removeLicenseMachine, setLicenseSeats,
+  createOfflineActivation, deleteLicense, extendLicense, getLicenseKey, issueLicense, listLicenses, removeLicenseMachine, setLicenseSeats,
   setLicenseStatus, type ActionResult, type LicenseRow,
 } from './snapselect-actions'
 import styles from './gallery-workspace.module.css'
@@ -170,6 +170,15 @@ export default function SnapSelectKeyPanel() {
     } else run(() => setLicenseStatus(license.lid, 'active'))
   }
 
+  const removeLicense = async (license: LicenseRow) => {
+    const name = license.customer || license.email || license.lid
+    if (!(await showConfirm(`Xóa vĩnh viễn key của ${name}?`, {
+      detail: 'Không khôi phục được. App đang dùng key này sẽ khóa ở lần xác minh online kế tiếp. Muốn khóa tạm thì dùng Thu hồi.',
+      confirmText: 'Xóa key',
+    }))) return
+    run(() => deleteLicense(license.lid), () => { if (expanded === license.lid) setExpanded('') })
+  }
+
   const removeMachine = async (license: LicenseRow, mid: string) => {
     if (!(await showConfirm('Xóa máy này khỏi key?', { detail: 'Máy đó sẽ khóa ở lần xác minh kế tiếp và trả lại một suất máy.' }))) return
     run(() => removeLicenseMachine(license.lid, mid))
@@ -230,6 +239,7 @@ export default function SnapSelectKeyPanel() {
                           <td><div className={styles.keyActions}>
                             <button type="button" onClick={() => copyKey(license.lid)} aria-label={`Sao chép key của ${license.customer || license.lid}`} title="Sao chép key"><Copy aria-hidden="true" size={14} /></button>
                             <button type="button" onClick={() => toggleStatus(license)} disabled={pending}>{license.status === 'revoked' ? 'Mở khóa' : 'Thu hồi'}</button>
+                            <button type="button" className={own.danger} onClick={() => removeLicense(license)} disabled={pending} aria-label={`Xóa key của ${license.customer || license.lid}`} title="Xóa key"><Trash2 aria-hidden="true" size={14} /></button>
                             <button type="button" className={own.more} aria-expanded={isOpen} onClick={() => { setExpanded(isOpen ? '' : license.lid); setOffline({ mid: '', days: 365, code: '' }) }}>Chi tiết<ChevronDown aria-hidden="true" size={13} /></button>
                           </div></td>
                         </tr>
