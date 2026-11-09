@@ -81,7 +81,15 @@ export function normalizePrivateKeyPem(value: string) {
 
 export function loadSigner(privateKeyPem: string | undefined, kid = 'k1'): Signer {
   if (!privateKeyPem) throw new Error('Thiếu SNAPSELECT_LICENSE_PRIVATE_KEY.')
-  const privateKey = createPrivateKey(normalizePrivateKeyPem(privateKeyPem))
+  let privateKey: KeyObject
+  try {
+    privateKey = createPrivateKey(normalizePrivateKeyPem(privateKeyPem))
+  } catch {
+    // Chỉ mô tả hình dạng giá trị (độ dài, phần đầu ASN.1 cố định của mọi khoá Ed25519), không lộ khoá.
+    const body = normalizePrivateKeyPem(privateKeyPem).split('\n').filter((line) => !line.startsWith('-----')).join('')
+    throw new Error(`SNAPSELECT_LICENSE_PRIVATE_KEY không phải khoá PEM Ed25519 hợp lệ (độ dài ${privateKeyPem.length}, `
+      + `có BEGIN: ${privateKeyPem.includes('BEGIN')}, base64 ${body.length}/64 ký tự, đầu Ed25519: ${body.startsWith('MC4CAQAwBQYDK2Vw')}).`)
+  }
   if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error('Khoá bí mật phải là Ed25519.')
   const publicKey = createPublicKey(privateKey)
   return { kid, privateKey, publicKey, publicKeyRaw: String(publicKey.export({ format: 'jwk' }).x) }
