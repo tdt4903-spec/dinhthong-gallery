@@ -26,6 +26,10 @@ export type LicenseRecord = {
   email: string
   order: string
   customer: string
+  /** Mã máy được gắn khi tạo key theo mã máy ('' = key dùng cho máy bất kỳ). */
+  machine: string
+  /** Key ngắn DTSP-XXXX-XXXX-XXXX gửi cho khách ('' với key dài cũ). */
+  shortKey: string
   plan: Plan
   seats: number
   features: string[]
@@ -43,6 +47,8 @@ export interface LicenseStore {
   /** Ghi bản ghi; ném ConflictError nếu bản ghi đã bị ghi bởi yêu cầu khác (so version). */
   put(record: LicenseRecord): Promise<void>
   list(): Promise<LicenseRecord[]>
+  /** Tìm lid theo key ngắn đã chuẩn hoá (DTSP-XXXX-XXXX-XXXX). */
+  findByShortKey(shortKey: string): Promise<string | null>
   /** Xoá hẳn bản quyền; trả false nếu không có. */
   remove(lid: string): Promise<boolean>
 }
@@ -131,6 +137,23 @@ export function planExpiry(plan: string, fromSeconds: number) {
   throw new LicenseError('bad_plan', 'Gói phải là theo tháng, theo năm hoặc vĩnh viễn.')
 }
 
+const SHORT_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789' // bỏ I, L, O, 0, 1 cho dễ đọc
+
+/** Key ngắn ngẫu nhiên ~59 bit, dạng DTSP-XXXX-XXXX-XXXX. */
+export function newShortKey() {
+  const chars = [...randomBytes(12)].map((b) => SHORT_ALPHABET[b % SHORT_ALPHABET.length]).join('')
+  return `DTSP-${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8)}`
+}
+
+/** Chuẩn hoá key ngắn khách gõ (thiếu gạch, chữ thường, dấu cách); trả '' nếu không phải key ngắn. */
+export function normalizeShortKey(value: unknown) {
+  const raw = String(value ?? '').toUpperCase()
+  if (raw.includes('.')) return ''
+  const chars = raw.replace(/[^A-Z0-9]/g, '').replace(/^DTSP/, '')
+  if (chars.length !== 12 || [...chars].some((ch) => !SHORT_ALPHABET.includes(ch))) return ''
+  return `DTSP-${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8)}`
+}
+
 function newLicenseId() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   return 'L' + [...randomBytes(11)].map((b) => alphabet[b % alphabet.length]).join('')
@@ -165,7 +188,24 @@ export class LicenseService {
     return signToken(LICENSE_PREFIX, LICENSE_CONTEXT, {
       v: 1, typ: 'lic', lid: record.lid, email: record.email, order: record.order,
       plan: record.plan, seats: record.seats, iat: record.iat, exp: record.exp, features: record.features,
+      ...(record.machine ? { mid: record.machine } : {}),
     }, this.signer)
+  }
+
+  /** Key gửi cho khách: key ngắn nếu có, không thì key dài có chữ ký (bản quyền cũ). */
+  customerKey(record: LicenseRecord) {
+    return record.shortKey || this.licenseKey(record)
+  }
+
+  /** Tìm bản quyền từ key ngắn hoặc key dài. */
+  async resolveLid(key: unknown) {
+    const short = normalizeShortKey(key)
+    if (short) {
+      const lid = await this.store.findByShortKey(short)
+      if (!lid) throw new LicenseError('invalid_key', 'Key không đúng hoặc đã bị xóa.')
+      return lid
+    }
+    return this.parseKey(key).lid
   }
 
   parseKey(key: unknown) {
@@ -181,6 +221,7 @@ export class LicenseService {
       refresh_after: now + this.refreshDays * DAY,
       grace_until: now + (offline ? days : this.graceDays) * DAY,
       license_exp: record.exp, plan: record.plan, seats: record.seats, offline,
+      email: record.email, customer: record.customer, order: record.order,
     }, this.signer)
   }
 
@@ -213,26 +254,33 @@ export class LicenseService {
     return { plan: record.plan, seats: record.seats, exp: record.exp, used: record.activations.length }
   }
 
-  async issue(input: { email?: string; order?: string; customer?: string; plan: string; seats?: unknown; note?: string }) {
+  async issue(input: { email?: string; order?: string; customer?: string; plan: string; seats?: unknown; note?: string; machineId?: string }) {
     const seats = checkSeats(input.seats ?? 1)
     const iat = this.clock()
+    const machine = input.machineId ? normalizeMachineId(input.machineId) : ''
+    if (input.machineId && machine.length !== 32) throw new LicenseError('bad_machine', 'Mã máy không hợp lệ (32 ký tự 0-9, A-F, có thể có dấu gạch).')
     const record: LicenseRecord = {
       lid: newLicenseId(), email: String(input.email ?? '').trim(), order: String(input.order ?? '').trim(),
-      customer: String(input.customer ?? '').trim(), plan: input.plan as Plan, seats, features: ['pro'], iat,
+      customer: String(input.customer ?? '').trim(), machine, shortKey: newShortKey(), plan: input.plan as Plan, seats, features: ['pro'], iat,
       exp: planExpiry(input.plan, iat), status: 'active', note: String(input.note ?? '').trim(),
-      activations: [], history: [{ at: iat, action: 'issue' }],
+      // Key theo mã máy chiếm sẵn một suất cho đúng máy đó.
+      activations: machine ? [{ mid: machine, first_seen: iat, name: 'Theo mã máy' }] : [],
+      history: [{ at: iat, action: 'issue', ...(machine ? { mid: machine } : {}) }],
     }
     await this.store.put(record)
-    return { record, key: this.licenseKey(record) }
+    return { record, key: this.customerKey(record) }
   }
 
   // --- API cho app ---------------------------------------------------------------
   async activate(body: AppRequest) {
     const mid = normalizeMachineId(body.machine_id)
     if (mid.length !== 32) throw new LicenseError('bad_machine', 'Mã máy không hợp lệ.')
-    const { lid } = this.parseKey(body.license_key)
+    const lid = await this.resolveLid(body.license_key)
     const { record } = await this.mutate(lid, (record) => {
       this.assertUsable(record)
+      if (record.machine && record.machine !== mid) {
+        throw new LicenseError('machine_mismatch', 'Key này được tạo cho máy khác. Gửi đúng mã máy của máy này để nhận key mới.', 403)
+      }
       const now = this.clock()
       let entry = record.activations.find((item) => item.mid === mid)
       if (!entry) {
@@ -250,7 +298,7 @@ export class LicenseService {
 
   async validate(body: AppRequest) {
     const mid = normalizeMachineId(body.machine_id)
-    const { lid } = this.parseKey(body.license_key)
+    const lid = await this.resolveLid(body.license_key)
     const { record, result: entry } = await this.mutate(lid, (record) => {
       this.assertUsable(record)
       const entry = record.activations.find((item) => item.mid === mid)
@@ -267,7 +315,7 @@ export class LicenseService {
 
   async deactivate(body: AppRequest) {
     const mid = normalizeMachineId(body.machine_id)
-    const { lid } = this.parseKey(body.license_key)
+    const lid = await this.resolveLid(body.license_key)
     const { record } = await this.mutate(lid, (record) => {
       const before = record.activations.length
       record.activations = record.activations.filter((item) => item.mid !== mid)

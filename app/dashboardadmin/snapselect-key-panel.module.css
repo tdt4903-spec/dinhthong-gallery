@@ -2,6 +2,10 @@
 .dialog { max-width: 920px; }
 .summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .summary > div:nth-child(4) strong { color: #5d7f8c; }
+.machineField { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.machineField label { margin-bottom: 2px !important; color: #45603f !important; font-weight: 600 !important; }
+.machineField input { font-family: ui-monospace, Menlo, monospace; font-size: 13px !important; letter-spacing: .03em; }
+.machineField span { color: #98a18d; font-size: 10px; }
 .formGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .planField > div { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 420px; }
 .tableWrap { max-height: 360px; }

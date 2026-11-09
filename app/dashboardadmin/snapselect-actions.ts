@@ -32,7 +32,7 @@ export async function listLicenses() {
   })
 }
 
-export async function issueLicense(input: { customer: string; email: string; order: string; plan: string; seats: number; note: string }) {
+export async function issueLicense(input: { customer: string; email: string; order: string; plan: string; seats: number; note: string; machineId?: string }) {
   return guarded(async () => {
     if (!PLANS.includes(input.plan as LicenseRecord['plan'])) throw new LicenseError('bad_plan', 'Chọn gói hợp lệ.')
     if (!String(input.customer || input.email || '').trim()) throw new LicenseError('bad_customer', 'Nhập tên khách hoặc email.')
@@ -44,7 +44,7 @@ export async function issueLicense(input: { customer: string; email: string; ord
 export async function getLicenseKey(lid: string) {
   return guarded(async () => {
     const service = getLicenseService()
-    return { key: service.licenseKey(await service.load(String(lid))) }
+    return { key: service.customerKey(await service.load(String(lid))) }
   })
 }
 

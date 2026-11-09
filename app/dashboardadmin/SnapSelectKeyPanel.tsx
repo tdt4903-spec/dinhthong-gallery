@@ -38,7 +38,7 @@ export default function SnapSelectKeyPanel() {
   const [pending, startTransition] = useTransition()
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState('')
-  const [form, setForm] = useState({ customer: '', email: '', order: '', plan: 'yearly', seats: 1, note: '' })
+  const [form, setForm] = useState({ machineId: '', customer: '', email: '', order: '', plan: 'yearly', seats: 1, note: '' })
   const [issuedKey, setIssuedKey] = useState('')
   const [offline, setOffline] = useState({ mid: '', days: 365, code: '' })
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -158,7 +158,7 @@ export default function SnapSelectKeyPanel() {
     if (!form.customer.trim() && !form.email.trim()) { void showAlert('Vui lòng nhập tên khách hàng hoặc email.'); return }
     run(() => issueLicense(form), (result) => {
       setIssuedKey((result as { key: string }).key)
-      setForm((value) => ({ ...value, customer: '', email: '', order: '', note: '' }))
+      setForm((value) => ({ ...value, machineId: '', customer: '', email: '', order: '', note: '' }))
     })
   }
 
@@ -185,7 +185,7 @@ export default function SnapSelectKeyPanel() {
   }
 
   const query = search.toLocaleLowerCase('vi-VN')
-  const visible = licenses.filter((item) => `${item.customer} ${item.email} ${item.order} ${item.lid}`.toLocaleLowerCase('vi-VN').includes(query))
+  const visible = licenses.filter((item) => `${item.customer} ${item.email} ${item.order} ${item.lid} ${item.shortKey} ${item.machine} ${formatMid(item.machine)} ${item.activations.map((a) => `${a.mid} ${formatMid(a.mid)}`).join(' ')}`.toLocaleLowerCase('vi-VN').includes(query))
   const active = licenses.filter((item) => !stateOf(item, now).revoked).length
   const machines = licenses.reduce((sum, item) => sum + item.activations.length, 0)
 
@@ -207,6 +207,11 @@ export default function SnapSelectKeyPanel() {
 
             <section className={styles.keyForm} aria-labelledby="snapselect-create-title">
               <div className={styles.keySectionHeading}><h3 id="snapselect-create-title">Cấp key mới</h3><span>App lọc ảnh macOS · kích hoạt theo máy</span></div>
+              <div className={own.machineField}>
+                <label htmlFor="ss-machine">Mã máy khách gửi</label>
+                <input id="ss-machine" value={form.machineId} onChange={(e) => setForm({ ...form, machineId: e.target.value })} placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX (khách bấm Sao chép mã máy trong app)" autoComplete="off" spellCheck={false} />
+                <span>Có mã máy: key chỉ kích hoạt được trên đúng máy đó. Để trống: key dùng cho máy bất kỳ (theo số máy).</span>
+              </div>
               <div className={`${styles.keyFormGrid} ${own.formGrid}`}>
                 <div><label htmlFor="ss-customer">Tên khách hàng</label><input id="ss-customer" value={form.customer} onChange={(e) => setForm({ ...form, customer: e.target.value })} placeholder="Nhập tên khách hàng" autoComplete="off" /></div>
                 <div><label htmlFor="ss-email">Email</label><input id="ss-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="khach@email.com" autoComplete="off" /></div>
@@ -216,13 +221,13 @@ export default function SnapSelectKeyPanel() {
               <fieldset className={`${styles.durationField} ${own.planField}`}><legend>Gói sử dụng</legend><div>{PLAN_OPTIONS.map((option) => <button key={option.value} type="button" aria-pressed={form.plan === option.value} onClick={() => setForm({ ...form, plan: option.value })}>{option.label}</button>)}</div></fieldset>
               <div className={styles.generatedKey}>
                 <label htmlFor="ss-generated">Key bản quyền</label>
-                <div><input id="ss-generated" readOnly placeholder="Key sẽ hiển thị tại đây — gửi cho khách dán vào app" value={issuedKey} onFocus={(e) => e.currentTarget.select()} /><button type="button" disabled={pending} onClick={issue} className={styles.primaryButton}>{pending ? <Loader2 aria-hidden="true" size={15} className="animate-spin" /> : <Plus aria-hidden="true" size={15} />}Tạo key</button>{issuedKey && <button type="button" onClick={() => copy(issuedKey)} aria-label="Sao chép key" className={styles.copyButton}><Copy aria-hidden="true" size={16} /></button>}</div>
+                <div><input id="ss-generated" readOnly placeholder="DTSP-XXXX-XXXX-XXXX — gửi cho khách nhập vào app" value={issuedKey} onFocus={(e) => e.currentTarget.select()} /><button type="button" disabled={pending} onClick={issue} className={styles.primaryButton}>{pending ? <Loader2 aria-hidden="true" size={15} className="animate-spin" /> : <Plus aria-hidden="true" size={15} />}Tạo key</button>{issuedKey && <button type="button" onClick={() => copy(issuedKey)} aria-label="Sao chép key" className={styles.copyButton}><Copy aria-hidden="true" size={16} /></button>}</div>
               </div>
             </section>
 
             <section aria-labelledby="snapselect-list-title">
               <div className={styles.keySectionHeading}><h3 id="snapselect-list-title">Danh sách bản quyền <span className={styles.countBadge}>{licenses.length}</span></h3><button type="button" onClick={() => void refresh()} disabled={loading} className={styles.refreshKeys}><RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} />Làm mới</button></div>
-              <div className={styles.keySearch}><Search aria-hidden="true" size={16} /><input aria-label="Tìm key theo khách hàng, email, mã đơn" type="search" placeholder="Tìm khách hàng, email, mã đơn…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+              <div className={styles.keySearch}><Search aria-hidden="true" size={16} /><input aria-label="Tìm key theo khách hàng, mã máy, key, email, mã đơn" type="search" placeholder="Tìm khách hàng, mã máy, key, email, mã đơn…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
               {loadError && <p role="alert" className={styles.keyError}>{loadError}</p>}
               <div className={`${styles.keyTableWrap} ${own.tableWrap}`}><table className={styles.keyTable}><thead><tr><th scope="col">Khách hàng</th><th scope="col">Gói / trạng thái</th><th scope="col">Máy · hạn</th><th scope="col">Thao tác</th></tr></thead><tbody>
                 {licenses.length === 0 ? <tr><td colSpan={4} className={styles.keyEmpty}><KeyRound aria-hidden="true" size={25} /><strong>Chưa có key nào</strong><span>Tạo key đầu tiên để bắt đầu quản lý bản quyền SnapSelect Pro.</span></td></tr>
@@ -233,7 +238,7 @@ export default function SnapSelectKeyPanel() {
                     return (
                       <Fragment key={license.lid}>
                         <tr>
-                          <td><strong>{license.customer || license.email || 'Không tên'}</strong><code>{[license.email && license.customer ? license.email : '', license.order, license.lid].filter(Boolean).join(' · ')}</code></td>
+                          <td><strong>{license.customer || license.email || 'Không tên'}</strong><code>{[license.shortKey, license.email && license.customer ? license.email : '', license.order].filter(Boolean).join(' · ') || license.lid}</code>{license.machine && <code title="Mã máy gắn với key">Máy {formatMid(license.machine)}</code>}</td>
                           <td><span className={styles.keyStatus} data-revoked={state.revoked}>{state.label}</span></td>
                           <td><span className={own.meta}><Laptop aria-hidden="true" size={12} />{license.activations.length}/{license.seats} máy</span><span className={own.metaSub}>{license.exp ? `Hạn ${formatDate(license.exp)}` : 'Vĩnh viễn'}</span></td>
                           <td><div className={styles.keyActions}>

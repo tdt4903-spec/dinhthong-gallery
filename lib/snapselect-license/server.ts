@@ -8,20 +8,20 @@ import { ConflictError, LicenseService, loadSigner, type LicenseRecord, type Lic
 const TABLE = 'snapselect_licenses'
 
 type Row = {
-  lid: string; customer: string; email: string; order_code: string; plan: Plan; seats: number
+  lid: string; customer: string; machine_id: string; short_key: string | null; email: string; order_code: string; plan: Plan; seats: number
   features: string[]; issued_at: number; expires_at: number | null; status: 'active' | 'revoked'
   note: string; activations: LicenseRecord['activations']; history: LicenseRecord['history']; version: number
 }
 
 const fromRow = (row: Row): LicenseRecord => ({
-  lid: row.lid, customer: row.customer, email: row.email, order: row.order_code, plan: row.plan,
+  lid: row.lid, customer: row.customer, machine: row.machine_id ?? '', shortKey: row.short_key ?? '', email: row.email, order: row.order_code, plan: row.plan,
   seats: row.seats, features: row.features, iat: Number(row.issued_at),
   exp: row.expires_at === null ? null : Number(row.expires_at), status: row.status, note: row.note,
   activations: row.activations ?? [], history: row.history ?? [], version: row.version,
 })
 
 const toRow = (record: LicenseRecord) => ({
-  lid: record.lid, customer: record.customer, email: record.email, order_code: record.order,
+  lid: record.lid, customer: record.customer, machine_id: record.machine, short_key: record.shortKey || null, email: record.email, order_code: record.order,
   plan: record.plan, seats: record.seats, features: record.features, issued_at: record.iat,
   expires_at: record.exp, status: record.status, note: record.note,
   activations: record.activations, history: record.history.slice(-200),
@@ -40,6 +40,12 @@ export class SupabaseLicenseStore implements LicenseStore {
     const { data, error } = await this.db.from(TABLE).select('*').order('created_at', { ascending: false }).limit(1000)
     if (error) throw error
     return (data as Row[]).map(fromRow)
+  }
+
+  async findByShortKey(shortKey: string) {
+    const { data, error } = await this.db.from(TABLE).select('lid').eq('short_key', shortKey).maybeSingle()
+    if (error) throw error
+    return data?.lid ?? null
   }
 
   async remove(lid: string) {
