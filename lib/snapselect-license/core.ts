@@ -66,9 +66,22 @@ export const normalizeToken = (text: unknown) => String(text ?? '').replace(/\s+
 export const normalizeMachineId = (text: unknown) => String(text ?? '').replace(/[^0-9a-fA-F]/g, '').toUpperCase()
 export const formatMachineId = (mid: string) => mid.match(/.{1,4}/g)?.join('-') ?? mid
 
+/**
+ * Chuẩn hoá PEM khi dán vào ô biến môi trường làm mất xuống dòng (gộp thành dấu cách),
+ * thành chuỗi "\n" chữ, có dấu nháy bao quanh, hoặc chỉ còn phần base64.
+ */
+export function normalizePrivateKeyPem(value: string) {
+  let text = value.trim().replace(/^['"]|['"]$/g, '').replace(/\\n/g, '\n').replace(/\r/g, '')
+  const match = text.match(/-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END \1-----/)
+  const label = match ? match[1] : 'PRIVATE KEY'
+  const body = (match ? match[2] : text).replace(/[^A-Za-z0-9+/=]/g, '')
+  text = `-----BEGIN ${label}-----\n${body.match(/.{1,64}/g)?.join('\n') ?? ''}\n-----END ${label}-----\n`
+  return text
+}
+
 export function loadSigner(privateKeyPem: string | undefined, kid = 'k1'): Signer {
   if (!privateKeyPem) throw new Error('Thiếu SNAPSELECT_LICENSE_PRIVATE_KEY.')
-  const privateKey = createPrivateKey(privateKeyPem.replace(/\\n/g, '\n'))
+  const privateKey = createPrivateKey(normalizePrivateKeyPem(privateKeyPem))
   if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error('Khoá bí mật phải là Ed25519.')
   const publicKey = createPublicKey(privateKey)
   return { kid, privateKey, publicKey, publicKeyRaw: String(publicKey.export({ format: 'jwk' }).x) }
