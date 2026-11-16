@@ -66,7 +66,7 @@ interface FolderSettings {
   collect_customer_info?: boolean
   max_viewers?: number
   enable_face_filter?: boolean
-  /** Guests may heart/select photos. Missing means allowed. */
+  /** Guests may heart/select photos. Missing: allowed on the shared root album only. */
   allow_photo_selection?: boolean
 }
 
@@ -293,6 +293,7 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
   const [editingFolderSetting, setEditingFolderSetting] = useState<FolderSettings | null>(null)
   const [isSavingFolderSetting, setIsSavingFolderSetting] = useState(false)
   const [editingFeatureFlags, setEditingFeatureFlags] = useState({ password: false, selectionLimit: false })
+  const [photoSelectionColumnReady, setPhotoSelectionColumnReady] = useState(false)
   const [viewerResetLog, setViewerResetLog] = useState<{
     albumId: string
     status: 'loading' | 'ready' | 'error'
@@ -568,11 +569,15 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
     title: currentActiveFolderTitle,
     ...resolveAlbumFeatures(currentActiveFolderId, folderSettingsMap[currentActiveFolderId], selectedAlbum),
   }
-  // Turning selection off on the shared album also covers its subfolders.
-  const guestPhotoSelectionDisabled = isSharedGuest && (
-    activeSetting.allow_photo_selection === false ||
-    folderSettingsMap[guestRootAlbumId]?.allow_photo_selection === false
-  )
+  // Each folder has its own switch. Unset: the shared root album allows
+  // selection, subfolders stay closed until an admin turns them on.
+  const isPhotoSelectionAllowed = (folderId: string) => {
+    if (!photoSelectionColumnReady) return true
+    const own = folderSettingsMap[folderId]?.allow_photo_selection
+    if (typeof own === 'boolean') return own
+    return Boolean(folderId) && folderId === guestRootAlbumId
+  }
+  const guestPhotoSelectionDisabled = isSharedGuest && !isPhotoSelectionAllowed(currentActiveFolderId)
 
   const editingSettingId = editingFolderSetting?.id || ''
   useEffect(() => {
@@ -1303,10 +1308,13 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
             allow_comments: f.allow_comments ?? true,
             collect_customer_info: f.collect_customer_info ?? false,
             max_viewers: Number(f.max_viewers || 0),
-            allow_photo_selection: f.allow_photo_selection !== false,
+            ...(typeof f.allow_photo_selection === 'boolean' ? { allow_photo_selection: f.allow_photo_selection } : {}),
           }
         })
         setFolderSettingsMap(map)
+        // Until the database has the column, keep the previous behaviour
+        // (selection allowed everywhere) instead of closing every subfolder.
+        setPhotoSelectionColumnReady(data.some((row: Record<string, unknown>) => 'allow_photo_selection' in row))
         return map
       }
     } catch {}
@@ -2399,7 +2407,7 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
       collect_customer_info: activeSetting.collect_customer_info ?? false,
       max_viewers: activeSetting.max_viewers ?? 0,
       enable_face_filter: faceAccess.ready ? faceAccess.enabled : undefined,
-      allow_photo_selection: activeSetting.allow_photo_selection !== false,
+      allow_photo_selection: isPhotoSelectionAllowed(currentActiveFolderId),
     })
   }
 
@@ -5087,6 +5095,7 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                 />
                 <span>Cho khách chọn ảnh (thả tim)</span>
               </label>
+              <p className="-mt-2 text-[11px] opacity-60">Folder tổng mặc định bật. Folder con mặc định tắt, cần bật riêng trong cài đặt của từng folder.</p>
 
               <div className={`rounded-xl border p-3 text-xs ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-50'}`}>
                 <p className="font-semibold">Tự xoá người xem khi đủ 1000 người</p>

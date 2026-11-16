@@ -1,6 +1,7 @@
--- Guests may select photos unless an admin turns it off for the album.
+-- Guest photo selection per folder. NULL means "not set": the shared root
+-- album allows selection, subfolders do not until an admin turns them on.
 alter table public.folder_settings
-  add column if not exists allow_photo_selection boolean not null default true;
+  add column if not exists allow_photo_selection boolean;
 
 -- Each automatic viewer reset (album reached the viewer threshold) is logged
 -- so admins can see how many times and when it happened.
