@@ -252,7 +252,15 @@ export async function GET(request: NextRequest) {
       }
     }))
 
-    return NextResponse.json({ files })
+    // Every guest opening an album asks for the same listing. A short shared
+    // CDN copy keeps Drive API calls bounded during busy periods; the admin
+    // workspace adds a unique query parameter and still reads live data.
+    return NextResponse.json({ files }, {
+      headers: {
+        'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+        'CDN-Cache-Control': 'max-age=60, stale-while-revalidate=300',
+      },
+    })
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

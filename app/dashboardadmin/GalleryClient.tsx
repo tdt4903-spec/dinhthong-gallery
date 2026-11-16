@@ -21,6 +21,7 @@ import { ALBUM_PHOTO_SORT_OPTIONS, formatPhotoCaptureTime, sortAlbumPhotos, type
 import { captureTimeStatus, usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
 import { saveAlbumFaceAccess, useAlbumFaceAccess } from '@/lib/album-face-access'
 import { useAlbumScrollGuard } from '@/lib/use-album-scroll-guard'
+import { getDriveThumbnailUrl } from '@/lib/drive-thumbnail'
 import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
 import styles from './gallery-workspace.module.css'
 import { 
@@ -1567,7 +1568,8 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
     setMobileDownloadProgress('')
     setIsPreparingMobileImages(false)
     try {
-      const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}&_t=${Date.now()}`, { cache: 'no-store' })
+      // Guests share the CDN copy of a listing; the admin workspace always reads live data.
+      const res = await fetch(`/api/drive?url=${encodeURIComponent(driveUrl)}${guestMode ? '' : `&_t=${Date.now()}`}`, { cache: guestMode ? 'default' : 'no-store' })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         throw new Error(data?.error || `Không thể tải nội dung album (HTTP ${res.status})`)
@@ -2891,8 +2893,8 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
           return { id: current.id, driveUrl: current.driveUrl, title }
         }
 
-        const res = await fetch(`/api/drive?url=${encodeURIComponent(current.driveUrl)}&_t=${Date.now()}`, {
-          cache: 'no-store',
+        const res = await fetch(`/api/drive?url=${encodeURIComponent(current.driveUrl)}${isSharedGuest ? '' : `&_t=${Date.now()}`}`, {
+          cache: isSharedGuest ? 'default' : 'no-store',
         })
         if (!res.ok) continue
         const data = await res.json()
@@ -4090,8 +4092,10 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                                       className="album-card-preview-image object-cover group-hover:scale-105 transition-transform duration-200 pointer-events-none"
                                       onError={(e) => {
                                         const image = e.currentTarget
-                                        const fallback = `https://lh3.googleusercontent.com/d/${item.id}=w360`
-                                        if (image.src !== fallback) image.src = fallback
+                                        // Google may throttle a busy shared network. Cloudflare's
+                                        // edge copy is shared by every guest and keeps the grid visible.
+                                        const fallback = getDriveThumbnailUrl(item.id, 640)
+                                        if (fallback && image.src !== fallback) image.src = fallback
                                       }}
                                     />
 
@@ -4297,6 +4301,11 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                     ref={imageZoom.imageRef}
                     onLoad={imageZoom.onImageLoad}
                     src={`https://lh3.googleusercontent.com/d/${previewMedia.id}=w1600`}
+                    onError={(e) => {
+                      const image = e.currentTarget
+                      const fallback = getDriveThumbnailUrl(previewMedia.id, 1600)
+                      if (fallback && image.src !== fallback) image.src = fallback
+                    }}
                     alt={previewMedia.name}
                     draggable={false}
                     className="media-viewer-image max-h-full max-w-full select-none object-contain pointer-events-none"
@@ -4481,8 +4490,13 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                   }`}
                 >
                   <img 
-                    src={`https://lh3.googleusercontent.com/d/${thumb.id}=w120-h120-p-k-no`} 
-                    alt={thumb.name} 
+                    src={`https://lh3.googleusercontent.com/d/${thumb.id}=w120-h120-p-k-no`}
+                    onError={(e) => {
+                      const image = e.currentTarget
+                      const fallback = getDriveThumbnailUrl(thumb.id, 640)
+                      if (fallback && image.src !== fallback) image.src = fallback
+                    }}
+                    alt={thumb.name}
                     className="w-full h-full object-cover"
                   />
                 </button>
