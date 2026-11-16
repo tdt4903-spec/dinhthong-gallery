@@ -12,6 +12,10 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://dinhthongphotos.io.vn'),
   title: 'Dinh Thong Gallery',
   description: 'Khoảnh khắc lưu giữ cảm xúc',
+  // Google's image host (lh3.googleusercontent.com) refuses Drive images that
+  // carry this site's Referer. Without it every photo loads directly from
+  // Google instead of failing over to the Cloudflare Worker.
+  referrer: 'no-referrer',
   openGraph: {
     type: 'website',
     siteName: 'Dinh Thong Gallery',

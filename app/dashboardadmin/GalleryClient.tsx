@@ -3590,7 +3590,7 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                         <div className={styles.albumImage}>
                           <button type="button" onClick={() => handleOpenAlbum(album)} className={styles.openAlbum} aria-label={`Mở album ${customNames[album.id] || album.title}`} />
                           {coverImage ? (
-                            <img src={coverImage.replace(/=w\d+.*$/, '=w800-h520-p-k-no')} alt={album.title} loading="lazy" style={{ height: '100%' }} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]" />
+                            <img src={coverImage.replace(/=w\d+.*$/, '=w800-h520-p-k-no')} onError={(e) => { const image = e.currentTarget; const fallback = getDriveThumbnailUrl(coverImage, 1280); if (fallback && image.src !== fallback) image.src = fallback }} alt={album.title} loading="lazy" style={{ height: '100%' }} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]" />
                           ) : (
                             <div className={`flex h-full w-full items-center justify-center ${isDarkMode ? 'bg-white/5' : 'bg-[#f3f6f2]'}`}><CustomFolderGraphic className="h-12 w-12" /></div>
                           )}
@@ -3999,9 +3999,10 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                                     decoding="async"
                                     className="album-card-preview-image object-cover group-hover:scale-105 transition-transform duration-300"
                                     onError={(e) => {
+                                      // A folder ID is not an image; retry the cover photo through Cloudflare.
                                       const image = e.currentTarget
-                                      const fallback = `https://lh3.googleusercontent.com/d/${folder.id}=w400-h400-p-k-no`
-                                      if (image.src !== fallback) image.src = fallback
+                                      const fallback = getDriveThumbnailUrl(currentCover || '', 640)
+                                      if (fallback && image.src !== fallback) image.src = fallback
                                     }}
                                   />
                                 ) : (
