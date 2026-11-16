@@ -180,6 +180,27 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Folder name only, for opening a shared folder link directly by its ID.
+  const folderNameId = request.nextUrl.searchParams.get('folderName')
+  if (folderNameId !== null) {
+    const folderId = getDriveFileId(folderNameId)
+    if (!folderId) return NextResponse.json({ error: 'Invalid Google Drive folder ID' }, { status: 400 })
+    const metaUrl = new URL(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folderId)}`)
+    metaUrl.searchParams.set('fields', 'id,name,mimeType')
+    metaUrl.searchParams.set('supportsAllDrives', 'true')
+    metaUrl.searchParams.set('key', apiKey)
+    const metaRes = await fetch(metaUrl.toString(), { cache: 'no-store', headers: { Accept: 'application/json' } })
+    if (!metaRes.ok) return NextResponse.json({ error: 'Folder not found' }, { status: metaRes.status, headers: { 'Cache-Control': 'no-store' } })
+    const meta = await metaRes.json()
+    if (meta.mimeType !== DRIVE_FOLDER_MIME) return NextResponse.json({ error: 'Not a folder' }, { status: 400 })
+    return NextResponse.json({ id: meta.id, name: meta.name || '' }, {
+      headers: {
+        'Cache-Control': 'public, max-age=0, s-maxage=3600, stale-while-revalidate=86400',
+        'CDN-Cache-Control': 'max-age=3600, stale-while-revalidate=86400',
+      },
+    })
+  }
+
   // ============================================================
   // EXISTING FOLDER LISTING
   // Giữ nguyên chức năng /api/drive?url=...

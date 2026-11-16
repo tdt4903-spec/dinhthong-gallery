@@ -2917,6 +2917,22 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
       console.warn('Không đọc được mapping known_drive_folders:', err)
     }
 
+    // A Drive folder ID opens directly (the fallback below does the same after
+    // scanning). Scanning every master folder tree first took 15-30 seconds
+    // for a shared subfolder link. Numeric short codes still need the scan.
+    if (/^[a-zA-Z0-9_-]{20,}$/.test(code) && !/^\d+$/.test(code)) {
+      let name = ''
+      try {
+        const res = await fetch(`/api/drive?folderName=${encodeURIComponent(code)}`)
+        if (res.ok) name = String((await res.json())?.name || '')
+      } catch {}
+      return {
+        id: code,
+        driveUrl: `https://drive.google.com/drive/folders/${code}`,
+        title: customNames[code] || name || 'Dinh Thong Gallery',
+      }
+    }
+
     try {
       const { data: masterRows, error: masterError } = await supabase
         .from('master_folders')
@@ -2938,42 +2954,61 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
 
       const visited = new Set<string>()
       const MAX_FOLDERS = 1000
+      const PARALLEL_LISTINGS = 8
+      const matches = (id: string) => id === code || toNumericCode(id) === code
+      const found = async (folder: { id: string; name: string; driveUrl: string }) => {
+        const title = String(customNames[folder.id] || folder.name || 'Dinh Thong Gallery')
+        try {
+          await supabase
+            .from('known_drive_folders')
+            .upsert(
+              [{ id: folder.id, name: title, parent_url: folder.driveUrl }],
+              { onConflict: 'id' }
+            )
+        } catch {}
+        return { id: folder.id, driveUrl: folder.driveUrl, title }
+      }
 
-      while (queue.length > 0 && visited.size < MAX_FOLDERS) {
-        const current = queue.shift()!
-        if (!current?.id || visited.has(current.id)) continue
-        visited.add(current.id)
-
-        if (current.id === code || toNumericCode(current.id) === code) {
-          const title = String(customNames[current.id] || current.name || 'Dinh Thong Gallery')
-          try {
-            await supabase
-              .from('known_drive_folders')
-              .upsert(
-                [{ id: current.id, name: title, parent_url: current.driveUrl }],
-                { onConflict: 'id' }
-              )
-          } catch {}
-          return { id: current.id, driveUrl: current.driveUrl, title }
+      // Breadth-first, one tree level at a time. Each level's folder listings
+      // load in parallel; reading them one by one made a subfolder share link
+      // wait 30+ seconds (dozens of sequential Drive listings) before showing.
+      let level = queue
+      while (level.length > 0 && visited.size < MAX_FOLDERS) {
+        const pending: typeof level = []
+        for (const folder of level) {
+          if (!folder?.id || visited.has(folder.id)) continue
+          visited.add(folder.id)
+          if (matches(folder.id)) return await found(folder)
+          pending.push(folder)
         }
-
-        const res = await fetch(`/api/drive?url=${encodeURIComponent(current.driveUrl)}${isSharedGuest ? '' : `&_t=${Date.now()}`}`, {
-          cache: isSharedGuest ? 'default' : 'no-store',
-        })
-        if (!res.ok) continue
-        const data = await res.json()
-        const children = Array.isArray(data?.files) ? data.files : []
-
-        for (const child of children) {
-          if (!child || child.type !== 'folder' || !child.id) continue
-          const childId = String(child.id)
-          if (visited.has(childId)) continue
-          queue.push({
-            id: childId,
-            name: String(child.name || childId),
-            driveUrl: `https://drive.google.com/drive/folders/${childId}`,
-          })
+        const next: typeof level = []
+        for (let start = 0; start < pending.length; start += PARALLEL_LISTINGS) {
+          const batch = pending.slice(start, start + PARALLEL_LISTINGS)
+          const listings = await Promise.all(batch.map(async folder => {
+            try {
+              const res = await fetch(`/api/drive?url=${encodeURIComponent(folder.driveUrl)}${isSharedGuest ? '' : `&_t=${Date.now()}`}`, {
+                cache: isSharedGuest ? 'default' : 'no-store',
+              })
+              if (!res.ok) return []
+              const data = await res.json()
+              return Array.isArray(data?.files) ? data.files : []
+            } catch {
+              return []
+            }
+          }))
+          for (const children of listings) {
+            for (const child of children) {
+              if (!child || child.type !== 'folder' || !child.id) continue
+              const childId = String(child.id)
+              if (visited.has(childId)) continue
+              const entry = { id: childId, name: String(child.name || childId), driveUrl: `https://drive.google.com/drive/folders/${childId}` }
+              // Stop as soon as the shared folder appears among the children.
+              if (matches(childId)) { visited.add(childId); return await found(entry) }
+              next.push(entry)
+            }
+          }
         }
+        level = next
       }
     } catch (err) {
       console.warn('Không thể quét cây Drive để tìm link share:', err)

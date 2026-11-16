@@ -6,7 +6,9 @@ import './management.css'
 import { SITE_BANNER_URL, SITE_SHARE_IMAGE_URL } from '@/lib/site-assets'
 import SiteBackground from '@/components/SiteBackground'
 import WorkerOverloadNotice from '@/components/WorkerOverloadNotice'
-import siteBackgroundImage from './nen web.jpg'
+// Blurred page backdrop: a 1280px copy of 'nen web.jpg' (the 7008px original
+// was 12.7 MB on every page and heavy for phones to decode).
+import siteBackgroundImage from './site-background.jpg'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://dinhthongphotos.io.vn'),

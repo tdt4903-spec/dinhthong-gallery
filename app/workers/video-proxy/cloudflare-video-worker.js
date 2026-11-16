@@ -370,7 +370,7 @@ async function handleRequest(request, env, ctx) {
 
     if (url.pathname === '/folder') return listFolder(request, env, url)
     if (url.pathname === '/thumb') return thumbnail(request, env, url)
-    if (['/assets/logo-web-v1.png', '/assets/share-favicon-v1.png'].includes(url.pathname)) {
+    if (['/assets/logo-web-v1.png', '/assets/share-favicon-v1.png', '/assets/banner-v2.jpg'].includes(url.pathname)) {
       return staticImageAsset(request, env, url, url.pathname)
     }
     if (url.pathname === '/assets/banner-v1.jpg' || url.pathname === '/banner.jpg') {
