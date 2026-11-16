@@ -66,6 +66,8 @@ interface FolderSettings {
   collect_customer_info?: boolean
   max_viewers?: number
   enable_face_filter?: boolean
+  /** Guests may heart/select photos. Missing means allowed. */
+  allow_photo_selection?: boolean
 }
 
 interface MasterFolderItem {
@@ -291,6 +293,13 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
   const [editingFolderSetting, setEditingFolderSetting] = useState<FolderSettings | null>(null)
   const [isSavingFolderSetting, setIsSavingFolderSetting] = useState(false)
   const [editingFeatureFlags, setEditingFeatureFlags] = useState({ password: false, selectionLimit: false })
+  const [viewerResetLog, setViewerResetLog] = useState<{
+    albumId: string
+    status: 'loading' | 'ready' | 'error'
+    total: number
+    entries: { deletedCount: number; threshold: number; createdAt: string }[]
+    error: string
+  } | null>(null)
 
   const [ratings, setRatings] = useState<Record<string, number>>({})
   const [comments, setComments] = useState<Record<string, string>>({})
@@ -559,6 +568,37 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
     title: currentActiveFolderTitle,
     ...resolveAlbumFeatures(currentActiveFolderId, folderSettingsMap[currentActiveFolderId], selectedAlbum),
   }
+  // Turning selection off on the shared album also covers its subfolders.
+  const guestPhotoSelectionDisabled = isSharedGuest && (
+    activeSetting.allow_photo_selection === false ||
+    folderSettingsMap[guestRootAlbumId]?.allow_photo_selection === false
+  )
+
+  const editingSettingId = editingFolderSetting?.id || ''
+  useEffect(() => {
+    if (!editingSettingId || isSharedGuest) return
+    let active = true
+    setViewerResetLog({ albumId: editingSettingId, status: 'loading', total: 0, entries: [], error: '' })
+    void (async () => {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession()
+        const accessToken = sessionData.session?.access_token
+        if (!accessToken) throw new Error('Phiên đăng nhập đã hết hạn.')
+        const res = await fetch(`/api/admin/viewer-resets?albumId=${encodeURIComponent(editingSettingId)}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: 'no-store',
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || !data?.ok) throw new Error(data?.error || `Không đọc được log (HTTP ${res.status}).`)
+        if (active) setViewerResetLog({ albumId: editingSettingId, status: 'ready', total: Number(data.total || 0), entries: Array.isArray(data.entries) ? data.entries : [], error: '' })
+      } catch (error) {
+        if (active) setViewerResetLog({ albumId: editingSettingId, status: 'error', total: 0, entries: [], error: error instanceof Error ? error.message : 'Không đọc được log.' })
+      }
+    })()
+    return () => { active = false }
+    // supabase is recreated each render; the session read does not depend on it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingSettingId, isSharedGuest])
 
   const getActorKey = (guestMode = isSharedGuest) => {
     if (guestMode) {
@@ -1262,7 +1302,8 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
             ...normalizeAlbumFeatures(f),
             allow_comments: f.allow_comments ?? true,
             collect_customer_info: f.collect_customer_info ?? false,
-            max_viewers: Number(f.max_viewers || 0)
+            max_viewers: Number(f.max_viewers || 0),
+            allow_photo_selection: f.allow_photo_selection !== false,
           }
         })
         setFolderSettingsMap(map)
@@ -2244,6 +2285,10 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
   }
 
   const handleToggleFavorite = async (imageId: string) => {
+    if (guestPhotoSelectionDisabled) {
+      void showAlert('Album này hiện không mở chức năng chọn ảnh.')
+      return
+    }
     if (isSharedGuest && !guestCanSelect) {
       void showAlert(activeSetting.collect_customer_info ? 'Vui lòng nhập tên để bắt đầu chọn ảnh.' : 'Vui lòng chờ xác thực quyền truy cập.')
       return
@@ -2354,6 +2399,7 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
       collect_customer_info: activeSetting.collect_customer_info ?? false,
       max_viewers: activeSetting.max_viewers ?? 0,
       enable_face_filter: faceAccess.ready ? faceAccess.enabled : undefined,
+      allow_photo_selection: activeSetting.allow_photo_selection !== false,
     })
   }
 
@@ -2386,10 +2432,18 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
         }),
         allow_comments: editingFolderSetting.allow_comments ?? true,
         collect_customer_info: editingFolderSetting.collect_customer_info ?? false,
-        max_viewers: Math.max(0, Number(editingFolderSetting.max_viewers || 0))
+        max_viewers: Math.max(0, Number(editingFolderSetting.max_viewers || 0)),
+        allow_photo_selection: editingFolderSetting.allow_photo_selection !== false,
       }
 
-      const { error: settingsError } = await supabase.from('folder_settings').upsert(payload, { onConflict: 'id' })
+      let { error: settingsError } = await supabase.from('folder_settings').upsert(payload, { onConflict: 'id' })
+      let selectionToggleSaved = true
+      if (settingsError && /allow_photo_selection/.test(settingsError.message || '')) {
+        // Database migration not applied yet: keep every other setting working.
+        const { allow_photo_selection: _unsaved, ...withoutToggle } = payload
+        ;({ error: settingsError } = await supabase.from('folder_settings').upsert(withoutToggle, { onConflict: 'id' }))
+        selectionToggleSaved = false
+      }
       if (settingsError) throw settingsError
 
       if (newTitle) {
@@ -2415,7 +2469,7 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
 
       setFolderSettingsMap(prev => ({
         ...prev,
-        [editingFolderSetting.id]: { ...editingFolderSetting, ...payload }
+        [editingFolderSetting.id]: { ...editingFolderSetting, ...payload, ...(selectionToggleSaved ? {} : { allow_photo_selection: prev[editingFolderSetting.id]?.allow_photo_selection }) }
       }))
 
       const faceFilterEnabled = editingFolderSetting.enable_face_filter ?? faceAccess.enabled
@@ -2425,7 +2479,9 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
       }
 
       setEditingFolderSetting(null)
-      void showAlert(`Đã lưu cài đặt cho "${newTitle || currentActiveFolderTitle}" thành công!`)
+      void showAlert(selectionToggleSaved
+        ? `Đã lưu cài đặt cho "${newTitle || currentActiveFolderTitle}" thành công!`
+        : `Đã lưu cài đặt cho "${newTitle || currentActiveFolderTitle}", nhưng chưa lưu được bật/tắt chọn ảnh vì database chưa được cập nhật.`)
     } catch (err: any) {
       void showAlert('Lỗi lưu cài đặt: ' + err.message)
     } finally {
@@ -4153,6 +4209,7 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                                     type="button"
                                     onClick={event => { event.stopPropagation(); void handleToggleFavorite(item.id) }}
                                     disabled={isGuestSelectionReview}
+                                    style={guestPhotoSelectionDisabled ? { display: 'none' } : undefined}
                                     aria-pressed={isFavorite}
                                     aria-label={isGuestSelectionReview ? (isFavorite ? 'Ảnh khách đã chọn' : 'Ảnh khách chưa chọn') : isFavorite ? 'Bỏ chọn ảnh' : 'Thả tim chọn ảnh'}
                                     title={isGuestSelectionReview ? 'Lựa chọn của khách' : isFavorite ? 'Bỏ chọn ảnh' : 'Thả tim chọn ảnh'}
@@ -4367,6 +4424,7 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                   type="button"
                   onClick={() => void handleToggleFavorite(previewMedia.id)}
                   disabled={isGuestSelectionReview}
+                  style={guestPhotoSelectionDisabled ? { display: 'none' } : undefined}
                   aria-pressed={(displayRatings[previewMedia.id] || 0) > 0}
                   className={`flex min-h-11 items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold transition disabled:cursor-default ${(displayRatings[previewMedia.id] || 0) > 0 ? 'bg-rose-500/15 text-rose-400' : 'text-white/70 hover:bg-white/10'}`}
                 >
@@ -4436,6 +4494,7 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                 type="button"
                 onClick={() => void handleToggleFavorite(previewMedia.id)}
                 disabled={isGuestSelectionReview}
+                style={guestPhotoSelectionDisabled ? { display: 'none' } : undefined}
                 aria-pressed={(displayRatings[previewMedia.id] || 0) > 0}
                 className={`inline-flex min-h-11 items-center gap-2 rounded-full px-2 py-1 text-xs font-semibold transition disabled:cursor-default ${(displayRatings[previewMedia.id] || 0) > 0 ? 'text-rose-400' : 'text-white/70 hover:text-rose-400'}`}
               >
@@ -5016,6 +5075,39 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                     className={`w-full px-3.5 py-2 rounded-xl border outline-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-gray-50 border-gray-200'}`} 
                   />
                 </div>
+              </div>
+
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 font-semibold">
+                <input
+                  type="checkbox"
+                  checked={editingFolderSetting.allow_photo_selection !== false}
+                  onChange={(e) => setEditingFolderSetting({ ...editingFolderSetting, allow_photo_selection: e.target.checked })}
+                  className="rounded text-emerald-600"
+                />
+                <span>Cho khách chọn ảnh (thả tim)</span>
+              </label>
+
+              <div className={`rounded-xl border p-3 text-xs ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-50'}`}>
+                <p className="font-semibold">Tự xoá người xem khi đủ 1000 người</p>
+                {viewerResetLog?.albumId !== editingFolderSetting.id || viewerResetLog.status === 'loading' ? (
+                  <p className="mt-1 opacity-60">Đang tải log...</p>
+                ) : viewerResetLog.status === 'error' ? (
+                  <p className="mt-1 text-red-500">{viewerResetLog.error}</p>
+                ) : viewerResetLog.total === 0 ? (
+                  <p className="mt-1 opacity-60">Chưa tự xoá lần nào.</p>
+                ) : (
+                  <>
+                    <p className="mt-1">Đã tự xoá <strong>{viewerResetLog.total}</strong> lần.</p>
+                    <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+                      {viewerResetLog.entries.map((entry, index) => (
+                        <li key={`${entry.createdAt}-${index}`} className="flex justify-between gap-3 tabular-nums">
+                          <span>{new Date(entry.createdAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}</span>
+                          <span className="opacity-70">Xoá {entry.deletedCount} người</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
 
               <div className="flex items-center justify-between pt-2">

@@ -1,3 +1,4 @@
+import { reportWorkerFailure } from './worker-health'
 export type DownloadEntry = {
   id: string
   name: string
@@ -254,6 +255,7 @@ export async function fetchCloudflareMedia(entry: DownloadEntry, options: FetchM
       if (signal?.aborted) throw abortError(signal)
       lastError = timedOut ? new Error('Quá thời gian chờ tải về.') : error
       const retryable = timedOut || error instanceof RetryableDownloadError || error instanceof TypeError
+      if (retryable) reportWorkerFailure()
       if (!retryable || attempt === maxAttempts - 1) break
       await waitBeforeRetry(500 * 2 ** attempt, signal)
     }

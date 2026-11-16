@@ -5,6 +5,7 @@ import './studio.css'
 import './management.css'
 import { SITE_BANNER_URL, SITE_SHARE_IMAGE_URL } from '@/lib/site-assets'
 import SiteBackground from '@/components/SiteBackground'
+import WorkerOverloadNotice from '@/components/WorkerOverloadNotice'
 import siteBackgroundImage from './nen web.jpg'
 
 export const metadata: Metadata = {
@@ -41,6 +42,7 @@ export default function RootLayout({
       </head>
       <body className="studio-ui" style={{ '--site-background-image': `url("${siteBackgroundImage.src}")` } as React.CSSProperties}>
         <SiteBackground />
+        <WorkerOverloadNotice />
         {children}
       </body>
     </html>

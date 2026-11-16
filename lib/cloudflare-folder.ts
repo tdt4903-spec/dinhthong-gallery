@@ -1,3 +1,4 @@
+import { reportWorkerFailure } from './worker-health'
 import type { AlbumPhotoTimeMetadata } from './album-photo-sort'
 
 export type CloudflareFolderItem = AlbumPhotoTimeMetadata & {
@@ -127,6 +128,7 @@ export async function fetchCloudflareFolderPage(
     } catch (error) {
       throwIfAborted(signal)
       lastError = timedOut ? new Error('Máy chủ không phản hồi trong 60 giây.') : error
+      if (!(error instanceof FolderHttpError)) reportWorkerFailure()
       if (error instanceof FolderHttpError || attempt === MAX_ATTEMPTS - 1) break
     } finally {
       clearTimeout(timer)

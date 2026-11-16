@@ -10,6 +10,28 @@ const normalizeGuestName = (value: string) =>
     .replace(/\s+/g, ' ')
     .toLocaleLowerCase('vi-VN')
 
+/** Album tự xoá danh sách người xem khi đạt số người này. */
+const AUTO_RESET_VIEWER_THRESHOLD = 1000
+
+type VisitorRow = { visitor_id?: unknown; customer_name?: unknown; last_seen_at?: unknown; updated_at?: unknown }
+
+function summarizeVisitors(rows: VisitorRow[], visitorId: string, normalizedName: string) {
+  const uniqueKeys = new Set<string>()
+  let sameNamedVisitor = false
+  let sameBrowserVisitor = false
+  for (const row of rows) {
+    const rowName = normalizeGuestName(String(row?.customer_name || ''))
+    if (String(row?.visitor_id || '') === visitorId) sameBrowserVisitor = true
+    if (rowName) {
+      uniqueKeys.add(`name:${rowName}`)
+      if (normalizedName && rowName === normalizedName) sameNamedVisitor = true
+    } else if (row?.visitor_id) {
+      uniqueKeys.add(`visitor:${String(row.visitor_id)}`)
+    }
+  }
+  return { uniqueKeys, sameNamedVisitor, sameBrowserVisitor }
+}
+
 const getSecretKey = () =>
   process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
@@ -36,32 +58,46 @@ export async function POST(request: Request) {
     })
 
     // Đọc toàn bộ người đã truy cập album này qua quyền Admin
-    const { data: rows, error: rowsError } = await admin
+    const { data: initialRows, error: rowsError } = await admin
       .from('gallery_album_visitors')
       .select('visitor_id, customer_name, last_seen_at, updated_at')
       .eq('album_id', albumId)
 
     if (rowsError) throw rowsError
 
+    let rows: VisitorRow[] = initialRows || []
     const normalizedName = normalizeGuestName(customerName)
 
     // Tập hợp danh sách các khách duy nhất đã vào trước đó
-    const uniqueKeys = new Set<string>()
-    let sameNamedVisitor = false
-    let sameBrowserVisitor = false
+    let { uniqueKeys, sameNamedVisitor, sameBrowserVisitor } = summarizeVisitors(rows, visitorId, normalizedName)
 
-    ;(rows || []).forEach((row: any) => {
-      const rowName = normalizeGuestName(String(row?.customer_name || ''))
-      if (String(row?.visitor_id || '') === visitorId) sameBrowserVisitor = true
-      if (rowName) {
-        uniqueKeys.add(`name:${rowName}`)
-        if (normalizedName && rowName === normalizedName) {
-          sameNamedVisitor = true
+    // 0. Album đã đủ ngưỡng: tự xoá danh sách người xem và ghi log để admin xem lại.
+    // Chỉ xoá các bản ghi đã đọc ở trên (theo thời điểm cập nhật), không xoá khách
+    // vừa vào cùng lúc. Nhiều yêu cầu đồng thời chỉ ghi log khi thực sự xoá đủ ngưỡng.
+    if (uniqueKeys.size >= AUTO_RESET_VIEWER_THRESHOLD) {
+      const latest = rows.reduce((max: string, row) => {
+        const value = String(row?.updated_at || row?.last_seen_at || '')
+        return value > max ? value : max
+      }, '')
+      let removal = admin.from('gallery_album_visitors').delete().eq('album_id', albumId)
+      if (latest) removal = removal.lte('updated_at', latest)
+      const { data: removed, error: removeError } = await removal.select('visitor_id')
+      if (removeError) {
+        console.error('guest/register-viewer auto reset error:', removeError)
+      } else {
+        const deletedCount = Array.isArray(removed) ? removed.length : 0
+        if (deletedCount >= AUTO_RESET_VIEWER_THRESHOLD) {
+          const { error: logError } = await admin.from('gallery_viewer_reset_log').insert({
+            album_id: albumId,
+            deleted_count: deletedCount,
+            threshold: AUTO_RESET_VIEWER_THRESHOLD,
+          })
+          if (logError) console.error('guest/register-viewer reset log error:', logError)
         }
-      } else if (row?.visitor_id) {
-        uniqueKeys.add(`visitor:${String(row.visitor_id)}`)
+        rows = []
+        ;({ uniqueKeys, sameNamedVisitor, sameBrowserVisitor } = summarizeVisitors(rows, visitorId, normalizedName))
       }
-    })
+    }
 
     // 1. Trường hợp người cũ quay lại: trùng tên đã khai báo trước đó,
     // hoặc cùng trình duyệt đã từng vào và bây giờ đang xác nhận tên khi album đã đầy.
@@ -107,7 +143,7 @@ export async function POST(request: Request) {
 
     if (error) throw error
 
-    const nextRows = [...(rows || []), { visitor_id: visitorId, customer_name: customerName }]
+    const nextRows = [...rows, { visitor_id: visitorId, customer_name: customerName }]
     const nextUniqueKeys = new Set<string>()
     nextRows.forEach((row: any) => {
       const rowName = normalizeGuestName(String(row?.customer_name || ''))
