@@ -73,7 +73,11 @@ async function fetchOriginalImageFromImageHost(fileId, metadata) {
     const type = response.headers.get('content-type') || ''
     const length = Number(response.headers.get('content-length') || 0)
     const expected = Number(metadata.size || 0)
-    if (response.status === 200 && response.body && /^image\//i.test(type) && (!expected || !length || length === expected)) {
+    // Large originals arrive as application/octet-stream; an exact byte size
+    // match with the Drive metadata still proves it is the original file.
+    const sizeMatches = expected > 0 && length === expected
+    const imageType = /^image\//i.test(type)
+    if (response.status === 200 && response.body && (sizeMatches || (imageType && (!expected || !length)))) {
       return response
     }
     void response.body?.cancel().catch(() => {})
