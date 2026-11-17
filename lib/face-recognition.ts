@@ -1505,8 +1505,88 @@ export function clusterDetectedFaces(
     // Low quality assignments never become matching references or move the
     // centroid, keeping later assignments anchored to the clear seed faces.
   }
-  return consolidated.sort((a, b) => b.imageIds.length - a.imageIds.length || faceQuality(b.faces[0]) - faceQuality(a.faces[0]))
+  return attachSplitViews(consolidated, threshold)
+    .sort((a, b) => b.imageIds.length - a.imageIds.length || faceQuality(b.faces[0]) - faceQuality(a.faces[0]))
     .map((cluster, index) => ({ ...cluster, label: `Khuôn mặt #${index + 1}` }))
+}
+
+/** Cluster faces used for nearest-neighbour scoring, best quality first. */
+function scoringFaces(cluster: FaceCluster, limit = 40): DetectedFaceRecord[] {
+  if (cluster.faces.length <= limit) return cluster.faces
+  return [...cluster.faces].sort((a, b) => faceQuality(b) - faceQuality(a)).slice(0, limit)
+}
+
+/**
+ * Mean of the k smallest distances between the given faces and a cluster.
+ * Profile and tilted views are close to the matching views of the same
+ * person even when they are far from that person's frontal anchor.
+ */
+function nearestViewsScore(faces: DetectedFaceRecord[], candidates: DetectedFaceRecord[], maximum: number, k = 5): number {
+  const distances: number[] = []
+  for (const face of faces) {
+    for (const candidate of candidates) {
+      const distance = faceDistance(face, candidate, maximum)
+      if (Number.isFinite(distance)) distances.push(distance)
+    }
+  }
+  if (distances.length === 0) return Infinity
+  distances.sort((a, b) => a - b)
+  const nearest = distances.slice(0, Math.min(k, distances.length))
+  // A single lucky pair is weak evidence; pad missing neighbours with the cap.
+  while (nearest.length < Math.min(k, faces.length * candidates.length)) nearest.push(maximum)
+  return nearest.reduce((sum, value) => sum + value, 0) / nearest.length
+}
+
+/**
+ * Reattach small groups (1-3 photos, or at most a quarter of the target's
+ * photos) that are really side or tilted views of a larger person group. Measured on a real family album: these groups sit
+ * within 0.45 of the right person (mean of the 5 nearest views) and at least
+ * 0.06 closer to it than to anyone else; different people stayed above that.
+ * Groups that share a photo with the target are never joined.
+ */
+function attachSplitViews(clusters: FaceCluster[], threshold: number): FaceCluster[] {
+  const strictness = Math.max(0, 0.38 - threshold)
+  const maximum = 0.45 - strictness
+  const margin = 0.06
+  const cap = maximum + 0.15
+  const large = clusters.filter(cluster => new Set(cluster.imageIds).size >= 4)
+  if (large.length === 0) return clusters
+  const largeImages = new Map(large.map(cluster => [cluster, new Set(cluster.imageIds)]))
+  const largeFaces = new Map(large.map(cluster => [cluster, scoringFaces(cluster)]))
+  const absorbed = new Set<FaceCluster>()
+  const isSmallFor = (photos: number, target: FaceCluster) =>
+    photos <= 3 || photos * 4 <= largeImages.get(target)!.size
+  // Smallest groups first; a group that absorbed nothing yet can still join a
+  // much larger one, but nothing joins a group that was absorbed itself.
+  const candidates = [...clusters].sort((a, b) => a.imageIds.length - b.imageIds.length)
+  for (const small of candidates) {
+    const smallImages = new Set(small.imageIds)
+    // Every nearby group counts as a competitor for the margin; only a group
+    // much larger than this one can absorb it.
+    const scored: { target: FaceCluster; score: number; eligible: boolean }[] = []
+    for (const target of large) {
+      if (target === small || absorbed.has(target)) continue
+      const targetImages = largeImages.get(target)!
+      let conflict = false
+      for (const id of smallImages) if (targetImages.has(id)) { conflict = true; break }
+      if (conflict) continue
+      // Cheap rejection: far from the whole group on average.
+      if (boundedDistance(small.centroid, target.centroid, cap) > cap) continue
+      const score = nearestViewsScore(small.faces, largeFaces.get(target)!, cap)
+      if (Number.isFinite(score)) scored.push({ target, score, eligible: isSmallFor(smallImages.size, target) })
+    }
+    scored.sort((a, b) => a.score - b.score)
+    const best = scored[0]?.eligible ? scored[0].target : undefined
+    const bestScore = scored[0]?.score ?? Infinity
+    const secondScore = scored[1]?.score ?? Infinity
+    if (!best || bestScore > maximum || secondScore - bestScore < margin) continue
+    const targetImages = largeImages.get(best)!
+    best.faces = [...best.faces, ...small.faces]
+    for (const id of smallImages) targetImages.add(id)
+    best.imageIds = [...targetImages]
+    absorbed.add(small)
+  }
+  return absorbed.size > 0 ? clusters.filter(cluster => !absorbed.has(cluster)) : clusters
 }
 
 function consolidateFaceViews(clusters: FaceCluster[], threshold: number): FaceCluster[] {
@@ -1573,25 +1653,25 @@ export function matchFaceCluster(cluster: FaceCluster, _threshold = 0.38): Set<s
 }
 
 /** Match a query to an identity, refusing an ambiguous lookalike instead of
- * falling back to an unrestricted search over every detected face. */
+ * falling back to an unrestricted search over every detected face. A selfie
+ * is compared with the nearest views of each person (not only the frontal
+ * anchor), since phone selfies rarely look like the album's reference shot. */
 export function matchReferenceFace(clusters: FaceCluster[], target: DetectedFaceRecord, threshold = 0.38): Set<string> {
   const exact = clusters.find(cluster => cluster.faces.some(face =>
     face.imageId === target.imageId && face.faceId === target.faceId && faceDistance(face, target) < 0.00001
   ))
   if (exact) return matchFaceCluster(exact)
+  const maximum = threshold + 0.07
+  const cap = maximum + 0.15
   let best: FaceCluster | undefined
   let nearest = Infinity, runnerUp = Infinity
   for (const cluster of clusters) {
-    const referenceIds = new Set(cluster.referenceFaceIds || [cluster.faces[0]?.faceId])
-    let distance = Infinity
-    for (const face of cluster.faces) {
-      if (referenceIds.has(face.faceId)) distance = Math.min(distance, faceDistance(face, target))
-    }
-    if (distance < nearest) {
-      runnerUp = nearest; nearest = distance; best = cluster
-    } else if (distance < runnerUp) runnerUp = distance
+    const score = nearestViewsScore([target], scoringFaces(cluster), cap, 3)
+    if (score < nearest) {
+      runnerUp = nearest; nearest = score; best = cluster
+    } else if (score < runnerUp) runnerUp = score
   }
-  return best && nearest <= threshold && runnerUp - nearest >= 0.05 ? matchFaceCluster(best) : new Set()
+  return best && nearest <= maximum && runnerUp - nearest >= 0.04 ? matchFaceCluster(best) : new Set()
 }
 
 export function matchFacesByDescriptors(
