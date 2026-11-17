@@ -31,8 +31,20 @@ import {
   loadCachedFolderFaces,
   matchReferenceFace,
   matchFaceCluster,
+  renderFaceAvatar,
   scanAlbumFaces,
 } from '@/lib/face-recognition'
+import {
+  FACE_INDEX_THRESHOLDS,
+  type PublishedFaceIndex,
+  clusterPositions,
+  clustersFromFaceIndex,
+  decodeFaceIndex,
+  encodeFaceIndex,
+  faceIndexRevision,
+  fetchPublishedFaceIndex,
+  publishFaceIndex,
+} from '@/lib/face-index'
 import {
   type ConfirmedFaceGroup,
   applyConfirmedFaceGroups,
@@ -58,6 +70,73 @@ export interface FaceFilterPanelProps {
   onClearInspectImageItem?: () => void
   clearSignal?: number
   onScanActivityChange?: (running: boolean) => void
+  /** Admin workspace: show the "save results for guests" controls. */
+  canPublishIndex?: boolean
+  getAdminToken?: () => Promise<string>
+}
+
+/** Guests without a published index only auto-scan albums this small. */
+const GUEST_AUTO_SCAN_LIMIT = 300
+
+/** Images whose published faces are still valid for the current revision. */
+function coveredImageIds(index: PublishedFaceIndex | null, items: ScannableMediaItem[]): Set<string> {
+  const covered = new Set<string>()
+  if (!index) return covered
+  for (const item of items) {
+    if (!index.revisions.has(item.id)) continue
+    const published = index.revisions.get(item.id) || ''
+    const current = faceIndexRevision(item)
+    if (!published || !current || published === current) covered.add(item.id)
+  }
+  return covered
+}
+
+/** Groups faces off the UI thread; falls back to the main thread. */
+function clusterFacesInWorker(faces: DetectedFaceRecord[], threshold: number): Promise<FaceCluster[]> {
+  return new Promise(resolve => {
+    const fallback = () => resolve(clusterDetectedFaces(faces, threshold))
+    let worker: Worker
+    try {
+      worker = new Worker(new URL('../../lib/face-cluster.worker.ts', import.meta.url), { type: 'module' })
+    } catch {
+      fallback()
+      return
+    }
+    worker.onmessage = event => {
+      worker.terminate()
+      if (!Array.isArray(event.data?.clusters)) { fallback(); return }
+      const byId = new Map(faces.map(face => [face.faceId, face]))
+      type GroupResult = Omit<FaceCluster, 'faces' | 'avatarDataUrl'> & { faceIds: string[] }
+      resolve((event.data.clusters as GroupResult[]).map(({ faceIds, ...cluster }) => ({
+        ...cluster,
+        avatarDataUrl: '',
+        faces: faceIds.map(id => byId.get(id)).filter((face): face is DetectedFaceRecord => Boolean(face)),
+      })))
+    }
+    worker.onerror = event => { event.preventDefault(); worker.terminate(); fallback() }
+    worker.postMessage({ faces: faces.map(face => ({ ...face, avatarDataUrl: '' })), threshold })
+  })
+}
+
+/** Face thumbnail; faces from a published index are cropped on demand. */
+function FaceAvatar({ face, item, alt, className }: {
+  face?: DetectedFaceRecord
+  item?: ScannableMediaItem
+  alt: string
+  className: string
+}) {
+  const key = face ? `${face.faceId}:${face.box.x},${face.box.y}` : ''
+  const [rendered, setRendered] = useState<{ key: string; src: string } | null>(null)
+  useEffect(() => {
+    if (!face || face.avatarDataUrl) return
+    let active = true
+    void renderFaceAvatar(face, item).then(src => { if (active) setRendered({ key, src }) })
+    return () => { active = false }
+  }, [face, item, key])
+  const src = face?.avatarDataUrl || (rendered?.key === key ? rendered.src : '')
+  return src
+    ? <img src={src} alt={alt} className={className} />
+    : <div className="flex h-full w-full items-center justify-center"><UserIcon className="h-6 w-6 text-gray-400" /></div>
 }
 
 // Only this small label ticks; the face cards and gallery do not rerender once
@@ -90,6 +169,8 @@ export default function FaceFilterPanel({
   onClearInspectImageItem,
   clearSignal = 0,
   onScanActivityChange,
+  canPublishIndex = false,
+  getAdminToken,
 }: FaceFilterPanelProps) {
   const images = useMemo(() => [...new Map(providedImages.filter(item => !item.type || item.type === 'image').map(item => [item.id, item])).values()], [providedImages])
   const panelRef = useRef<HTMLElement | null>(null)
@@ -111,6 +192,15 @@ export default function FaceFilterPanel({
     message: '',
   })
   const [scanError, setScanError] = useState('')
+  const [publishedIndex, setPublishedIndex] = useState<PublishedFaceIndex | null>(null)
+  const [coveredIds, setCoveredIds] = useState<Set<string>>(new Set())
+  const [indexStatus, setIndexStatus] = useState<'idle' | 'loading' | 'ready' | 'none' | 'error'>('idle')
+  const [ignorePublished, setIgnorePublished] = useState(false)
+  const [publishState, setPublishState] = useState<{ status: 'idle' | 'working' | 'done' | 'error'; message: string }>({ status: 'idle', message: '' })
+  // Faces of covered images come from the published index; only the remaining
+  // images are scanned on this device.
+  const publishedFacesRef = useRef<DetectedFaceRecord[]>([])
+  const coveredIdsRef = useRef<Set<string>>(new Set())
   const [isGroupingFaces, setIsGroupingFaces] = useState(false)
   const [groupedFaces, setGroupedFaces] = useState<{ source: DetectedFaceRecord[]; clusters: FaceCluster[] } | null>(null)
   const [hydratedCacheKey, setHydratedCacheKey] = useState('')
@@ -123,6 +213,11 @@ export default function FaceFilterPanel({
   })).sort((left, right) => left.id.localeCompare(right.id))]), [folderId, images])
   const imagesRef = useRef(images)
   imagesRef.current = images
+  const imagesById = useMemo(() => new Map(images.map(item => [item.id, item])), [images])
+  const uncoveredCount = images.length - coveredIds.size
+  const autoScanAllowed = canPublishIndex || uncoveredCount <= GUEST_AUTO_SCAN_LIMIT
+  const autoScanAllowedRef = useRef(autoScanAllowed)
+  useEffect(() => { autoScanAllowedRef.current = autoScanAllowed }, [autoScanAllowed])
 
   const [threshold, setThreshold] = useState<number>(0.38)
   const [selectedClusterFaces, setSelectedClusterFaces] = useState<Map<string, DetectedFaceRecord>>(new Map())
@@ -205,6 +300,13 @@ export default function FaceFilterPanel({
     setReferenceSourceLabel('')
     setScanError('')
     setScanProgress({ completed: 0, total: images.length, stage: 'idle', message: '' })
+    setPublishedIndex(null)
+    setCoveredIds(new Set())
+    setIndexStatus('idle')
+    setIgnorePublished(false)
+    setPublishState({ status: 'idle', message: '' })
+    publishedFacesRef.current = []
+    coveredIdsRef.current = new Set()
     onFaceFilterChange(null)
     return () => {
       if (activeScanRef.current) activeScanRef.current.cancelled = true
@@ -231,30 +333,60 @@ export default function FaceFilterPanel({
     }
   }, [clearSignal])
 
-  // Tải kết quả đã cache trong IndexedDB (nếu trước đó đã quét)
+  // Kết quả đã lưu cho khách (chỉ mục trên Cloudflare) + kết quả đã quét trên máy này
   useEffect(() => {
     let active = true
     if (!isOpen || !folderId || images.length === 0 || hydratedCacheKey === cacheKey) return
-
-    loadCachedFolderFaces(folderId, imagesRef.current).then(({ faces, scannedCount: cachedCount }) => {
+    const controller = new AbortController()
+    const items = imagesRef.current
+    void (async () => {
+      let index: PublishedFaceIndex | null = null
+      if (!ignorePublished) {
+        setIndexStatus('loading')
+        try {
+          index = await fetchPublishedFaceIndex(folderId, items, controller.signal)
+          if (active) setIndexStatus(index ? 'ready' : 'none')
+        } catch {
+          if (active) setIndexStatus('error')
+        }
+      }
       if (!active) return
+      const covered = coveredImageIds(index, items)
+      const publishedFaces = index ? index.faces.filter(face => covered.has(face.imageId)) : []
+      let local: { faces: DetectedFaceRecord[]; scannedCount: number } = { faces: [], scannedCount: 0 }
+      try {
+        local = await loadCachedFolderFaces(folderId, items.filter(item => !covered.has(item.id)))
+      } catch {}
+      if (!active) return
+      publishedFacesRef.current = publishedFaces
+      coveredIdsRef.current = covered
+      setPublishedIndex(index)
+      setCoveredIds(covered)
       if (!activeScanRef.current) {
-        setDetectedFaces(faces)
-        setScannedCount(cachedCount)
+        setDetectedFaces(local.faces.length > 0 ? [...publishedFaces, ...local.faces] : publishedFaces)
+        setScannedCount(covered.size + local.scannedCount)
       }
       setHydratedCacheKey(cacheKey)
-    }).catch(() => {
-      if (active) setHydratedCacheKey(cacheKey)
-    })
+    })()
 
     return () => {
       active = false
+      controller.abort()
     }
-  }, [folderId, isOpen, cacheKey, FACE_SCAN_VERSION])
+  }, [folderId, isOpen, cacheKey, ignorePublished, FACE_SCAN_VERSION])
 
   const startAlbumScan = useCallback(
     async (forceRescan = false) => {
-      const scanImages = imagesRef.current
+      if (forceRescan) {
+        // A full rescan replaces the published results on this device.
+        publishedFacesRef.current = []
+        coveredIdsRef.current = new Set()
+        setCoveredIds(new Set())
+        setIgnorePublished(true)
+      }
+      const covered = coveredIdsRef.current
+      const publishedFaces = publishedFacesRef.current
+      const scanImages = imagesRef.current.filter(item => !covered.has(item.id))
       if (activeScanRef.current || scanImages.length === 0) return
 
       const run = { cancelled: false, startedAt: performance.now() }
@@ -288,13 +420,13 @@ export default function FaceFilterPanel({
             lastProgressUpdate = now
             lastProgressStage = info.stage
             setScanProgress(info)
-            setScannedCount(info.completed)
+            setScannedCount(covered.size + info.completed)
             // Publish a bounded snapshot, not one regroup per image. People
             // can start filtering without waiting for the last album photo.
             if (info.completed - lastPublishedCompleted >= 16 && now - lastFacesUpdate >= 5000) {
               lastFacesUpdate = now
               lastPublishedCompleted = info.completed
-              setDetectedFaces([...partialFaces])
+              setDetectedFaces([...publishedFaces, ...partialFaces])
             }
             if (info.failedCount) setScanError(`${info.failedCount} ảnh chưa quét được. Bấm Quét album để thử lại các ảnh này.`)
           },
@@ -302,7 +434,7 @@ export default function FaceFilterPanel({
         // Finalize the last snapshot. A stopped scan also returns its completed
         // images; partial snapshots remain usable while inference continues.
         if (activeScanRef.current === run) {
-          setDetectedFaces(finalFaces)
+          setDetectedFaces(finalFaces.length > 0 ? [...publishedFaces, ...finalFaces] : publishedFaces)
         }
       } catch (err: any) {
         if (run.cancelled || activeScanRef.current !== run) return
@@ -323,11 +455,11 @@ export default function FaceFilterPanel({
   useEffect(() => {
     if (!isOpen || images.length === 0 || hydratedCacheKey !== cacheKey) return
     const key = `${cacheKey}_${FACE_SCAN_VERSION}`
-    if (autoScanTriggeredForFolderRef.current !== key && scannedCount < images.length && !isScanning) {
+    if (autoScanTriggeredForFolderRef.current !== key && scannedCount < images.length && !isScanning && autoScanAllowed) {
       autoScanTriggeredForFolderRef.current = key
       void startAlbumScan(false)
     }
-  }, [isOpen, folderId, images.length, scannedCount, isScanning, startAlbumScan, hydratedCacheKey, cacheKey])
+  }, [isOpen, folderId, images.length, scannedCount, isScanning, startAlbumScan, hydratedCacheKey, cacheKey, autoScanAllowed])
 
   // Xử lý khi người dùng bấm "Tìm mặt trong ảnh này" từ modal xem ảnh lớn
   useEffect(() => {
@@ -339,7 +471,9 @@ export default function FaceFilterPanel({
       setIsDetectingReference(true)
       setScanError('')
       try {
-        const faces = await detectFacesInDriveImage(inspectImageItem, folderId || 'default_album')
+        const faces = coveredIdsRef.current.has(inspectImageItem.id)
+          ? publishedFacesRef.current.filter(face => face.imageId === inspectImageItem.id)
+          : await detectFacesInDriveImage(inspectImageItem, folderId || 'default_album')
         if (!active) return
 
         if (faces.length === 0) {
@@ -348,7 +482,7 @@ export default function FaceFilterPanel({
           setReferenceFaces(faces)
           setReferenceSourceLabel(`Ảnh: ${inspectImageItem.name}`)
           setSelectedReferenceFaceIds(faces.length === 1 ? new Set([faces[0].faceId]) : new Set())
-          void startAlbumScan(false)
+          if (autoScanAllowedRef.current) void startAlbumScan(false)
         }
       } catch (err: any) {
         if (!active) return
@@ -382,6 +516,14 @@ export default function FaceFilterPanel({
       finish([])
       return
     }
+    // Every face came from the published index: use its precomputed groups.
+    if (publishedIndex && detectedFaces === publishedFacesRef.current) {
+      const stored = clustersFromFaceIndex(publishedIndex, threshold, imageId => coveredIdsRef.current.has(imageId))
+      if (stored) {
+        finish(stored)
+        return
+      }
+    }
     setIsGroupingFaces(true)
     const fallback = () => {
       worker?.terminate()
@@ -408,7 +550,7 @@ export default function FaceFilterPanel({
       worker.postMessage({ faces: detectedFaces.map(face => ({ ...face, avatarDataUrl: '' })), threshold })
     } catch { fallback() }
     return () => { active = false; worker?.terminate(); clearTimeout(fallbackTimer) }
-  }, [detectedFaces, threshold])
+  }, [detectedFaces, threshold, publishedIndex])
 
   const faceClusters: FaceCluster[] = useMemo(() => {
     // Keep the last usable index while a new grouping runs. Clearing it made
@@ -537,7 +679,7 @@ export default function FaceFilterPanel({
       setReferenceSourceLabel(`Ảnh tải lên: ${file.name}`)
       setSelectedReferenceFaceIds(faces.length === 1 ? new Set([faces[0].faceId]) : new Set())
 
-      if (scannedCount < images.length && !isScanning) {
+      if (scannedCount < images.length && !isScanning && autoScanAllowedRef.current) {
         void startAlbumScan(false)
       }
     } catch (err: any) {
@@ -609,6 +751,32 @@ export default function FaceFilterPanel({
     setMergeSelection(new Set())
     setIsMergeMode(false)
     handleClearFaceFilter()
+  }
+
+  const handlePublishIndex = async () => {
+    if (!getAdminToken || publishState.status === 'working') return
+    const items = imagesRef.current
+    const faces = [...new Map(detectedFaces.map(face => [face.faceId, face])).values()]
+    setPublishState({ status: 'working', message: 'Đang chuẩn bị kết quả...' })
+    try {
+      // Group the stored (16-bit) descriptors so guests see exactly these groups.
+      const draft = decodeFaceIndex(encodeFaceIndex({ albumId: folderId, scanVersion: FACE_SCAN_VERSION, items, faces }).buffer as ArrayBuffer, items)
+      const clusters: Record<string, [number[], number[]][]> = {}
+      for (const value of FACE_INDEX_THRESHOLDS) {
+        setPublishState({ status: 'working', message: `Đang gom nhóm ${draft.faces.length} khuôn mặt (độ nhạy ${value})...` })
+        clusters[String(value)] = clusterPositions(await clusterFacesInWorker(draft.faces, value), draft.faces)
+      }
+      const data = encodeFaceIndex({ albumId: folderId, scanVersion: FACE_SCAN_VERSION, items, faces: draft.faces, clusters })
+      setPublishState({ status: 'working', message: `Đang tải lên ${(data.byteLength / 1048576).toFixed(1)} MB...` })
+      await publishFaceIndex(folderId, data, await getAdminToken())
+      const index = decodeFaceIndex(data.buffer as ArrayBuffer, items)
+      setPublishedIndex(index)
+      setCoveredIds(coveredImageIds(index, items))
+      setIndexStatus('ready')
+      setPublishState({ status: 'done', message: `Đã lưu cho khách: ${items.length} ảnh, ${draft.faces.length} khuôn mặt.` })
+    } catch (error) {
+      setPublishState({ status: 'error', message: error instanceof Error ? error.message : 'Không lưu được kết quả nhận diện.' })
+    }
   }
 
   if (!isOpen || typeof document === 'undefined') return null
@@ -745,6 +913,39 @@ export default function FaceFilterPanel({
         Có thể chọn nhiều khuôn mặt cùng lúc. Kết quả gồm ảnh có ít nhất một mặt đã chọn; bấm lại để bỏ chọn. Nếu mặt nghiêng bị tách, dùng “Gộp mặt trùng”.
       </p>
 
+      {indexStatus === 'loading' && (
+        <p role="status" className="mt-3 flex items-center gap-2 text-xs text-emerald-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Đang tải kết quả nhận diện đã lưu...</p>
+      )}
+      {!canPublishIndex && !autoScanAllowed && !isScanning && scannedCount < images.length && indexStatus !== 'loading' && (
+        <p className={`mt-3 rounded-xl px-3 py-2 text-xs leading-relaxed ${isDarkMode ? 'bg-amber-500/10 text-amber-200' : 'bg-amber-50 text-amber-800'}`}>
+          Album này chưa có đủ kết quả nhận diện sẵn ({images.length - uncoveredCount}/{images.length} ảnh). Bấm “Quét album” để tự quét phần còn lại trên máy của bạn; với album lớn việc này có thể mất nhiều thời gian.
+        </p>
+      )}
+      {canPublishIndex && (
+        <div className={`mt-3 rounded-xl border p-3 text-xs leading-relaxed ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-white'}`}>
+          <p className="font-semibold">Kết quả nhận diện cho khách</p>
+          <p className="mt-1 opacity-70">
+            {indexStatus === 'loading' ? 'Đang kiểm tra kết quả đã lưu...'
+              : publishedIndex ? `Đã lưu lúc ${new Date(publishedIndex.meta.createdAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })} cho ${publishedIndex.meta.images.length} ảnh.${uncoveredCount > 0 ? ` Có ${uncoveredCount} ảnh mới hoặc đã sửa chưa có trong kết quả này.` : ''}`
+              : indexStatus === 'error' ? 'Không đọc được kết quả đã lưu.'
+              : 'Chưa lưu. Khách sẽ phải tự quét album trên máy của họ (rất chậm với album lớn).'}
+          </p>
+          <button
+            type="button"
+            onClick={() => void handlePublishIndex()}
+            disabled={isScanning || isGroupingFaces || scannedCount < images.length || publishState.status === 'working' || !getAdminToken}
+            className="mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white disabled:opacity-40"
+          >
+            {publishState.status === 'working' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Lưu kết quả cho khách
+          </button>
+          {scannedCount < images.length && !isScanning && <p className="mt-1 opacity-60">Quét xong toàn bộ {images.length} ảnh rồi bấm lưu.</p>}
+          {publishState.message && (
+            <p role="status" className={`mt-1 ${publishState.status === 'error' ? 'text-red-500' : 'text-emerald-600'}`}>{publishState.message}</p>
+          )}
+        </div>
+      )}
+
       {!isScanning && !isGroupingFaces && scannedCount > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
           <span className={isDarkMode ? 'text-white/45' : 'text-gray-500'}>Ảnh đã phân tích được dùng lại trên thiết bị này; chỉ quét thêm ảnh mới.</span>
@@ -830,15 +1031,7 @@ export default function FaceFilterPanel({
                   }`}
                 >
                   <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-black/20">
-                    {face.avatarDataUrl ? (
-                      <img
-                        src={face.avatarDataUrl}
-                        alt={`Mặt mẫu ${idx + 1}`}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <UserIcon className="h-6 w-6 m-auto text-gray-400" />
-                    )}
+                    <FaceAvatar face={face} item={imagesById.get(face.imageId)} alt={`Mặt mẫu ${idx + 1}`} className="h-full w-full object-cover" />
                     {isSelected && (
                       <div className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white shadow">
                         <Check className="h-2.5 w-2.5" />
@@ -896,17 +1089,7 @@ export default function FaceFilterPanel({
                   title={isMergeMode ? `Chọn nhóm mặt #${idx + 1}` : `Bấm để lọc ${imageCount} ảnh có khuôn mặt này`}
                 >
                   <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-black/15">
-                    {cluster.avatarDataUrl ? (
-                      <img
-                        src={cluster.avatarDataUrl}
-                        alt={cluster.label}
-                        className="h-full w-full object-cover group-hover:scale-105 transition-transform"
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center">
-                        <UserIcon className="h-6 w-6 text-gray-400" />
-                      </div>
-                    )}
+                    <FaceAvatar face={cluster.faces[0]} item={imagesById.get(cluster.faces[0]?.imageId || '')} alt={cluster.label} className="h-full w-full object-cover group-hover:scale-105 transition-transform" />
 
                     <span
                       className={`absolute bottom-1 right-1 rounded-md px-1.5 py-0.5 text-[9px] font-bold leading-none backdrop-blur-md ${

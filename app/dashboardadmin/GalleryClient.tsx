@@ -3962,6 +3962,8 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
                 onClearInspectImageItem={handleClearInspectFaceImage}
                 clearSignal={clearFaceFilterSignal}
                 onScanActivityChange={setIsFaceScanRunning}
+                canPublishIndex={!isSharedGuest}
+                getAdminToken={async () => (await supabase.auth.getSession()).data.session?.access_token || ''}
               />
             )}
 

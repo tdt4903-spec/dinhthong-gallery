@@ -80,7 +80,7 @@ function isValidFaceRecord(value: unknown): value is DetectedFaceRecord {
     face.box.width > 0 && face.box.height > 0
 }
 
-function imageRevision(item: ScannableMediaItem): string {
+export function imageRevision(item: ScannableMediaItem): string {
   if (item.contentHash) return `hash:${item.contentHash}`
   return item.modifiedTime ? `mtime:${item.modifiedTime}` : ''
 }
@@ -510,6 +510,73 @@ function cropFaceAvatarDataUrl(
 
   ctx.drawImage(sourceCanvas, sx, sy, sWidth, sHeight, 0, 0, avatarSize, avatarSize)
   return avatarCanvas.toDataURL('image/jpeg', 0.78)
+}
+
+const AVATAR_PREVIEW_SIZE = 512
+const AVATAR_CONCURRENCY = 4
+const avatarResults = new Map<string, Promise<string>>()
+let activeAvatarJobs = 0
+const waitingAvatarJobs: Array<() => void> = []
+
+async function withAvatarSlot<T>(job: () => Promise<T>): Promise<T> {
+  if (activeAvatarJobs >= AVATAR_CONCURRENCY) await new Promise<void>(resolve => waitingAvatarJobs.push(resolve))
+  activeAvatarJobs++
+  try {
+    return await job()
+  } finally {
+    activeAvatarJobs--
+    waitingAvatarJobs.shift()?.()
+  }
+}
+
+/**
+ * Face thumbnail for a record without a stored avatar (faces from a published
+ * album index carry none, to keep that file small). Crops a small preview from
+ * Google, or from the Cloudflare thumbnail if Google refuses it. Results are
+ * memoized and at most four previews load at once.
+ */
+export function renderFaceAvatar(face: DetectedFaceRecord, item?: ScannableMediaItem): Promise<string> {
+  if (face.avatarDataUrl) return Promise.resolve(face.avatarDataUrl)
+  const key = `${face.faceId}:${face.box.x},${face.box.y},${face.box.width},${face.box.height}`
+  const existing = avatarResults.get(key)
+  if (existing) return existing
+  const result = withAvatarSlot(async () => {
+    const revision = item ? imageRevision(item) : ''
+    const sources = [
+      `https://lh3.googleusercontent.com/d/${encodeURIComponent(face.imageId)}=w${AVATAR_PREVIEW_SIZE}${revision ? `?_dtv=${encodeURIComponent(revision)}` : ''}`,
+      `${(process.env.NEXT_PUBLIC_VIDEO_PROXY_URL || 'https://dinhthong-video-proxy.tdt4903.workers.dev').replace(/\/+$/, '')}/thumb?id=${encodeURIComponent(face.imageId)}&size=640`,
+    ]
+    for (const source of sources) {
+      let image: HTMLImageElement | undefined
+      const canvas = document.createElement('canvas')
+      const avatarCanvas = document.createElement('canvas')
+      try {
+        image = await loadCorsSafeImage(source)
+        canvas.width = image.naturalWidth
+        canvas.height = image.naturalHeight
+        avatarCanvas.width = FACE_AVATAR_SIZE
+        avatarCanvas.height = FACE_AVATAR_SIZE
+        canvas.getContext('2d')?.drawImage(image, 0, 0)
+        const dataUrl = cropFaceAvatarDataUrl(canvas, {
+          x: face.box.x * canvas.width, y: face.box.y * canvas.height,
+          width: face.box.width * canvas.width, height: face.box.height * canvas.height,
+        }, avatarCanvas)
+        if (dataUrl) return dataUrl
+      } catch {
+        // Try the next source.
+      } finally {
+        if (image) image.src = ''
+        canvas.width = 0
+        canvas.height = 0
+        avatarCanvas.width = 0
+        avatarCanvas.height = 0
+      }
+    }
+    return ''
+  })
+  avatarResults.set(key, result)
+  void result.then(value => { if (!value) avatarResults.delete(key) })
+  return result
 }
 
 interface FaceDetectionProposal {

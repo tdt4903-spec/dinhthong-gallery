@@ -18,7 +18,7 @@ const CACHE_TTL = 60 * 60 * 24 * 7
 function withCors(response) {
   const headers = new Headers(response.headers)
   headers.set('Access-Control-Allow-Origin', '*')
-  headers.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS')
+  headers.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, DELETE, OPTIONS')
   headers.set('Access-Control-Allow-Headers', 'Range, Authorization, Content-Type')
   headers.set(
     'Access-Control-Expose-Headers',
@@ -326,6 +326,97 @@ async function albumFaceAccess(request, env, url) {
   return Response.json({ albumId, enabled: body.enabled }, { headers })
 }
 
+const FACE_INDEX_MAX_BYTES = 24 * 1024 * 1024
+const ADMIN_ORIGINS = ['https://dinhthongphotos.io.vn', 'https://www.dinhthongphotos.io.vn', 'https://dinhthong-gallery.vercel.app', 'http://localhost:3000', 'http://127.0.0.1:3000']
+
+/** null when the request carries a gallery admin session, else the error response. */
+async function requireGalleryAdmin(request, env, headers) {
+  const origin = request.headers.get('Origin') || ''
+  if (origin && !ADMIN_ORIGINS.includes(origin)) return Response.json({ error: 'Không cho phép thay đổi từ trang này.' }, { status: 403, headers })
+  const authorization = request.headers.get('Authorization') || ''
+  if (!/^Bearer \S+$/.test(authorization)) return Response.json({ error: 'Vui lòng đăng nhập admin.' }, { status: 401, headers })
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return Response.json({ error: 'Chưa cấu hình xác thực admin.' }, { status: 503, headers })
+  const permission = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/is_gallery_admin`, {
+    method: 'POST',
+    headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: authorization, 'Content-Type': 'application/json' },
+    body: '{}',
+  })
+  if (!permission.ok || await permission.json() !== true) return Response.json({ error: 'Chỉ admin được thực hiện thao tác này.' }, { status: 403, headers })
+  return null
+}
+
+/**
+ * Published face index of an album folder (see lib/face-index.ts). Guests read
+ * it so their phones never scan a whole album; only admins write or delete it.
+ */
+async function faceIndex(request, env, url, ctx) {
+  const noStore = { 'Cache-Control': 'no-store' }
+  const albumId = url.searchParams.get('id') || ''
+  if (!validDriveId(albumId) || albumId.length > 200) return Response.json({ error: 'Mã album không hợp lệ.' }, { status: 400, headers: noStore })
+  if (!env.ALBUM_COVERS) return Response.json({ error: 'Kho dữ liệu chưa sẵn sàng.' }, { status: 503, headers: noStore })
+  const key = `face-index:v1:${albumId}`
+  const cacheKey = new Request(new URL(`/_internal/face-index-v1/${albumId}`, url.origin))
+
+  if (request.method === 'GET' || request.method === 'HEAD') {
+    let cached = await caches.default.match(cacheKey)
+    if (!cached) {
+      const { value, metadata } = await env.ALBUM_COVERS.getWithMetadata(key, 'arrayBuffer')
+      if (!value) return Response.json({ error: 'Album chưa có kết quả nhận diện.' }, { status: 404, headers: { 'Cache-Control': 'public, max-age=30' } })
+      cached = new Response(value, {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Cache-Control': 'public, max-age=300',
+          'X-Face-Index-Updated': String(metadata?.updatedAt || ''),
+        },
+      })
+      ctx.waitUntil(caches.default.put(cacheKey, cached.clone()).catch(() => {}))
+    }
+    const headers = new Headers(cached.headers)
+    headers.set('Cache-Control', 'public, max-age=60')
+    return new Response(request.method === 'HEAD' ? null : cached.body, { headers })
+  }
+
+  if (request.method !== 'POST' && request.method !== 'DELETE') {
+    return new Response('Method Not Allowed', { status: 405, headers: { ...noStore, Allow: 'GET, HEAD, POST, DELETE, OPTIONS' } })
+  }
+  const denied = await requireGalleryAdmin(request, env, noStore)
+  if (denied) return denied
+
+  if (request.method === 'DELETE') {
+    await env.ALBUM_COVERS.delete(key)
+    await caches.default.delete(cacheKey).catch(() => {})
+    return Response.json({ albumId, deleted: true }, { headers: noStore })
+  }
+
+  if (Number(request.headers.get('Content-Length') || 0) > FACE_INDEX_MAX_BYTES) return Response.json({ error: 'Kết quả nhận diện vượt giới hạn 24 MB.' }, { status: 413, headers: noStore })
+  const reader = request.body?.getReader()
+  if (!reader) return Response.json({ error: 'Thiếu dữ liệu.' }, { status: 400, headers: noStore })
+  const chunks = []
+  let length = 0
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    length += value.byteLength
+    if (length > FACE_INDEX_MAX_BYTES) { await reader.cancel(); return Response.json({ error: 'Kết quả nhận diện vượt giới hạn 24 MB.' }, { status: 413, headers: noStore }) }
+    chunks.push(value)
+  }
+  const bytes = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+  // Same header checks as the client decoder: magic, version and album ID.
+  if (length < 12 || bytes[0] !== 0x44 || bytes[1] !== 0x54 || bytes[2] !== 0x46 || bytes[3] !== 0x49 || bytes[4] !== 1) {
+    return Response.json({ error: 'Dữ liệu nhận diện không hợp lệ.' }, { status: 400, headers: noStore })
+  }
+  const metaLength = new DataView(bytes.buffer).getUint32(8, true)
+  let meta
+  try { meta = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + metaLength))) } catch { meta = null }
+  if (!meta || meta.albumId !== albumId) return Response.json({ error: 'Dữ liệu nhận diện không khớp album.' }, { status: 400, headers: noStore })
+  const updatedAt = Date.now()
+  await env.ALBUM_COVERS.put(key, bytes, { metadata: { updatedAt, size: length, faces: Array.isArray(meta.faceIds) ? meta.faceIds.length : 0 } })
+  await caches.default.delete(cacheKey).catch(() => {})
+  return Response.json({ albumId, updatedAt, size: length }, { headers: noStore })
+}
+
 async function albumCover(request, env, url) {
   const noStore = { 'Cache-Control': 'no-store' }
   if (!env.ALBUM_COVERS) return Response.json({ error: 'Kho ảnh bìa chưa sẵn sàng.' }, { status: 503, headers: noStore })
@@ -395,6 +486,7 @@ async function handleRequest(request, env, ctx) {
 
     if (url.pathname === '/album-covers' || url.pathname.startsWith('/album-covers/')) return albumCover(request, env, url)
     if (url.pathname === '/album-face-access') return albumFaceAccess(request, env, url)
+    if (url.pathname === '/face-index') return faceIndex(request, env, url, ctx)
 
     // Chỉ cho phép GET và HEAD; OPTIONS phục vụ kiểm tra CORS.
     if (request.method !== 'GET' && request.method !== 'HEAD') {
