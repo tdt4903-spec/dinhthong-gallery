@@ -89,6 +89,43 @@ async function fetchOriginalImageFromImageHost(fileId, metadata) {
   return null
 }
 
+/**
+ * Google Drive's public download page (drive.usercontent.google.com) for a
+ * file shared by link. It has its own limits, separate from the Drive API that
+ * answers 403 downloadQuotaExceeded, and supports ranges, so it backs up both
+ * videos and images. An HTML page (sign-in, virus warning, quota notice) or a
+ * file whose total size differs from the Drive metadata is never accepted.
+ */
+async function fetchFromDriveDownloadPage(fileId, metadata, range) {
+  const target = new URL('https://drive.usercontent.google.com/download')
+  target.searchParams.set('id', fileId)
+  target.searchParams.set('export', 'download')
+  target.searchParams.set('confirm', 't')
+  if (metadata?.resourceKey) target.searchParams.set('resourcekey', metadata.resourceKey)
+  const headers = new Headers({ 'Accept-Encoding': 'identity' })
+  if (range) headers.set('Range', range)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 20_000)
+  try {
+    const response = await fetch(target.toString(), { headers, redirect: 'follow', signal: controller.signal, cf: { cacheTtl: 0 } })
+    const type = response.headers.get('content-type') || ''
+    const expected = Number(metadata?.size || 0)
+    const total = response.status === 206
+      ? Number((response.headers.get('content-range') || '').split('/')[1] || 0)
+      : Number(response.headers.get('content-length') || 0)
+    if ((response.status === 200 || response.status === 206) && response.body && !/^text\/html/i.test(type) &&
+        (!expected || !total || total === expected)) {
+      return response
+    }
+    void response.body?.cancel().catch(() => {})
+  } catch {
+    // No further fallback.
+  } finally {
+    clearTimeout(timer)
+  }
+  return null
+}
+
 function validDriveId(id) {
   return /^[a-zA-Z0-9_-]{10,}$/.test(id)
 }
@@ -580,7 +617,14 @@ async function handleRequest(request, env, ctx) {
       }
     }
 
-    if (!metadataRes.ok) {
+    // Quota or rate limits on the metadata call must not block a download:
+    // continue without metadata (no size check, no edge cache) and let the
+    // image host or the public download page serve the file.
+    let metadataMissing = false
+    if (!metadataRes.ok && (metadataRes.status === 403 || metadataRes.status === 429 || metadataRes.status >= 500)) {
+      void metadataRes.body?.cancel().catch(() => {})
+      metadataMissing = true
+    } else if (!metadataRes.ok) {
       const errorText = await metadataRes.text().catch(() => '')
 
       return new Response(
@@ -597,7 +641,7 @@ async function handleRequest(request, env, ctx) {
       )
     }
 
-    const metadata = await metadataRes.json()
+    const metadata = metadataMissing ? {} : await metadataRes.json()
 
     // Không cho tải folder
     if (metadata.mimeType === DRIVE_FOLDER_MIME) {
@@ -628,7 +672,7 @@ async function handleRequest(request, env, ctx) {
     const originalCacheUrl = new URL(`/_internal/original-image-v2/${fileId}`, url.origin)
     originalCacheUrl.searchParams.set('version', String(metadata.version || 'current'))
     const originalCacheKey = new Request(originalCacheUrl)
-    if (isImage && !range) {
+    if (isImage && !range && !metadataMissing) {
       const cached = await caches.default.match(originalCacheKey)
       if (cached) {
         const cachedHeaders = new Headers(cached.headers)
@@ -700,7 +744,7 @@ async function handleRequest(request, env, ctx) {
 
     // Whole original images come from the image host first (see
     // fetchOriginalImageFromImageHost); videos and ranges use the Drive API.
-    let upstream = isImage && !range && metadata.mimeType?.startsWith('image/')
+    let upstream = isImage && !range && (metadataMissing || metadata.mimeType?.startsWith('image/'))
       ? await fetchOriginalImageFromImageHost(fileId, metadata)
       : null
     if (!upstream) {
@@ -717,6 +761,14 @@ async function handleRequest(request, env, ctx) {
           },
         })
       } finally { clearTimeout(upstreamTimer) }
+    }
+
+    if (!upstream.ok && upstream.status !== 206) {
+      const fallback = await fetchFromDriveDownloadPage(fileId, metadata, range)
+      if (fallback) {
+        void upstream.body?.cancel().catch(() => {})
+        upstream = fallback
+      }
     }
 
     if (!upstream.ok && upstream.status !== 206) {
@@ -842,7 +894,7 @@ async function handleRequest(request, env, ctx) {
     // Original images up to 32 MB are cached at the edge. Versioned keys retain
     // new edits; per-request filenames never fragment the media cache.
     const fullSize = Number(contentLength || metadata.size || 0)
-    if (isImage && !range && request.method === 'GET' && upstream.status === 200 &&
+    if (isImage && !range && !metadataMissing && request.method === 'GET' && upstream.status === 200 &&
         metadata.mimeType?.startsWith('image/') && !/^(?:text\/|application\/json)/i.test(upstream.headers.get('content-type') || '') && fullSize > 0 && fullSize <= 32 * 1024 * 1024) {
       const cachedHeaders = new Headers(headers)
       cachedHeaders.set('Cache-Control', 'public, max-age=3600')
