@@ -51,6 +51,40 @@ function contentDisposition(fileName) {
   return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
 }
 
+/**
+ * Original image bytes from Google's image host. The Drive API (alt=media)
+ * answers 403 downloadQuotaExceeded once many guests download the same album
+ * photos; lh3 "=d" serves the same original file without that per-file API
+ * quota. Only an image whose size matches the Drive metadata is accepted, so a
+ * resized or re-encoded copy never replaces the original download.
+ */
+async function fetchOriginalImageFromImageHost(fileId, metadata) {
+  const target = new URL(`https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}=d`)
+  if (metadata.resourceKey) target.searchParams.set('resourcekey', metadata.resourceKey)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 20_000)
+  try {
+    const response = await fetch(target.toString(), {
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: { 'Accept-Encoding': 'identity' },
+      cf: { cacheTtl: 0 },
+    })
+    const type = response.headers.get('content-type') || ''
+    const length = Number(response.headers.get('content-length') || 0)
+    const expected = Number(metadata.size || 0)
+    if (response.status === 200 && response.body && /^image\//i.test(type) && (!expected || !length || length === expected)) {
+      return response
+    }
+    void response.body?.cancel().catch(() => {})
+  } catch {
+    // Fall back to the Drive API below.
+  } finally {
+    clearTimeout(timer)
+  }
+  return null
+}
+
 function validDriveId(id) {
   return /^[a-zA-Z0-9_-]{10,}$/.test(id)
 }
@@ -370,7 +404,7 @@ async function handleRequest(request, env, ctx) {
 
     if (url.pathname === '/folder') return listFolder(request, env, url)
     if (url.pathname === '/thumb') return thumbnail(request, env, url)
-    if (['/assets/logo-web-v1.png', '/assets/share-favicon-v1.png', '/assets/banner-v2.jpg'].includes(url.pathname)) {
+    if (['/assets/logo-web-v1.png', '/assets/share-favicon-v1.png', '/assets/banner-v2.jpg', '/assets/site-background-v2.jpg'].includes(url.pathname)) {
       return staticImageAsset(request, env, url, url.pathname)
     }
     if (url.pathname === '/assets/banner-v1.jpg' || url.pathname === '/banner.jpg') {
@@ -568,20 +602,26 @@ async function handleRequest(request, env, ctx) {
      * Không cache.
      */
 
-    const upstreamController = new AbortController()
-    const upstreamTimer = setTimeout(() => upstreamController.abort(), 20_000)
-    let upstream
-    try {
-      upstream = await fetch(mediaUrl.toString(), {
-        headers: upstreamHeaders,
-        redirect: 'follow',
-        signal: upstreamController.signal,
-        cf: range ? undefined : isImage ? { cacheTtl: 0 } : {
-          cacheEverything: true,
-          cacheTtl: CACHE_TTL,
-        },
-      })
-    } finally { clearTimeout(upstreamTimer) }
+    // Whole original images come from the image host first (see
+    // fetchOriginalImageFromImageHost); videos and ranges use the Drive API.
+    let upstream = isImage && !range && metadata.mimeType?.startsWith('image/')
+      ? await fetchOriginalImageFromImageHost(fileId, metadata)
+      : null
+    if (!upstream) {
+      const upstreamController = new AbortController()
+      const upstreamTimer = setTimeout(() => upstreamController.abort(), 20_000)
+      try {
+        upstream = await fetch(mediaUrl.toString(), {
+          headers: upstreamHeaders,
+          redirect: 'follow',
+          signal: upstreamController.signal,
+          cf: range ? undefined : isImage ? { cacheTtl: 0 } : {
+            cacheEverything: true,
+            cacheTtl: CACHE_TTL,
+          },
+        })
+      } finally { clearTimeout(upstreamTimer) }
+    }
 
     if (!upstream.ok && upstream.status !== 206) {
       const errorText = await upstream.text().catch(() => '')

@@ -3,12 +3,9 @@ import type { Metadata } from 'next'
 import './globals.css'
 import './studio.css'
 import './management.css'
-import { SITE_BANNER_URL, SITE_SHARE_IMAGE_URL } from '@/lib/site-assets'
+import { SITE_BACKGROUND_URL, SITE_BANNER_URL, SITE_SHARE_IMAGE_URL } from '@/lib/site-assets'
 import SiteBackground from '@/components/SiteBackground'
 import WorkerOverloadNotice from '@/components/WorkerOverloadNotice'
-// Blurred page backdrop: a 1280px copy of 'nen web.jpg' (the 7008px original
-// was 12.7 MB on every page and heavy for phones to decode).
-import siteBackgroundImage from './site-background.jpg'
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://dinhthongphotos.io.vn'),
@@ -46,7 +43,7 @@ export default function RootLayout({
         <link rel="preconnect" href="https://lh3.googleusercontent.com" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://lh3.googleusercontent.com" />
       </head>
-      <body className="studio-ui" style={{ '--site-background-image': `url("${siteBackgroundImage.src}")` } as React.CSSProperties}>
+      <body className="studio-ui" style={{ '--site-background-image': `url("${SITE_BACKGROUND_URL}")` } as React.CSSProperties}>
         <SiteBackground />
         <WorkerOverloadNotice />
         {children}
