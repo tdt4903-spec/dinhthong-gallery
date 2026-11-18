@@ -22,6 +22,8 @@ import { captureTimeStatus, usePhotoCaptureTimes } from '@/lib/use-photo-capture
 import { saveAlbumFaceAccess, useAlbumFaceAccess } from '@/lib/album-face-access'
 import { useAlbumScrollGuard } from '@/lib/use-album-scroll-guard'
 import { getDriveThumbnailUrl } from '@/lib/drive-thumbnail'
+import { detectInAppBrowser, type InAppBrowser } from '@/lib/in-app-browser'
+import OpenInBrowserNotice from '../../components/ui/OpenInBrowserNotice'
 import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
 import styles from './gallery-workspace.module.css'
 import { 
@@ -438,6 +440,14 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
   const mobileAlbumShareRef = useRef<{ dispose: () => Promise<void> } | null>(null)
   const mobileAlbumSharingRef = useRef(false)
   const downloadUiMountedRef = useRef(true)
+  // Zalo/Facebook/Messenger built-in browsers cannot save to Photos.
+  const [inAppBrowser, setInAppBrowser] = useState<InAppBrowser | null>(null)
+  const [inAppBannerHidden, setInAppBannerHidden] = useState(false)
+  const [showOpenInBrowser, setShowOpenInBrowser] = useState(false)
+  useEffect(() => {
+    const detected = detectInAppBrowser(navigator.userAgent)
+    if (detected) setInAppBrowser(detected)
+  }, [])
   const [pendingMobileAlbumShare, setPendingMobileAlbumShare] = useState<{ files: File[]; label: string; imageCount: number; videoCount: number; entryIds: string[] } | null>(null)
   const [isSharingMobileAlbum, setIsSharingMobileAlbum] = useState(false)
   const partResolverRef = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null)
@@ -1857,6 +1867,7 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
     }
     if (!canShareAlbum) {
       setArchiveProgress(previous => previous ? { ...previous, status: 'error', error: 'Trình duyệt này không hỗ trợ gửi toàn bộ album vào Ảnh trong một lần. Hãy mở bằng Safari trên iPhone/iPad hoặc Chrome mới nhất trên Android.' } : null)
+      if (inAppBrowser) setShowOpenInBrowser(true)
       return
     }
     const prepared = mobileAlbumShareRef.current
@@ -2014,12 +2025,25 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
     }
   }
 
+  /** The browser can hand image files to the phone's save/share sheet. */
+  const canSaveFilesToPhone = () => {
+    try {
+      if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') return false
+      return navigator.canShare({ files: [new File([new Uint8Array([0xff, 0xd8, 0xff])], 'test.jpg', { type: 'image/jpeg' })] })
+    } catch {
+      return false
+    }
+  }
+
   const startMobileMediaDownload = async (
     title: string, key: string, getEntries: (signal: AbortSignal) => Promise<DownloadEntry[]>
   ) => {
     if (archiveControllerRef.current || isPreparingMobileImages || pendingMobileAlbumShare || mobileAlbumSharingRef.current) return
-    if (typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') {
-      void showAlert('Hãy mở album bằng Safari trên iPhone/iPad hoặc Chrome trên Android để dùng bảng lưu ảnh của điện thoại.')
+    if (!canSaveFilesToPhone()) {
+      // Inside Zalo/Facebook/Messenger: explain how to reopen in Safari/Chrome.
+      const detected = inAppBrowser || detectInAppBrowser(navigator.userAgent) || { app: 'trình duyệt hiện tại', platform: /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'ios' as const : /Android/i.test(navigator.userAgent) ? 'android' as const : 'other' as const }
+      setInAppBrowser(detected)
+      setShowOpenInBrowser(true)
       return
     }
     const controller = new AbortController()
@@ -3547,6 +3571,13 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
         selectedAlbum && !isSharedGuest ? 'lg:pt-[90px]' : ''
       }`}>
         
+        {isSharedGuest && inAppBrowser && !inAppBannerHidden && (
+          <OpenInBrowserNotice browser={inAppBrowser} variant="banner" onClose={() => setInAppBannerHidden(true)} />
+        )}
+        {showOpenInBrowser && inAppBrowser && (
+          <OpenInBrowserNotice browser={inAppBrowser} variant="dialog" onClose={() => setShowOpenInBrowser(false)} />
+        )}
+
         {/* BANNER CẢNH BÁO ĐỊNH KỲ NGÀY 30 */}
         {!isSharedGuest && getMonthlyCleanWarning() && (
           <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 flex items-center justify-between gap-3 shadow-sm">
