@@ -13,7 +13,10 @@ export type InAppBrowser = {
 const APPS: [RegExp, string][] = [
   [/Zalo/i, 'Zalo'],
   [/MessengerForiOS|MessengerLite|\bOrca-Android\b|FB_IAB\/MESSENGER/i, 'Messenger'],
-  [/FBAN|FBAV|FB_IAB|FBIOS|FB4A/i, 'Facebook'],
+  // On iPhone, Messenger opens links in the same browser as Facebook (same
+  // user agent), so the two cannot be told apart there.
+  [/FBIOS|FBAN\/FBIOS/i, 'Facebook/Messenger'],
+  [/FBAN|FBAV|FB_IAB|FB4A/i, 'Facebook'],
   [/Instagram/i, 'Instagram'],
   [/musical_ly|BytedanceWebview|TikTok|trill_/i, 'TikTok'],
   [/\bLine\//i, 'Line'],
@@ -29,6 +32,21 @@ export function detectInAppBrowser(userAgent: string): InAppBrowser | null {
   // Generic Android WebView (most other apps' built-in browsers).
   if (platform === 'android' && /; wv\)/.test(ua)) return { app: 'ứng dụng', platform }
   return null
+}
+
+/** Where the app's own "open in browser" menu is, in one sentence. */
+export function externalBrowserMenuStep(browser: InAppBrowser): string {
+  const corner = browser.platform === 'android' ? 'biểu tượng ⋮ hoặc •••' : 'biểu tượng •••'
+  if (/Facebook|Messenger|Instagram/.test(browser.app)) return `Bấm ${corner} ở góc trên bên phải → chọn “Mở trong trình duyệt ngoài”.`
+  if (browser.app === 'Zalo') return `Bấm ${corner} ở góc trên bên phải → chọn “Mở bằng trình duyệt”.`
+  if (browser.app === 'TikTok') return `Bấm ${corner} ở góc trên bên phải → chọn “Mở trong trình duyệt”.`
+  return `Bấm ${corner} ở góc trên của màn hình → chọn “Mở bằng trình duyệt”.`
+}
+
+/** Ask the phone to reopen this page in its real browser. Some apps ignore it. */
+export function openInExternalBrowser(browser: InAppBrowser, url = window.location.href): void {
+  if (browser.platform === 'ios') window.location.href = iosSafariUrl(url)
+  else if (browser.platform === 'android') window.location.href = androidChromeUrl(url)
 }
 
 /** Android: open this URL in Chrome (falls back to the system browser chooser). */

@@ -22,7 +22,7 @@ import { captureTimeStatus, usePhotoCaptureTimes } from '@/lib/use-photo-capture
 import { saveAlbumFaceAccess, useAlbumFaceAccess } from '@/lib/album-face-access'
 import { useAlbumScrollGuard } from '@/lib/use-album-scroll-guard'
 import { getDriveThumbnailUrl } from '@/lib/drive-thumbnail'
-import { detectInAppBrowser, type InAppBrowser } from '@/lib/in-app-browser'
+import { detectInAppBrowser, openInExternalBrowser, type InAppBrowser } from '@/lib/in-app-browser'
 import OpenInBrowserNotice from '../../components/ui/OpenInBrowserNotice'
 import { usePageScrollLock } from '@/lib/use-page-scroll-lock'
 import styles from './gallery-workspace.module.css'
@@ -444,10 +444,26 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
   const [inAppBrowser, setInAppBrowser] = useState<InAppBrowser | null>(null)
   const [inAppBannerHidden, setInAppBannerHidden] = useState(false)
   const [showOpenInBrowser, setShowOpenInBrowser] = useState(false)
+  const inAppDetectedOnLoadRef = useRef(false)
   useEffect(() => {
     const detected = detectInAppBrowser(navigator.userAgent)
-    if (detected) setInAppBrowser(detected)
+    if (detected) {
+      inAppDetectedOnLoadRef.current = true
+      setInAppBrowser(detected)
+    }
   }, [])
+  // Guests arriving inside a chat app: ask the phone once per session to
+  // reopen the album in its real browser. Apps that block it keep the banner.
+  useEffect(() => {
+    if (!isSharedGuest || !inAppBrowser || !inAppDetectedOnLoadRef.current) return
+    try {
+      if (sessionStorage.getItem('dt_external_browser_tried')) return
+      sessionStorage.setItem('dt_external_browser_tried', '1')
+    } catch {
+      return
+    }
+    openInExternalBrowser(inAppBrowser)
+  }, [isSharedGuest, inAppBrowser])
   const [pendingMobileAlbumShare, setPendingMobileAlbumShare] = useState<{ files: File[]; label: string; imageCount: number; videoCount: number; entryIds: string[] } | null>(null)
   const [isSharingMobileAlbum, setIsSharingMobileAlbum] = useState(false)
   const partResolverRef = useRef<{ resolve: () => void; reject: (error: Error) => void } | null>(null)
