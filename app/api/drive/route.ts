@@ -244,16 +244,23 @@ export async function GET(request: NextRequest) {
       let coverUrl = ''
 
       if (isFolder) {
-        try {
-          const childQuery = encodeURIComponent(`'${f.id}' in parents and mimeType contains 'image/' and trashed = false`)
-          const childUrl = `https://www.googleapis.com/drive/v3/files?q=${childQuery}&fields=files(id)&pageSize=1&key=${apiKey}`
+        // Cover: first image in the folder, or else in its first subfolder
+        // (event albums keep photos one level deeper, e.g. Session/Camera 1).
+        const firstChild = async (parentId: string, filter: string, orderBy = '') => {
+          const query = encodeURIComponent(`'${parentId}' in parents and ${filter} and trashed = false`)
+          const childUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id)&pageSize=1${orderBy ? `&orderBy=${orderBy}` : ''}&key=${apiKey}`
           const childRes = await fetch(childUrl, { next: { revalidate: 300 } })
-          if (childRes.ok) {
-            const childData = await childRes.json()
-            if (childData.files && childData.files.length > 0) {
-              coverUrl = `https://lh3.googleusercontent.com/d/${childData.files[0].id}=w1000`
-            }
+          if (!childRes.ok) return ''
+          const childData = await childRes.json()
+          return String(childData.files?.[0]?.id || '')
+        }
+        try {
+          let imageId = await firstChild(f.id, "mimeType contains 'image/'")
+          if (!imageId) {
+            const subfolderId = await firstChild(f.id, `mimeType = '${DRIVE_FOLDER_MIME}'`, 'name')
+            if (subfolderId) imageId = await firstChild(subfolderId, "mimeType contains 'image/'")
           }
+          if (imageId) coverUrl = `https://lh3.googleusercontent.com/d/${imageId}=w1000`
         } catch {}
       }
 

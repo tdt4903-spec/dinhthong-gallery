@@ -1190,7 +1190,9 @@ export default function GalleryClient({ displayName = '', approved = false }: Ga
   const currentFolderCoverUrl = String(
     rootCustomCover ||
     (cachedCoverIsImage ? cachedCurrentFolderCover : '') ||
-    firstCurrentImage?.coverUrl || firstCurrentImage?.url || firstCurrentImage?.fullUrl || ''
+    firstCurrentImage?.coverUrl || firstCurrentImage?.url || firstCurrentImage?.fullUrl ||
+    // A folder holding only subfolders (event sessions) borrows their cover.
+    visibleItems.find(item => item.type === 'folder' && item.coverUrl)?.coverUrl || ''
   )
   const downloadableImages = useMemo(() => visibleItems.filter(item => item.type === 'image'), [visibleItems])
   const selectedDownloadImages = downloadableImages.filter(item => downloadSelectedIds.has(item.id))
