@@ -977,6 +977,14 @@ function measureFaceQuality(
   }
 }
 
+/**
+ * Scan tuning. `recovery` runs up to two extra detector passes on crops to
+ * find small faces in crowd shots; `minDescriptorSide` skips the (expensive)
+ * identity embedding for faces smaller than this many preview pixels, which
+ * are too small to identify reliably anyway.
+ */
+export const faceScanOptions = { recovery: true, minDescriptorSide: 0 }
+
 async function detectFacesWithGpu(
   img: HTMLImageElement,
   imageId: string,
@@ -1027,7 +1035,7 @@ async function detectFacesWithGpu(
     }
     const baseProposals = uniqueFaceProposals(detections.map((detection: any, index: number) => proposalFor(detection, `${imageId}_face_${index}`)))
     const recoveredProposals: FaceDetectionProposal[] = []
-    const recoveryRegions = smallFaceRecoveryRegions(canvas, detections, weakCandidates)
+    const recoveryRegions = faceScanOptions.recovery ? smallFaceRecoveryRegions(canvas, detections, weakCandidates) : []
     if (recoveryRegions.length) {
       const recoveryCanvas = document.createElement('canvas')
       try {
@@ -1060,7 +1068,9 @@ async function detectFacesWithGpu(
         recoveryCanvas.height = 0
       }
     }
+    const minSide = faceScanOptions.minDescriptorSide
     const proposals = [...baseProposals, ...uniqueFaceProposals(recoveredProposals)]
+      .filter(proposal => !minSide || Math.min(proposal.box.width * width, proposal.box.height * height) >= minSide)
     const faces: DetectedFaceRecord[] = []
     const batchSize = inferenceBatchSize()
     for (let start = 0; start < proposals.length; start += batchSize) {

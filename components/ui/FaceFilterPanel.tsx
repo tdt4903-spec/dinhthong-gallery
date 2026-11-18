@@ -31,6 +31,7 @@ import {
   loadCachedFolderFaces,
   matchReferenceFace,
   matchFaceCluster,
+  faceScanOptions,
   renderFaceAvatar,
   scanAlbumFaces,
 } from '@/lib/face-recognition'
@@ -75,8 +76,13 @@ export interface FaceFilterPanelProps {
   getAdminToken?: () => Promise<string>
 }
 
-/** Guests without a published index only auto-scan albums this small. */
-const GUEST_AUTO_SCAN_LIMIT = 300
+/**
+ * Guests scan on their own phone. Faces smaller than this (preview pixels) are
+ * skipped: they cannot seed a person group anyway, and dropping them roughly
+ * halves the per-face work. Measured on 40 gala photos: every clear face kept
+ * (65/65), 57% fewer embeddings. Admin scans keep every face.
+ */
+const GUEST_MIN_FACE_SIDE = 28
 
 /** Images whose published faces are still valid for the current revision. */
 function coveredImageIds(index: PublishedFaceIndex | null, items: ScannableMediaItem[]): Set<string> {
@@ -215,9 +221,9 @@ export default function FaceFilterPanel({
   imagesRef.current = images
   const imagesById = useMemo(() => new Map(images.map(item => [item.id, item])), [images])
   const uncoveredCount = images.length - coveredIds.size
-  const autoScanAllowed = canPublishIndex || uncoveredCount <= GUEST_AUTO_SCAN_LIMIT
-  const autoScanAllowedRef = useRef(autoScanAllowed)
-  useEffect(() => { autoScanAllowedRef.current = autoScanAllowed }, [autoScanAllowed])
+  useEffect(() => {
+    faceScanOptions.minDescriptorSide = canPublishIndex ? 0 : GUEST_MIN_FACE_SIDE
+  }, [canPublishIndex])
 
   const [threshold, setThreshold] = useState<number>(0.38)
   const [selectedClusterFaces, setSelectedClusterFaces] = useState<Map<string, DetectedFaceRecord>>(new Map())
@@ -405,6 +411,8 @@ export default function FaceFilterPanel({
 
       let lastProgressUpdate = 0
       let lastProgressStage = ''
+      // Remaining-time estimate from this scan's own pace (cached images excluded).
+      let paceBaseline: { completed: number; at: number } | null = null
       let lastFacesUpdate = performance.now()
       let lastPublishedCompleted = 0
       try {
@@ -419,7 +427,17 @@ export default function FaceFilterPanel({
             if (info.stage === lastProgressStage && info.stage === 'scanning' && now - lastProgressUpdate < 500) return
             lastProgressUpdate = now
             lastProgressStage = info.stage
-            setScanProgress(info)
+            if (info.stage === 'scanning' && !paceBaseline) paceBaseline = { completed: info.completed, at: now }
+            let eta = ''
+            if (paceBaseline && info.stage === 'scanning') {
+              const scanned = info.completed - paceBaseline.completed
+              const elapsed = (now - paceBaseline.at) / 1000
+              if (scanned >= 5 && elapsed >= 5) {
+                const seconds = Math.round(((info.total - info.completed) * elapsed) / scanned)
+                if (seconds > 0) eta = ` • còn khoảng ${seconds >= 90 ? `${Math.round(seconds / 60)} phút` : `${seconds} giây`}`
+              }
+            }
+            setScanProgress(eta ? { ...info, message: `${info.message}${eta}` } : info)
             setScannedCount(covered.size + info.completed)
             // Publish a bounded snapshot, not one regroup per image. People
             // can start filtering without waiting for the last album photo.
@@ -455,11 +473,11 @@ export default function FaceFilterPanel({
   useEffect(() => {
     if (!isOpen || images.length === 0 || hydratedCacheKey !== cacheKey) return
     const key = `${cacheKey}_${FACE_SCAN_VERSION}`
-    if (autoScanTriggeredForFolderRef.current !== key && scannedCount < images.length && !isScanning && autoScanAllowed) {
+    if (autoScanTriggeredForFolderRef.current !== key && scannedCount < images.length && !isScanning) {
       autoScanTriggeredForFolderRef.current = key
       void startAlbumScan(false)
     }
-  }, [isOpen, folderId, images.length, scannedCount, isScanning, startAlbumScan, hydratedCacheKey, cacheKey, autoScanAllowed])
+  }, [isOpen, folderId, images.length, scannedCount, isScanning, startAlbumScan, hydratedCacheKey, cacheKey])
 
   // Xử lý khi người dùng bấm "Tìm mặt trong ảnh này" từ modal xem ảnh lớn
   useEffect(() => {
@@ -482,7 +500,7 @@ export default function FaceFilterPanel({
           setReferenceFaces(faces)
           setReferenceSourceLabel(`Ảnh: ${inspectImageItem.name}`)
           setSelectedReferenceFaceIds(faces.length === 1 ? new Set([faces[0].faceId]) : new Set())
-          if (autoScanAllowedRef.current) void startAlbumScan(false)
+          void startAlbumScan(false)
         }
       } catch (err: any) {
         if (!active) return
@@ -679,7 +697,7 @@ export default function FaceFilterPanel({
       setReferenceSourceLabel(`Ảnh tải lên: ${file.name}`)
       setSelectedReferenceFaceIds(faces.length === 1 ? new Set([faces[0].faceId]) : new Set())
 
-      if (scannedCount < images.length && !isScanning && autoScanAllowedRef.current) {
+      if (scannedCount < images.length && !isScanning) {
         void startAlbumScan(false)
       }
     } catch (err: any) {
@@ -915,11 +933,6 @@ export default function FaceFilterPanel({
 
       {indexStatus === 'loading' && (
         <p role="status" className="mt-3 flex items-center gap-2 text-xs text-emerald-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Đang tải kết quả nhận diện đã lưu...</p>
-      )}
-      {!canPublishIndex && !autoScanAllowed && !isScanning && scannedCount < images.length && indexStatus !== 'loading' && (
-        <p className={`mt-3 rounded-xl px-3 py-2 text-xs leading-relaxed ${isDarkMode ? 'bg-amber-500/10 text-amber-200' : 'bg-amber-50 text-amber-800'}`}>
-          Album này chưa có đủ kết quả nhận diện sẵn ({images.length - uncoveredCount}/{images.length} ảnh). Bấm “Quét album” để tự quét phần còn lại trên máy của bạn; với album lớn việc này có thể mất nhiều thời gian.
-        </p>
       )}
       {canPublishIndex && (
         <div className={`mt-3 rounded-xl border p-3 text-xs leading-relaxed ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-white'}`}>
