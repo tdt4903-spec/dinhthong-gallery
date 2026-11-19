@@ -1583,19 +1583,28 @@ export default function DashboardBooking() {
                           value={booking.email}
                         />
 
-                        <Info
-                          title="Ngày chụp"
-                          value={
-                            booking.event_date
-                              ? new Date(
-                                  booking.event_date +
-                                  'T00:00:00'
-                                ).toLocaleDateString(
-                                  'vi-VN'
-                                )
-                              : ''
-                          }
-                        />
+                        <label className="block">
+                          <span className="text-[9px] uppercase tracking-[0.12em] opacity-35">
+                            Ngày chụp
+                          </span>
+                          {/* Editing the date saves at once; a confirmed booking's
+                              Google Calendar event moves to the new day. */}
+                          <input
+                            type="date"
+                            aria-label={`Ngày chụp của ${booking.full_name}`}
+                            defaultValue={booking.event_date ? booking.event_date.slice(0, 10) : ''}
+                            key={`${booking.id}-${booking.event_date || ''}`}
+                            // Saved when leaving the field, so a half-typed year is never stored.
+                            onBlur={event => {
+                              const value = event.currentTarget.value
+                              const year = Number(value.slice(0, 4))
+                              if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || year < 2000 || year > 2100) return
+                              if (value === (booking.event_date || '').slice(0, 10)) return
+                              void updateBooking(booking.id, { event_date: value })
+                            }}
+                            className={`mt-1 ${adminInput(isDarkMode)} h-10`}
+                          />
+                        </label>
 
                         <Info
                           title="Địa điểm"
