@@ -844,20 +844,27 @@ export default function DashboardBooking() {
         return
       }
 
+      const calendarNote =
+        result?.calendar?.ok
+          ? ' Đã ghi vào Google Lịch.'
+          : result?.calendar?.skipped
+            ? ''
+            : ` Chưa ghi được vào Google Lịch: ${result?.calendar?.error || 'lỗi không xác định'}.`
+
       if (
         result?.emailSent ===
         false
       ) {
         void showAlert(
-          result?.warning ||
-          'Đã xác nhận lịch nhưng khách chưa có Email.'
+          (result?.warning ||
+          'Đã xác nhận lịch nhưng khách chưa có Email.') + calendarNote
         )
 
         return
       }
 
       void showAlert(
-        'Đã xác nhận lịch và gửi Email cho khách hàng.'
+        'Đã xác nhận lịch và gửi Email cho khách hàng.' + calendarNote
       )
 
     } catch (emailError) {

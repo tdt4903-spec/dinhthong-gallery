@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import nodemailer from 'nodemailer'
+import { syncBookingToCalendar } from '@/lib/google-calendar'
 
 export const runtime = 'nodejs'
 
@@ -430,6 +431,13 @@ export async function POST(
         })
         .eq('id', bookingId)
 
+      // Confirmed booking -> all-day event on the studio's Google Calendar.
+      // A calendar failure never blocks the confirmation or the email.
+      const calendar = await syncBookingToCalendar(booking)
+      if (!calendar.ok && !('skipped' in calendar && calendar.skipped)) {
+        console.error('[BOOKING CALENDAR]', { bookingId, error: calendar.error })
+      }
+
       const customerEmail =
         String(
           booking.email || ''
@@ -439,6 +447,7 @@ export async function POST(
         return NextResponse.json({
           ok: true,
           emailSent: false,
+          calendar,
           warning:
             'Đã xác nhận lịch nhưng khách không nhập Email.',
         })
@@ -451,6 +460,7 @@ export async function POST(
           ok: true,
           emailSent: true,
           alreadySent: true,
+          calendar,
         })
       }
 
@@ -519,6 +529,7 @@ export async function POST(
       return NextResponse.json({
         ok: true,
         emailSent: true,
+        calendar,
       })
     }
 
