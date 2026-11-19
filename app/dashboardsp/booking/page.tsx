@@ -662,6 +662,30 @@ export default function DashboardBooking() {
      BOOKING
   ========================== */
 
+  /** Write (sync) or remove a booking's event on the studio Google Calendar. */
+  async function syncBookingCalendar(
+    bookingId: string,
+    action: 'sync' | 'remove'
+  ): Promise<string> {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData.session?.access_token
+      if (!token) return 'Chưa ghi Google Lịch vì phiên Admin đã hết hạn.'
+      const response = await fetch('/api/booking/calendar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ bookingId, action }),
+      })
+      const result = await response.json().catch(() => ({}))
+      const calendar = result?.calendar
+      if (calendar?.ok) return action === 'remove' ? 'Đã xoá khỏi Google Lịch.' : 'Đã ghi vào Google Lịch.'
+      if (calendar?.skipped) return ''
+      return `Chưa ${action === 'remove' ? 'xoá được khỏi' : 'ghi được vào'} Google Lịch: ${calendar?.error || result?.error || 'lỗi không xác định'}.`
+    } catch {
+      return 'Chưa kết nối được Google Lịch.'
+    }
+  }
+
   async function updateBooking(
     id: string,
     patch: Partial<Booking>
@@ -681,6 +705,7 @@ export default function DashboardBooking() {
       return
     }
 
+    const previous = bookings.find(item => item.id === id)
     setBookings(current =>
       current.map(item =>
         item.id === id
@@ -691,6 +716,19 @@ export default function DashboardBooking() {
           : item
       )
     )
+
+    // Keep Google Calendar in step with status changes made from the list:
+    // confirmed -> write the event, cancelled -> remove it, and a confirmed
+    // booking whose date or place changed -> update it.
+    const nextStatus = patch.status ?? previous?.status
+    let calendarAction: 'sync' | 'remove' | null = null
+    if (patch.status === 'confirmed' && previous?.status !== 'confirmed') calendarAction = 'sync'
+    else if (patch.status === 'cancelled' && previous?.status !== 'cancelled') calendarAction = 'remove'
+    else if (nextStatus === 'confirmed' && ('event_date' in patch || 'location' in patch || 'title' in patch)) calendarAction = 'sync'
+    if (calendarAction) {
+      const message = await syncBookingCalendar(id, calendarAction)
+      if (message) void showAlert(message)
+    }
   }
 
   async function toggleTransferred(
@@ -905,7 +943,10 @@ export default function DashboardBooking() {
             item.id !== booking.id
         )
       )
-      void showAlert('Đã xóa Booking.')
+      const calendarNote = booking.status === 'confirmed' || booking.status === 'done'
+        ? await syncBookingCalendar(booking.id, 'remove')
+        : ''
+      void showAlert(`Đã xóa Booking.${calendarNote ? ` ${calendarNote}` : ''}`)
     } else {
       void showAlert(error.message)
     }
