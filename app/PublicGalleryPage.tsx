@@ -88,6 +88,22 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
             <Link href="/#portfolio" className={styles.active}>Portfolio</Link>
             <Link href="/#about">Về Dinh Thong Photos</Link>
           </nav>
+          <label className={`${styles.search} ${styles.headerSearch}`}>
+            <Search size={17} aria-hidden="true" />
+            <span className="sr-only">Tìm bộ ảnh</span>
+            <input
+              type="search"
+              value={query}
+              onChange={event => {
+                const next = event.target.value
+                // Bring the results into view when a search starts.
+                if (!query && next) document.getElementById('portfolio')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                setQuery(next)
+              }}
+              placeholder="Tìm một câu chuyện…"
+            />
+            {query && <button type="button" onClick={() => setQuery('')} aria-label="Xóa tìm kiếm"><X size={15} /></button>}
+          </label>
           <div className={styles.headerActions}>
             <button type="button" onClick={toggleTheme} className={styles.iconButton} aria-label={isDarkMode ? 'Chuyển giao diện sáng' : 'Chuyển giao diện tối'} title="Đổi giao diện sáng / tối">
               {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
@@ -130,7 +146,6 @@ export default function PublicGalleryPage({ category }: { category?: PublicCateg
             {(albums.length > 0 || category) && <div className={styles.albumSection}>
               <div className={styles.albumToolbar}>
                 <div><p className={styles.eyebrow}>{category ? 'KHÁM PHÁ ALBUM' : 'PORTFOLIO'}</p><h3 className={styles.albumHeading}>{category ? 'Tất cả bộ ảnh' : 'Những bộ ảnh gần đây'}</h3></div>
-                <label className={styles.search}><Search size={17} aria-hidden="true" /><span className="sr-only">Tìm bộ ảnh</span><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Tìm một câu chuyện…" />{query && <button type="button" onClick={() => setQuery('')} aria-label="Xóa tìm kiếm"><X size={15} /></button>}</label>
               </div>
               {!category && categories.length > 0 && <div className={styles.filters} role="group" aria-label="Lọc album theo bộ sưu tập">{categories.map(item => <button key={item.id} type="button" aria-pressed={selectedCategory === item.id} onClick={() => setSelectedCategory(selectedCategory === item.id ? 'all' : item.id)}>{item.name}</button>)}</div>}
               <p className={styles.resultCount} aria-live="polite">{query || selectedCategory !== 'all' ? `${matchingAlbums.length} bộ ảnh phù hợp` : `${albums.length} bộ ảnh`}</p>

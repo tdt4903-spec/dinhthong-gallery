@@ -16,8 +16,8 @@ import { getCustomerProductsSupabase } from '@/lib/customer-products'
 import { useGalleryTheme } from '@/lib/use-gallery-theme'
 import { getPublicCategoryPath } from '@/lib/public-gallery-paths'
 import { useImageZoom } from '@/lib/use-image-zoom'
-import { ALBUM_PHOTO_SORT_OPTIONS, formatPhotoCaptureTime, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
-import { captureTimeStatus, usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
+import { formatPhotoCaptureTime, sortAlbumPhotos, type AlbumPhotoSort, type AlbumPhotoTimeMetadata } from '@/lib/album-photo-sort'
+import { usePhotoCaptureTimes } from '@/lib/use-photo-capture-times'
 
 type DriveItem = AlbumPhotoTimeMetadata & {
   id: string
@@ -56,7 +56,8 @@ export default function PublicAlbumPage() {
 
   const [album, setAlbum] = useState<any>(null)
   const [albumImages, setImages] = useState<DriveItem[]>([])
-  const [photoSort, setPhotoSort] = useState<AlbumPhotoSort>('default')
+  // Portfolio albums keep the curated order (no sort control on this page).
+  const photoSort: AlbumPhotoSort = 'default'
   const captureTimes = usePhotoCaptureTimes(albumImages, albumImages.length > 0, { scopeKey: albumSlug })
   const timedImages = captureTimes.items
   const images = useMemo(() => sortAlbumPhotos(timedImages, photoSort), [timedImages, photoSort])
@@ -559,29 +560,6 @@ export default function PublicAlbumPage() {
       />
 
       <section className="mx-auto max-w-[1600px] px-3 py-8 sm:px-5 md:px-8 md:py-14">
-        {images.length > 0 && (
-          <div className="mb-6 flex flex-col items-stretch gap-2 sm:items-end">
-            <label className="flex flex-col gap-2 text-xs font-medium sm:flex-row sm:items-center sm:gap-3">
-              Sắp xếp ảnh
-              <select
-                value={photoSort}
-                onChange={(event) => setPhotoSort(event.target.value as AlbumPhotoSort)}
-                className={`min-h-11 w-full rounded-xl border px-3 py-2 text-base sm:w-auto sm:text-sm ${
-                  isDarkMode
-                    ? 'border-white/15 bg-[#0b2118] text-white'
-                    : 'border-black/15 bg-white text-[#1c1d21]'
-                }`}
-              >
-                {ALBUM_PHOTO_SORT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
-            {photoSort.startsWith('captured-') && (
-              <p className="max-w-xl text-xs leading-relaxed opacity-55" role="status">{captureTimeStatus(captureTimes)}</p>
-            )}
-          </div>
-        )}
         {images.length === 0 ? (
           <div
             className={`flex min-h-[380px] items-center justify-center rounded-xl border ${

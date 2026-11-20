@@ -76,6 +76,9 @@
 .search input { background: transparent; color: var(--ink); border: none; outline: none; width: 100%; min-width: 0; font-size: 12px; }
 .search input::placeholder { color: var(--muted); }
 .search button { display: grid; place-items: center; flex-shrink: 0; border: none; background: transparent; padding: 5px; color: var(--muted); }
+/* Search field in the site header (portfolio pages). */
+.headerSearch { width: 230px; padding: 8px 0; }
+.headerSearch input::-webkit-search-cancel-button { display: none; }
 .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 25px; }
 .filters button { display: inline-flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 4px; padding: 9px 14px; font-size: 11px; color: var(--muted); background: transparent; }
 .filters button[aria-pressed='true'] { background: #173d32; border-color: #173d32; color: white; }
@@ -150,7 +153,11 @@
   .collectionMeta > span { font-size: 9px; padding-top: 3px; }
 }
 @media (max-width: 760px) {
-  .headerInner { min-height: 77px; padding: 13px 5%; }
+  .headerInner { min-height: 77px; padding: 13px 5%; flex-wrap: wrap; row-gap: 8px; }
+  .headerSearch { order: 3; width: 100%; }
+  /* Keep logo and actions on the first row; only the search wraps below. */
+  .brand { flex: 1 1 0; min-width: 0; }
+  .headerActions { flex-shrink: 0; }
   .brand { font-size: 22px; gap: 10px; }
   .nav { display: none; }
   .headerActions { gap: 10px; }
@@ -235,6 +242,7 @@
   .albumHeading { font-size: 25px; }
   .search { width: 100%; margin-top: 18px; padding-block: 11px; }
   .search input { font-size: 16px; }
+  .headerSearch { margin-top: 0; padding-block: 8px; }
   .filters { margin-top: 20px; gap: 6px; }
   .filters button { padding: 8px 11px; font-size: 10px; }
   .albumGrid { gap: 22px 13px; }
