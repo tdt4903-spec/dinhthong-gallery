@@ -12,7 +12,7 @@ import type {
   ReactNode,
 } from 'react'
 
-import { type PeoplePriceTier, quotePeople } from '@/lib/booking-pricing'
+import { type PeoplePriceTier, quotePeople, quoteSessions } from '@/lib/booking-pricing'
 import Link from 'next/link'
 import { SITE_BANNER_URL } from '@/lib/site-assets'
 import styles from './booking.module.css'
@@ -42,6 +42,8 @@ import {
 
 
 type Service = {
+  collect_sessions: boolean
+  session_percentages: number[]
   collect_people: boolean
   people_price_tiers: PeoplePriceTier[]
   id: string
@@ -144,6 +146,7 @@ export default function BookingPage() {
   } = useGalleryTheme()
 
 
+  const [sessionCount, setSessionCount] = useState(1)
   const [peopleCount, setPeopleCount] = useState('')
 
   const [loading, setLoading] =
@@ -244,7 +247,11 @@ export default function BookingPage() {
   const peopleQuote = selectedService?.collect_people
     ? quotePeople(selectedService.people_price_tiers || [], Number(peopleCount))
     : null
-  const totalPrice = selectedService?.collect_people ? peopleQuote?.total || 0 : selectedPackage?.price || 0
+  const basePrice = selectedService?.collect_people ? peopleQuote?.total || 0 : selectedPackage?.price || 0
+
+  const sessionPercentages = selectedService?.collect_sessions ? selectedService.session_percentages || [] : []
+  const sessionQuote = quoteSessions(basePrice, sessionPercentages, sessionCount)
+  const totalPrice = sessionQuote?.total || 0
 
   const depositPercent =
     Math.max(
@@ -440,6 +447,7 @@ export default function BookingPage() {
   ) {
 
     setSelectedServiceId(id)
+    setSessionCount(1)
     setPeopleCount('')
 
     setSelectedPackageId('')
@@ -530,6 +538,11 @@ export default function BookingPage() {
 
     if (selectedService?.collect_people && !peopleQuote) {
       setErrorText('Vui lòng nhập số người có trong bảng giá của thể loại.')
+      return
+    }
+
+    if (!sessionQuote) {
+      setErrorText('Vui lòng chọn số buổi có trong bảng giá.')
       return
     }
 
@@ -631,6 +644,7 @@ export default function BookingPage() {
           )
           .insert({
             id: bookingId,
+            session_count: sessionCount,
             ...(selectedService?.collect_people ? { people_count: Number(peopleCount) } : {}),
             full_name:
               form.full_name.trim(),
@@ -980,6 +994,18 @@ export default function BookingPage() {
             </section>
           )}
 
+          {selectedService?.collect_sessions && (!selectedService.collect_people || peopleQuote) && (
+            <section className={styles.panel}>
+              <Title>Chọn số buổi<Required /></Title>
+              <label htmlFor="booking-sessions" className="mt-3 block text-sm">Số buổi chụp</label>
+              <select id="booking-sessions" value={sessionCount} className="mt-2 w-full rounded-xl border border-current/20 bg-transparent p-3" onChange={e => { setSessionCount(Number(e.target.value)); setPaymentOption('later'); setErrorText('') }}>
+                {Array.from({ length: sessionPercentages.length + 1 }, (_, index) => <option key={index} value={index + 1}>{index + 1} buổi — {100 + sessionPercentages.slice(0, index).reduce((sum, percent) => sum + percent, 0)}% giá gốc</option>)}
+              </select>
+              <p className="mt-3 text-sm opacity-70">Buổi 1: 100% giá gốc{sessionPercentages.slice(0, sessionCount - 1).map((percent, index) => ` + buổi ${index + 2}: ${percent}%`).join('')}. Mỗi buổi thêm tính trên giá buổi đầu.</p>
+              {selectedPackage && sessionQuote && <p className="mt-3 font-semibold text-emerald-600">{money(basePrice)} + {new Intl.NumberFormat('vi-VN').format(sessionQuote.extra)} ₫ = {money(totalPrice)}</p>}
+            </section>
+          )}
+
           {/* PACKAGE */}
 
           {selectedService && (!selectedService.collect_people || peopleQuote) && (
@@ -1057,7 +1083,7 @@ export default function BookingPage() {
 
 
                         <div className="mt-3 font-serif text-xl text-emerald-600">
-                          {money(selectedService.collect_people ? peopleQuote?.total : pkg.price)}
+                          {money(quoteSessions(selectedService.collect_people ? peopleQuote?.total || 0 : pkg.price, sessionPercentages, sessionCount)?.total)}
                         </div>
 
                       </button>
@@ -1570,6 +1596,8 @@ export default function BookingPage() {
               />
 
 
+              {selectedService?.collect_sessions && <Summary label="Số buổi" value={`${sessionCount} buổi · ${sessionQuote?.percent || 100}% giá gốc`} />}
+              {selectedPackage && sessionCount > 1 && sessionQuote && <Summary label="Giá buổi đầu / phần cộng thêm" value={`${money(basePrice)} + ${new Intl.NumberFormat('vi-VN').format(sessionQuote.extra)} ₫`} />}
               {peopleQuote && <Summary label="Số người / đơn giá" value={`${peopleCount} người × ${money(peopleQuote.unitPrice)}`} />}
               {selectedPackage && (
 

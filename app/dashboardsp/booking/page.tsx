@@ -1,6 +1,6 @@
 'use client'
 
-import { type PeoplePriceTier, validatePeopleTiers } from '@/lib/booking-pricing'
+import { type PeoplePriceTier, validatePeopleTiers, validateSessionPercentages } from '@/lib/booking-pricing'
 
 import BookingCalendar from "./BookingCalendar"
 import styles from '@/components/studio/operations.module.css'
@@ -42,6 +42,8 @@ import {
 import { AppPopupHost, useAppPopup } from '../../../components/ui/AppPopup'
 
 type Service = {
+  collect_sessions: boolean
+  session_percentages: number[]
   collect_people: boolean
   people_price_tiers: PeoplePriceTier[]
   id: string
@@ -63,6 +65,9 @@ type Package = {
 }
 
 type Booking = {
+  session_count: number
+  session_percent: number
+  base_price: number
   people_count: number | null
   unit_price: number | null
   id: string
@@ -177,6 +182,8 @@ export default function DashboardBooking() {
   const [editingService, setEditingService] =
     useState<Service | null>(null)
 
+  const [sessionRows, setSessionRows] = useState<string[]>([])
+
   const [tierRows, setTierRows] = useState<{ min: string; max: string; price: string }[]>([])
 
   const [serviceForm, setServiceForm] =
@@ -185,6 +192,7 @@ export default function DashboardBooking() {
       description: '',
       cover_url: '',
       collect_people: false,
+      collect_sessions: false,
       active: true,
     })
 
@@ -355,12 +363,14 @@ export default function DashboardBooking() {
   function newService() {
     setEditingService(null)
     setTierRows([])
+    setSessionRows([])
 
     setServiceForm({
       name: '',
       description: '',
       cover_url: '',
       collect_people: false,
+      collect_sessions: false,
       active: true,
     })
 
@@ -371,11 +381,13 @@ export default function DashboardBooking() {
     service: Service
   ) {
     setEditingService(service)
+    setSessionRows((service.session_percentages || []).map(String))
     setTierRows((service.people_price_tiers || []).map(tier => ({ min: String(tier.min), max: tier.max === null ? "" : String(tier.max), price: String(tier.price) })))
 
     setServiceForm({
       name: service.name,
       collect_people: Boolean(service.collect_people),
+      collect_sessions: Boolean(service.collect_sessions),
       description:
         service.description || '',
       cover_url:
@@ -401,7 +413,14 @@ export default function DashboardBooking() {
       const error = validatePeopleTiers(tiers)
       if (error) { void showAlert(error); return }
     }
+    const sessionPercentages = sessionRows.map(value => value.trim() ? Number(value) : NaN)
+    if (serviceForm.collect_sessions) {
+      const error = validateSessionPercentages(sessionPercentages)
+      if (error) { void showAlert(error); return }
+    }
     const payload = {
+      collect_sessions: serviceForm.collect_sessions,
+      session_percentages: serviceForm.collect_sessions ? sessionPercentages : (editingService?.session_percentages || []),
       collect_people: serviceForm.collect_people,
       people_price_tiers: serviceForm.collect_people ? tiers.sort((a, b) => a.min - b.min) : (editingService?.people_price_tiers || []),
       name,
@@ -1637,6 +1656,7 @@ export default function DashboardBooking() {
                         />
 
                         {booking.people_count && <Info title="Số người / đơn giá" value={`${booking.people_count} người × ${money(booking.unit_price || 0)}/người`} />}
+                        {booking.session_count > 1 && <Info title="Số buổi / cách tính" value={`${booking.session_count} buổi · ${booking.session_percent}% × ${money(booking.base_price)}`} />}
                         <Info
                           title="Giá đã chốt"
                           value={money(
@@ -1917,6 +1937,26 @@ export default function DashboardBooking() {
                 </div>
               ))}
               <button type="button" className="text-sm font-semibold text-emerald-600" onClick={() => setTierRows(rows => [...rows, { min: '', max: '', price: '' }])}>+ Thêm khoảng giá</button>
+            </div>
+          )}
+
+          <label className="flex items-center gap-3 text-sm font-semibold">
+            <input type="checkbox" checked={serviceForm.collect_sessions} onChange={e => setServiceForm({ ...serviceForm, collect_sessions: e.target.checked })} />
+            Thu thập số buổi
+          </label>
+          {serviceForm.collect_sessions && (
+            <div className="space-y-3 rounded-xl border border-current/10 p-3">
+              <p className="text-xs leading-5 opacity-70">Buổi 1 tính 100% giá gốc (giá theo người hoặc giá gói). Mỗi buổi thêm tính theo % của giá gốc rồi cộng lại. Ví dụ: buổi 2 thêm 50%, buổi 3 thêm 30% → 3 buổi bằng 180% giá gốc.</p>
+              <p className="text-sm font-semibold">Buổi 1: 100% giá gốc</p>
+              {sessionRows.map((value, index) => (
+                <div key={index} className="flex items-end gap-3">
+                  <label className="flex-1 text-xs">Buổi {index + 2} — cộng thêm (%)
+                    <input type="number" min="0" max="10000" step="1" value={value} className={adminInput(isDarkMode)} onChange={e => setSessionRows(rows => rows.map((item, i) => i === index ? e.target.value : item))} />
+                  </label>
+                  <button type="button" className="p-3 text-xs text-red-500" onClick={() => setSessionRows(rows => rows.filter((_, i) => i !== index))}>Xóa buổi</button>
+                </div>
+              ))}
+              <button type="button" className="text-sm font-semibold text-emerald-600" onClick={() => setSessionRows(rows => [...rows, ''])}>+ Thêm buổi</button>
             </div>
           )}
 

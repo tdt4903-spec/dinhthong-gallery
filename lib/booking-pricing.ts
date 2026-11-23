@@ -29,3 +29,20 @@ export function quotePeople(tiers: PeoplePriceTier[], people: number) {
   if (!tier || !Number.isSafeInteger(people * tier.price)) return null
   return { unitPrice: tier.price, total: people * tier.price }
 }
+
+// Entry 0 is the surcharge for session 2; all surcharges use the first-session price.
+export function validateSessionPercentages(percentages: number[]): string | null {
+  if (percentages.some(percent => !Number.isSafeInteger(percent) || percent < 0 || percent > 10000)) {
+    return 'Phần trăm mỗi buổi phải là số nguyên từ 0 đến 10.000%.'
+  }
+  return null
+}
+
+export function quoteSessions(basePrice: number, percentages: number[], count: number) {
+  if (!Number.isSafeInteger(basePrice) || basePrice < 0 || !Number.isSafeInteger(count) ||
+      count < 1 || count > percentages.length + 1 || validateSessionPercentages(percentages)) return null
+  const percent = 100 + percentages.slice(0, count - 1).reduce((sum, value) => sum + value, 0)
+  const total = Number((BigInt(basePrice) * BigInt(percent) + BigInt(99)) / BigInt(100))
+  if (!Number.isSafeInteger(total)) return null
+  return { basePrice, percent, extra: total - basePrice, total }
+}

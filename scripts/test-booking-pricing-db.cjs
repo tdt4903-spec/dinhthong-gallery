@@ -15,9 +15,10 @@ async function main() {
         payment_method text, payment_percent integer, payment_amount bigint, status text, transferred boolean, transferred_at timestamptz);
     `)
     await db.exec(fs.readFileSync('supabase/migrations/20261123100000_booking_people_pricing.sql','utf8'))
+    await db.exec(fs.readFileSync('supabase/migrations/20261123110000_booking_session_pricing.sql','utf8'))
     await db.exec(`
       create trigger booking_snapshot_trigger before insert on booking_requests for each row execute function set_booking_snapshot();
-      insert into booking_service_types values (1, 'Nhóm', true, true, '[{"min":1,"max":2,"price":300000},{"min":3,"max":4,"price":250000},{"min":5,"max":null,"price":200000}]');
+      insert into booking_service_types (id,name,active,collect_people,people_price_tiers) values (1, 'Nhóm', true, true, '[{"min":1,"max":2,"price":300000},{"min":3,"max":4,"price":250000},{"min":5,"max":null,"price":200000}]');
       insert into booking_service_types (id, name) values (2, 'Cố định');
       insert into booking_service_packages values (1,1,'Gói A',999), (2,2,'Gói B',700001);
       insert into booking_payment_settings values ('main',30);
@@ -54,6 +55,35 @@ async function main() {
     await db.exec('update booking_requests set status=\'confirmed\' where id=3')
     const {rows:[updated]} = await db.query('select * from booking_requests where id=3')
     assert.equal(Number(updated.package_price),750000)
+    await db.exec("update booking_service_types set collect_sessions=true, session_percentages='[50,30]' where id=1")
+    const insertSessions = (id, count, option='deposit', service=1, pkg=1) => db.query(`insert into booking_requests
+      (id,service_type_id,package_id,full_name,phone,event_date,location,people_count,session_count,base_price,session_percent,payment_option)
+      values ($1,$2,$3,'Khách','0901234567','2026-12-01','Studio',2,$4,1,1,$5) returning *`,[id,service,pkg,count,option])
+    for (const [count,percent] of [[1,100],[2,150],[3,180]]) {
+      const {rows:[row]}=await insertSessions(200+count,count)
+      assert.equal(Number(row.base_price),800000)
+      assert.equal(row.session_count,count)
+      assert.equal(row.session_percent,percent)
+      assert.equal(Number(row.package_price),800000*percent/100)
+      assert.equal(Number(row.payment_amount),Math.ceil(800000*percent/100*.3))
+    }
+    const {rows:[sessionFull]}=await insertSessions(204,3,'full')
+    assert.equal(Number(sessionFull.payment_amount),1440000)
+    await assert.rejects(insertSessions(205,4),/số buổi/)
+    await assert.rejects(insertSessions(206,0),/số buổi/)
+    await assert.rejects(insertSessions(207,2,'full',2,2),/một buổi/)
+    await db.exec("update booking_service_types set collect_sessions=true, session_percentages='[50]' where id=2")
+    const {rows:[fixedSessions]}=await insertSessions(208,2,'full',2,2)
+    assert.equal(Number(fixedSessions.base_price),700001)
+    assert.equal(Number(fixedSessions.package_price),1050002)
+    for (const percentages of [[-1],[1.5],[10001],['50']]) {
+      await assert.rejects(db.query('update booking_service_types set session_percentages=$1 where id=1',[JSON.stringify(percentages)]),/booking_session_percentages_valid/)
+    }
+    await db.exec("update booking_service_types set session_percentages='[10]' where id=1")
+    const {rows:[savedSession]}=await db.query('select * from booking_requests where id=203')
+    assert.equal(Number(savedSession.package_price),1440000)
+    assert.equal(savedSession.session_percent,180)
+    console.log('PASS: session addition, rounding, validation, saved percentages, people and fixed-price combinations')
     console.log('PASS: migration, boundaries, deposits, full/later payment, fixed-price compatibility, tamper protection, invalid ranges, uncovered counts and historical snapshots')
   } finally { await db.close() }
 }
