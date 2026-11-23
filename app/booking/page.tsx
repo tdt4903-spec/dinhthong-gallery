@@ -12,6 +12,7 @@ import type {
   ReactNode,
 } from 'react'
 
+import { type PeoplePriceTier, quotePeople } from '@/lib/booking-pricing'
 import Link from 'next/link'
 import { SITE_BANNER_URL } from '@/lib/site-assets'
 import styles from './booking.module.css'
@@ -41,6 +42,8 @@ import {
 
 
 type Service = {
+  collect_people: boolean
+  people_price_tiers: PeoplePriceTier[]
   id: string
   name: string
   description: string
@@ -141,6 +144,8 @@ export default function BookingPage() {
   } = useGalleryTheme()
 
 
+  const [peopleCount, setPeopleCount] = useState('')
+
   const [loading, setLoading] =
     useState(true)
 
@@ -236,6 +241,11 @@ export default function BookingPage() {
       )
 
 
+  const peopleQuote = selectedService?.collect_people
+    ? quotePeople(selectedService.people_price_tiers || [], Number(peopleCount))
+    : null
+  const totalPrice = selectedService?.collect_people ? peopleQuote?.total || 0 : selectedPackage?.price || 0
+
   const depositPercent =
     Math.max(
       30,
@@ -252,7 +262,7 @@ export default function BookingPage() {
   const depositAmount =
     selectedPackage
       ? Math.ceil(
-          selectedPackage.price
+          totalPrice
           * depositPercent
           / 100
         )
@@ -263,7 +273,7 @@ export default function BookingPage() {
     paymentOption === 'deposit'
       ? depositAmount
       : paymentOption === 'full'
-      ? selectedPackage?.price || 0
+      ? totalPrice || 0
       : 0
 
 
@@ -430,6 +440,7 @@ export default function BookingPage() {
   ) {
 
     setSelectedServiceId(id)
+    setPeopleCount('')
 
     setSelectedPackageId('')
 
@@ -516,6 +527,11 @@ export default function BookingPage() {
       return
     }
 
+
+    if (selectedService?.collect_people && !peopleQuote) {
+      setErrorText('Vui lòng nhập số người có trong bảng giá của thể loại.')
+      return
+    }
 
     if (!selectedPackageId) {
       setErrorText(
@@ -615,6 +631,7 @@ export default function BookingPage() {
           )
           .insert({
             id: bookingId,
+            ...(selectedService?.collect_people ? { people_count: Number(peopleCount) } : {}),
             full_name:
               form.full_name.trim(),
 
@@ -951,9 +968,21 @@ export default function BookingPage() {
           </section>
 
 
+          {selectedService?.collect_people && (
+            <section className={styles.panel}>
+              <Title>Nhập số người<Required /></Title>
+              <label htmlFor="booking-people" className="mt-3 block text-sm">Số người tham gia chụp</label>
+              <input id="booking-people" required type="number" min="1" max="2147483647" step="1" value={peopleCount} placeholder="Nhập số người" className="mt-2 w-full rounded-xl border border-current/20 bg-transparent p-3" onChange={e => { setPeopleCount(e.target.value); setSelectedPackageId(''); setPaymentOption('later'); setErrorText('') }} />
+              <ul className="mt-3 space-y-1 text-sm opacity-70">
+                {(selectedService.people_price_tiers || []).map((tier, index) => <li key={index}>{tier.max === null ? `Từ ${tier.min} người` : `${tier.min}–${tier.max} người`}: {money(tier.price)}/người</li>)}
+              </ul>
+              {peopleQuote ? <p className="mt-3 font-semibold text-emerald-600">{peopleCount} người × {money(peopleQuote.unitPrice)} = {money(peopleQuote.total)}</p> : <p role="status" className="mt-3 text-sm">{peopleCount ? 'Số người chưa hợp lệ hoặc chưa có báo giá. Vui lòng chọn số người trong bảng giá hoặc liên hệ studio.' : 'Nhập số người để xem giá và chọn gói chụp.'}</p>}
+            </section>
+          )}
+
           {/* PACKAGE */}
 
-          {selectedService && (
+          {selectedService && (!selectedService.collect_people || peopleQuote) && (
 
             <section className={styles.panel}>
 
@@ -1028,7 +1057,7 @@ export default function BookingPage() {
 
 
                         <div className="mt-3 font-serif text-xl text-emerald-600">
-                          {money(pkg.price)}
+                          {money(selectedService.collect_people ? peopleQuote?.total : pkg.price)}
                         </div>
 
                       </button>
@@ -1365,7 +1394,7 @@ export default function BookingPage() {
                       sub="100%"
                       price={
                         money(
-                          selectedPackage.price
+                          totalPrice
                         )
                       }
                       onClick={() =>
@@ -1541,13 +1570,14 @@ export default function BookingPage() {
               />
 
 
+              {peopleQuote && <Summary label="Số người / đơn giá" value={`${peopleCount} người × ${money(peopleQuote.unitPrice)}`} />}
               {selectedPackage && (
 
                 <Summary
                   label="Giá"
                   value={
                     money(
-                      selectedPackage.price
+                      totalPrice
                     )
                   }
                   strong
@@ -1579,7 +1609,7 @@ export default function BookingPage() {
                   label="Chuyển toàn bộ"
                   value={
                     money(
-                      selectedPackage?.price
+                      totalPrice
                     )
                   }
                   strong

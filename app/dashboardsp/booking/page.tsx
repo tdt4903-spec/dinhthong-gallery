@@ -1,5 +1,7 @@
 'use client'
 
+import { type PeoplePriceTier, validatePeopleTiers } from '@/lib/booking-pricing'
+
 import BookingCalendar from "./BookingCalendar"
 import styles from '@/components/studio/operations.module.css'
 
@@ -40,6 +42,8 @@ import {
 import { AppPopupHost, useAppPopup } from '../../../components/ui/AppPopup'
 
 type Service = {
+  collect_people: boolean
+  people_price_tiers: PeoplePriceTier[]
   id: string
   name: string
   description: string
@@ -59,6 +63,8 @@ type Package = {
 }
 
 type Booking = {
+  people_count: number | null
+  unit_price: number | null
   id: string
   full_name: string
   phone: string
@@ -171,11 +177,14 @@ export default function DashboardBooking() {
   const [editingService, setEditingService] =
     useState<Service | null>(null)
 
+  const [tierRows, setTierRows] = useState<{ min: string; max: string; price: string }[]>([])
+
   const [serviceForm, setServiceForm] =
     useState({
       name: '',
       description: '',
       cover_url: '',
+      collect_people: false,
       active: true,
     })
 
@@ -345,11 +354,13 @@ export default function DashboardBooking() {
 
   function newService() {
     setEditingService(null)
+    setTierRows([])
 
     setServiceForm({
       name: '',
       description: '',
       cover_url: '',
+      collect_people: false,
       active: true,
     })
 
@@ -360,9 +371,11 @@ export default function DashboardBooking() {
     service: Service
   ) {
     setEditingService(service)
+    setTierRows((service.people_price_tiers || []).map(tier => ({ min: String(tier.min), max: tier.max === null ? "" : String(tier.max), price: String(tier.price) })))
 
     setServiceForm({
       name: service.name,
+      collect_people: Boolean(service.collect_people),
       description:
         service.description || '',
       cover_url:
@@ -383,7 +396,14 @@ export default function DashboardBooking() {
       return
     }
 
+    const tiers = tierRows.map(row => ({ min: Number(row.min), max: row.max.trim() ? Number(row.max) : null, price: Number(row.price) }))
+    if (serviceForm.collect_people) {
+      const error = validatePeopleTiers(tiers)
+      if (error) { void showAlert(error); return }
+    }
     const payload = {
+      collect_people: serviceForm.collect_people,
+      people_price_tiers: serviceForm.collect_people ? tiers.sort((a, b) => a.min - b.min) : (editingService?.people_price_tiers || []),
       name,
 
       description:
@@ -1137,7 +1157,7 @@ export default function DashboardBooking() {
 
           <SectionHead
             title="Gói chụp & Giá"
-            description="Mỗi thể loại có thể có nhiều gói và mỗi gói có một mức giá riêng."
+            description="Mỗi thể loại có thể có nhiều gói. Thể loại bật thu thập số người sẽ dùng bảng giá theo người trong phần sửa thể loại."
           >
 
             <button
@@ -1221,7 +1241,7 @@ export default function DashboardBooking() {
 
                           <div className="text-right">
                             <div className="font-serif text-xl text-emerald-600">
-                              {money(pkg.price)}
+                              {service.collect_people ? 'Theo số người' : money(pkg.price)}
                             </div>
                           </div>
 
@@ -1616,6 +1636,7 @@ export default function DashboardBooking() {
                           value={booking.package_name}
                         />
 
+                        {booking.people_count && <Info title="Số người / đơn giá" value={`${booking.people_count} người × ${money(booking.unit_price || 0)}/người`} />}
                         <Info
                           title="Giá đã chốt"
                           value={money(
@@ -1876,6 +1897,28 @@ export default function DashboardBooking() {
               ? '✓ Đang hiển thị'
               : 'Đang ẩn'}
           </button>
+
+          <label className="flex items-center gap-3 text-sm font-semibold">
+            <input type="checkbox" checked={serviceForm.collect_people} onChange={e => setServiceForm({ ...serviceForm, collect_people: e.target.checked })} />
+            Thu thập số lượng người
+          </label>
+          {serviceForm.collect_people && (
+            <div className="space-y-3 rounded-xl border border-current/10 p-3">
+              <p className="text-xs leading-5 opacity-70">Tổng tiền = số người × đơn giá của khoảng phù hợp. Giá này áp dụng cho mọi gói thuộc thể loại, thay cho giá cố định của gói. Các khoảng không được trùng nhau; để trống “Đến” nếu không giới hạn.</p>
+              {tierRows.map((row, index) => (
+                <div key={index} className="grid grid-cols-2 gap-2 rounded-lg border border-current/10 p-2 sm:grid-cols-4">
+                  {(['min', 'max', 'price'] as const).map(key => (
+                    <label key={key} className="text-xs">
+                      {key === 'min' ? 'Từ (người)' : key === 'max' ? 'Đến (người)' : 'Giá/người (₫)'}
+                      <input type="number" min="1" step="1" placeholder={key === 'max' ? 'Không giới hạn' : ''} value={row[key]} className={adminInput(isDarkMode)} onChange={e => setTierRows(rows => rows.map((item, i) => i === index ? { ...item, [key]: e.target.value } : item))} />
+                    </label>
+                  ))}
+                  <button type="button" className="text-xs text-red-500" onClick={() => setTierRows(rows => rows.filter((_, i) => i !== index))}>Xóa khoảng</button>
+                </div>
+              ))}
+              <button type="button" className="text-sm font-semibold text-emerald-600" onClick={() => setTierRows(rows => [...rows, { min: '', max: '', price: '' }])}>+ Thêm khoảng giá</button>
+            </div>
+          )}
 
           <SaveButton
             onClick={() =>
