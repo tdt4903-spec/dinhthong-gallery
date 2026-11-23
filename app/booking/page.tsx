@@ -146,6 +146,7 @@ export default function BookingPage() {
   } = useGalleryTheme()
 
 
+  const [step, setStep] = useState(0)
   const [sessionCount, setSessionCount] = useState(1)
   const [peopleCount, setPeopleCount] = useState('')
 
@@ -463,6 +464,7 @@ export default function BookingPage() {
   ) {
 
     setSelectedPackageId(id)
+    setSessionCount(1)
 
     setPaymentOption('later')
 
@@ -524,6 +526,22 @@ export default function BookingPage() {
 
     event.preventDefault()
 
+    if (step < 2) {
+      if (step === 0) {
+        if (!selectedService) { setErrorText('Vui lòng chọn thể loại.'); return }
+        if (selectedService.collect_people && !peopleQuote) { setErrorText('Vui lòng nhập số người hợp lệ.'); return }
+        if (!selectedPackage) { setErrorText('Vui lòng chọn gói chụp.'); return }
+        if (!sessionQuote) { setErrorText('Vui lòng chọn số buổi hợp lệ.'); return }
+      } else {
+        if (!form.event_date || !form.location.trim() || !form.full_name.trim() || !form.phone.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(form.email.trim())) {
+          setErrorText('Vui lòng điền đầy đủ thông tin và email hợp lệ.'); return
+        }
+      }
+      setErrorText('')
+      setStep(step + 1)
+      document.getElementById('booking-steps')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
 
     if (form.website) return
 
@@ -858,20 +876,23 @@ export default function BookingPage() {
         <section className={styles.hero} aria-labelledby="booking-title">
           <div className={styles.heroCopy}>
             <p className={styles.kicker}>ĐẶT LỊCH CHỤP</p>
-            <h1 id="booking-title">Hẹn một<br /><em>buổi chụp.</em></h1>
-            <p>Chọn gói chụp và ngày bạn mong muốn. Dinh Thong Gallery sẽ liên hệ để thống nhất chi tiết và xác nhận lịch.</p>
+            <h1 id="booking-title">Đặt lịch <em>chụp ảnh.</em></h1>
+            <p>Chọn dịch vụ, điền thông tin và gửi yêu cầu đặt lịch.</p>
           </div>
           <img src={SITE_BANNER_URL} alt="" className={styles.heroPhoto} />
         </section>
-        <nav aria-label="Các bước đặt lịch" className={styles.steps}>
-          <a href="#booking-service"><b>01</b> Chọn gói</a>
-          <a href="#booking-session"><b>02</b> Buổi chụp</a>
-          <a href="#booking-contact"><b>03</b> Liên hệ</a>
+        <nav id="booking-steps" aria-label="Các bước đặt lịch" className={styles.steps}>
+          {['Chọn dịch vụ', 'Thông tin', 'Xác nhận'].map((label, index) => (
+            <button key={label} type="button" aria-current={step === index ? 'step' : undefined} disabled={index > step || sending} onClick={() => { setStep(index); setErrorText('') }}>
+              <b>{index + 1}</b><span>{label}</span>
+            </button>
+          ))}
         </nav>
       </div>
 
       <form onSubmit={submit} className={styles.form}>
-        <div className={styles.fields}>
+        {step < 2 && <div className={styles.fields}>
+          {step === 0 && <>
           {/* THỂ LOẠI */}
 
           <section id="booking-service" className={styles.panel}>
@@ -986,23 +1007,8 @@ export default function BookingPage() {
             <section className={styles.panel}>
               <Title>Nhập số người<Required /></Title>
               <label htmlFor="booking-people" className="mt-3 block text-sm">Số người tham gia chụp</label>
-              <input id="booking-people" required type="number" min="1" max="2147483647" step="1" value={peopleCount} placeholder="Nhập số người" className="mt-2 w-full rounded-xl border border-current/20 bg-transparent p-3" onChange={e => { setPeopleCount(e.target.value); setSelectedPackageId(''); setPaymentOption('later'); setErrorText('') }} />
-              <ul className="mt-3 space-y-1 text-sm opacity-70">
-                {(selectedService.people_price_tiers || []).map((tier, index) => <li key={index}>{tier.max === null ? `Từ ${tier.min} người` : `${tier.min}–${tier.max} người`}: {money(tier.price)}/người</li>)}
-              </ul>
+              <input id="booking-people" required type="number" min="1" max="2147483647" step="1" value={peopleCount} placeholder="Nhập số người" className="mt-2 w-full rounded-xl border border-current/20 bg-transparent p-3" onChange={e => { setPeopleCount(e.target.value); setSelectedPackageId(''); setSessionCount(1); setPaymentOption('later'); setErrorText('') }} />
               {peopleQuote ? <p className="mt-3 font-semibold text-emerald-600">{peopleCount} người × {money(peopleQuote.unitPrice)} = {money(peopleQuote.total)}</p> : <p role="status" className="mt-3 text-sm">{peopleCount ? 'Số người chưa hợp lệ hoặc chưa có báo giá. Vui lòng chọn số người trong bảng giá hoặc liên hệ studio.' : 'Nhập số người để xem giá và chọn gói chụp.'}</p>}
-            </section>
-          )}
-
-          {selectedService?.collect_sessions && (!selectedService.collect_people || peopleQuote) && (
-            <section className={styles.panel}>
-              <Title>Chọn số buổi<Required /></Title>
-              <label htmlFor="booking-sessions" className="mt-3 block text-sm">Số buổi chụp</label>
-              <select id="booking-sessions" value={sessionCount} className="mt-2 w-full rounded-xl border border-current/20 bg-transparent p-3" onChange={e => { setSessionCount(Number(e.target.value)); setPaymentOption('later'); setErrorText('') }}>
-                {Array.from({ length: sessionPercentages.length + 1 }, (_, index) => <option key={index} value={index + 1}>{index + 1} buổi — {100 + sessionPercentages.slice(0, index).reduce((sum, percent) => sum + percent, 0)}% giá gốc</option>)}
-              </select>
-              <p className="mt-3 text-sm opacity-70">Buổi 1: 100% giá gốc{sessionPercentages.slice(0, sessionCount - 1).map((percent, index) => ` + buổi ${index + 2}: ${percent}%`).join('')}. Mỗi buổi thêm tính trên giá buổi đầu.</p>
-              {selectedPackage && sessionQuote && <p className="mt-3 font-semibold text-emerald-600">{money(basePrice)} + {new Intl.NumberFormat('vi-VN').format(sessionQuote.extra)} ₫ = {money(totalPrice)}</p>}
             </section>
           )}
 
@@ -1018,7 +1024,7 @@ export default function BookingPage() {
               </Title>
 
 
-              <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+              <div className={`${styles.packageGrid} mt-3`}>
 
                 {servicePackages.length === 0 && <p className={styles.notice}>Thể loại này chưa có gói mở đặt lịch. Bạn có thể chọn thể loại khác.</p>}
                 {servicePackages.map(
@@ -1098,6 +1104,19 @@ export default function BookingPage() {
           )}
 
 
+          {selectedService?.collect_sessions && selectedPackage && (!selectedService.collect_people || peopleQuote) && (
+            <section className={styles.panel}>
+              <Title>Chọn số buổi<Required /></Title>
+              <label htmlFor="booking-sessions" className="mt-3 block text-sm">Số buổi chụp</label>
+              <select id="booking-sessions" value={sessionCount} className="mt-2 w-full rounded-xl border border-current/20 bg-transparent p-3" onChange={e => { setSessionCount(Number(e.target.value)); setPaymentOption('later'); setErrorText('') }}>
+                {Array.from({ length: sessionPercentages.length + 1 }, (_, index) => <option key={index} value={index + 1}>{index + 1} buổi</option>)}
+              </select>
+              {selectedPackage && sessionQuote && <p className="mt-3 font-semibold text-emerald-600">{money(basePrice)} + {new Intl.NumberFormat('vi-VN').format(sessionQuote.extra)} ₫ = {money(totalPrice)}</p>}
+            </section>
+          )}
+
+          </>}
+          {step === 1 && <>
           {/* BUỔI CHỤP */}
 
           <section id="booking-session" className={styles.panel}>
@@ -1309,6 +1328,7 @@ export default function BookingPage() {
           </section>
 
 
+          </>}
           <input
             className="hidden"
             tabIndex={-1}
@@ -1322,13 +1342,19 @@ export default function BookingPage() {
             }
           />
 
-        </div>
+          {errorText && <p role="alert" className={styles.stepError}>{errorText}</p>}
+          <div className={styles.stepActions}>
+            {step > 0 && <button type="button" onClick={() => { setStep(step - 1); setErrorText('') }}>Quay lại</button>}
+            <button type="submit" disabled={loading || loadError || !services.length} className={styles.nextStep}>Tiếp tục <ChevronRight size={16} /></button>
+          </div>
+        </div>}
 
 
         {/* TÓM TẮT */}
 
 
-        <aside className={styles.aside}>
+        {step === 2 && <aside className={styles.aside}>
+          <button type="button" disabled={sending} className={styles.backStep} onClick={() => { setStep(1); setErrorText('') }}>← Quay lại thông tin</button>
 
           {/* PAYMENT CARD */}
 
@@ -1756,7 +1782,7 @@ export default function BookingPage() {
 
           </div>
 
-        </aside>
+        </aside>}
 
       </form>
 
