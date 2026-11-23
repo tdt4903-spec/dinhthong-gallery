@@ -176,6 +176,8 @@ export default function DashboardBooking() {
      SERVICE MODAL
   ========================== */
 
+  const [showPricingModal, setShowPricingModal] = useState(false)
+
   const [showServiceModal, setShowServiceModal] =
     useState(false)
 
@@ -378,7 +380,8 @@ export default function DashboardBooking() {
   }
 
   function editService(
-    service: Service
+    service: Service,
+    pricing = false
   ) {
     setEditingService(service)
     setSessionRows((service.session_percentages || []).map(String))
@@ -396,7 +399,8 @@ export default function DashboardBooking() {
         service.active,
     })
 
-    setShowServiceModal(true)
+    if (pricing) setShowPricingModal(true)
+    else setShowServiceModal(true)
   }
 
   async function saveService() {
@@ -464,6 +468,7 @@ export default function DashboardBooking() {
     }
 
     setShowServiceModal(false)
+    setShowPricingModal(false)
 
     await loadData()
     void showAlert(
@@ -1176,7 +1181,7 @@ export default function DashboardBooking() {
 
           <SectionHead
             title="Gói chụp & Giá"
-            description="Mỗi thể loại có thể có nhiều gói. Thể loại bật thu thập số người sẽ dùng bảng giá theo người trong phần sửa thể loại."
+            description="Quản lý giá gói, mô tả và cấu hình thu thập số người, số buổi cho từng thể loại."
           >
 
             <button
@@ -1216,6 +1221,10 @@ export default function DashboardBooking() {
                   <div className="text-xs font-bold uppercase tracking-[0.12em] opacity-50">
                     {service.name}
                   </div>
+                  <button type="button" onClick={() => editService(service, true)} className="mt-2 inline-flex items-center gap-2 rounded-xl border border-current/10 px-3 py-2 text-xs font-semibold">
+                    <Pencil className="h-3.5 w-3.5" /> Mô tả & Thu thập
+                  </button>
+
 
                 </div>
 
@@ -1879,6 +1888,37 @@ export default function DashboardBooking() {
             }
           />
 
+          <button
+            type="button"
+            onClick={() =>
+              setServiceForm({
+                ...serviceForm,
+                active:
+                  !serviceForm.active,
+              })
+            }
+            className="w-full rounded-xl border border-current/10 p-3 text-xs"
+          >
+            {serviceForm.active
+              ? '✓ Đang hiển thị'
+              : 'Đang ẩn'}
+          </button>
+
+          <SaveButton
+            onClick={() =>
+              void saveService()
+            }
+          >
+            Lưu thể loại
+          </SaveButton>
+
+        </Modal>
+      )}
+
+
+      {showPricingModal && (
+        <Modal dark={isDarkMode} title={`Mô tả & Thu thập — ${editingService?.name || ''}`} close={() => setShowPricingModal(false)}>
+          <p className="text-xs leading-5 opacity-70">Cấu hình áp dụng cho các gói thuộc thể loại này.</p>
           <div>
             <AdminLabel>
               Mô tả
@@ -1901,22 +1941,6 @@ export default function DashboardBooking() {
               )} h-auto py-3`}
             />
           </div>
-
-          <button
-            type="button"
-            onClick={() =>
-              setServiceForm({
-                ...serviceForm,
-                active:
-                  !serviceForm.active,
-              })
-            }
-            className="w-full rounded-xl border border-current/10 p-3 text-xs"
-          >
-            {serviceForm.active
-              ? '✓ Đang hiển thị'
-              : 'Đang ẩn'}
-          </button>
 
           <label className="flex items-center gap-3 text-sm font-semibold">
             <input type="checkbox" checked={serviceForm.collect_people} onChange={e => setServiceForm({ ...serviceForm, collect_people: e.target.checked })} />
@@ -1960,17 +1984,9 @@ export default function DashboardBooking() {
             </div>
           )}
 
-          <SaveButton
-            onClick={() =>
-              void saveService()
-            }
-          >
-            Lưu thể loại
-          </SaveButton>
-
+          <SaveButton onClick={() => void saveService()}>Lưu mô tả & thu thập</SaveButton>
         </Modal>
       )}
-
 
       {/* PACKAGE MODAL */}
 
