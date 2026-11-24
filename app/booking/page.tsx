@@ -909,7 +909,7 @@ export default function BookingPage() {
                             {selected && <span className={styles.selectedBadge}><Check className="h-3.5 w-3.5" /></span>}
                           </span>
                           <span className={styles.serviceName}>{service.name}</span>
-                          {service.description && <span className={styles.serviceDesc}>{service.description}</span>}
+                          {selected && service.description && <span className={styles.serviceDesc}>{service.description}</span>}
                         </button>
                       )
                     })}
