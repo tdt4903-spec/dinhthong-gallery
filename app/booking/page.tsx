@@ -3,7 +3,6 @@
 import {
   FormEvent,
   useEffect,
-  useId,
   useMemo,
   useState,
 } from 'react'
@@ -22,10 +21,16 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   Copy,
   CreditCard,
   Loader2,
+  Mail,
+  MessageCircle,
+  Minus,
+  Phone,
+  Plus,
   MapPin,
   Moon,
   Sun,
@@ -93,8 +98,9 @@ type SubmitResult =
   | 'pending-payment'
 
 
-function driveImage1500(
-  input?: string
+function driveImage(
+  input?: string,
+  size = 1500
 ) {
   const value =
     String(input || '').trim()
@@ -116,7 +122,7 @@ function driveImage1500(
     return value
   }
 
-  return `https://lh3.googleusercontent.com/d/${match[1]}=s1500`
+  return `https://lh3.googleusercontent.com/d/${match[1]}=s${size}`
 }
 
 
@@ -472,25 +478,6 @@ export default function BookingPage() {
   }
 
 
-  function toggleTransfer() {
-
-    if (
-      paymentOption === 'later'
-    ) {
-
-      setPaymentOption(
-        'deposit'
-      )
-
-    } else {
-
-      setPaymentOption(
-        'later'
-      )
-    }
-  }
-
-
   async function copyAccount() {
 
     if (
@@ -817,977 +804,376 @@ export default function BookingPage() {
   }
 
 
+  const steps = ['Dịch vụ', 'Thông tin', 'Xác nhận']
+  const canSubmit = !loading && !loadError && services.length > 0
+  const hasContact = Boolean(
+    payment?.admin_contact_phone ||
+    payment?.admin_contact_email ||
+    payment?.admin_contact_zalo_url ||
+    payment?.admin_contact_facebook_url
+  )
+  const updateForm = (key: keyof typeof form, value: string) => setForm(current => ({ ...current, [key]: value }))
+  const goToStep = (index: number) => {
+    if (sending || index > step) return
+    setStep(index)
+    setErrorText('')
+    document.getElementById('booking-steps')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  const nextLabel = step === 0
+    ? (selectedPackage ? ['Tiếp tục', 'Tiếp tục'] : ['Chọn gói để tiếp tục', 'Chọn gói'])
+    : step === 1 ? ['Xem lại & thanh toán', 'Tiếp tục'] : ['Gửi yêu cầu đặt lịch', 'Gửi yêu cầu']
+
   return (
     <main
       data-site-theme={isDarkMode ? 'dark' : 'light'}
-      className={`site-page-surface studio-booking min-h-screen ${
-        isDarkMode
-          ? 'bg-[#06140f] text-white'
-          : 'bg-white text-[#202520]'
+      className={`site-page-surface studio-booking min-h-screen ${styles.page} ${
+        isDarkMode ? 'bg-[#06140f] text-white' : 'bg-white text-[#202520]'
       }`}
     >
-
-      <header
-        className={`sticky top-0 z-50 border-b backdrop-blur-xl ${
-          isDarkMode
-            ? 'border-white/10 bg-[#071710]/95'
-            : 'border-black/[0.06] bg-white/95'
-        }`}
-      >
-
+      <header className={`sticky top-0 z-50 border-b backdrop-blur-xl ${
+        isDarkMode ? 'border-white/10 bg-[#071710]/95' : 'border-black/[0.06] bg-white/95'
+      }`}>
         <div className="mx-auto flex h-[58px] max-w-[1320px] items-center justify-between px-4 sm:px-6">
-
-          <Link
-            href="/"
-            className="flex items-center gap-2"
-          >
-
-            <ArrowLeft className="h-3.5 w-3.5" />
-
+          <Link href="/" className="flex min-h-11 items-center gap-2">
+            <ArrowLeft className="h-4 w-4" />
             <span className="text-base font-semibold">Dinh Thong Gallery</span>
-
           </Link>
-
-
           <button
             type="button"
             onClick={toggleTheme}
             aria-label="Đổi giao diện sáng hoặc tối"
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-current/10"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-current/10"
           >
-
-            {isDarkMode
-              ? (
-                <Sun className="h-3.5 w-3.5" />
-              )
-              : (
-                <Moon className="h-3.5 w-3.5" />
-              )
-            }
-
+            {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
-
         </div>
-
       </header>
 
-
-      <div className={styles.container}>
-        <section className={styles.hero} aria-labelledby="booking-title">
-          <div className={styles.heroCopy}>
+      <div className={styles.shell}>
+        <section className={styles.intro} aria-labelledby="booking-title">
+          <img src={SITE_BANNER_URL} alt="" className={styles.introPhoto} />
+          <div>
             <p className={styles.kicker}>ĐẶT LỊCH CHỤP</p>
-            <h1 id="booking-title">Đặt lịch <em>chụp ảnh.</em></h1>
-            <p>Chọn dịch vụ, điền thông tin và gửi yêu cầu đặt lịch.</p>
+            <h1 id="booking-title">Đặt lịch chụp ảnh</h1>
+            <p className={styles.introText}>3 bước đơn giản · Studio sẽ liên hệ xác nhận lịch với bạn.</p>
           </div>
-          <img src={SITE_BANNER_URL} alt="" className={styles.heroPhoto} />
         </section>
-        <nav id="booking-steps" aria-label="Các bước đặt lịch" className={styles.steps}>
-          {['Chọn dịch vụ', 'Thông tin', 'Xác nhận'].map((label, index) => (
-            <button key={label} type="button" aria-current={step === index ? 'step' : undefined} disabled={index > step || sending} onClick={() => { setStep(index); setErrorText('') }}>
-              <b>{index + 1}</b><span>{label}</span>
-            </button>
-          ))}
+
+        <nav id="booking-steps" aria-label="Các bước đặt lịch" className={styles.stepper}>
+          <ol>
+            {steps.map((label, index) => (
+              <li key={label} data-state={index < step ? 'done' : index === step ? 'current' : 'todo'}>
+                <button
+                  type="button"
+                  aria-current={step === index ? 'step' : undefined}
+                  disabled={index > step || sending}
+                  onClick={() => goToStep(index)}
+                >
+                  <span className={styles.stepDot}>{index < step ? <Check className="h-3.5 w-3.5" /> : index + 1}</span>
+                  <span className={styles.stepLabel}>{label}</span>
+                </button>
+              </li>
+            ))}
+          </ol>
+          <div className={styles.progress} aria-hidden="true"><span style={{ width: `${((step + 1) / steps.length) * 100}%` }} /></div>
         </nav>
-      </div>
 
-      <form onSubmit={submit} className={styles.form}>
-        {step < 2 && <div className={styles.fields}>
-          {step === 0 && <>
-          {/* THỂ LOẠI */}
-
-          <section id="booking-service" className={styles.panel}>
-
-            <Title>
-              Chọn thể loại
-              <Required />
-            </Title>
-
-
-            {loadError && <p role="alert" className={styles.notice}>Chưa tải đủ thông tin đặt lịch. <button type="button" onClick={() => window.location.reload()}>Tải lại</button></p>}
-            {!loadError && !loading && services.length === 0 && <p className={styles.notice}>Hiện chưa có thể loại chụp mở đặt lịch.</p>}
-            {loading ? (
-
-              <div className="flex h-36 items-center justify-center">
-                <Loader2 className="h-5 w-5 animate-spin opacity-30" />
-              </div>
-
-            ) : (
-
-              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-
-                {services.map(
-                  service => {
-
-                    const selected =
-                      service.id ===
-                      selectedServiceId
-
-                    return (
-                      <button
-                        key={service.id}
-                        aria-pressed={selected}
-                        type="button"
-                        onClick={() =>
-                          chooseService(
-                            service.id
-                          )
-                        }
-                        className={`overflow-hidden rounded-[16px] border p-1.5 transition ${
-                          selected
-                            ? isDarkMode
-                              ? 'border-emerald-400 bg-emerald-500/10'
-                              : 'border-emerald-500 bg-[#fff0d8]'
-                            : isDarkMode
-                            ? 'border-white/10 bg-white/[0.025]'
-                            : 'border-black/[0.06] bg-[#f4f7f8]'
-                        }`}
-                      >
-
-                        <div className="relative aspect-[4/3] overflow-hidden rounded-[12px] bg-black/5">
-
-                          {service.cover_url
-                            ? (
-                              <img
-                                src={
-                                  service.cover_url
-                                }
-                                alt={
-                                  service.name
-                                }
-                                draggable={
-                                  false
-                                }
-                                className="h-full w-full object-cover"
-                              />
-                            )
-                            : (
-                              <div className="flex h-full items-center justify-center">
-
-                                <UserRound className="h-7 w-7 opacity-15" />
-
-                              </div>
-                            )
-                          }
-
-
-                          {selected && (
-
-                            <div className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white">
-
-                              <Check className="h-3.5 w-3.5" />
-
-                            </div>
-
-                          )}
-
-                        </div>
-
-
-                        <div className="px-1.5 py-2 text-center">
-
-                          <div className="text-sm font-semibold">
-                            {service.name}
-                          </div>
-
-                        </div>
-
-                      </button>
-                    )
-                  }
-                )}
-
-              </div>
-
-            )}
-
-          </section>
-
-
-          {selectedService?.collect_people && (
-            <section className={styles.panel}>
-              <Title>Nhập số người<Required /></Title>
-              <label htmlFor="booking-people" className="mt-3 block text-sm">Số người tham gia chụp</label>
-              <input id="booking-people" required type="number" min="1" max="2147483647" step="1" value={peopleCount} placeholder="Nhập số người" className="mt-2 w-full rounded-xl border border-current/20 bg-transparent p-3" onChange={e => { setPeopleCount(e.target.value); setSelectedPackageId(''); setSessionCount(1); setPaymentOption('later'); setErrorText('') }} />
-              {peopleQuote ? <p className="mt-3 font-semibold text-emerald-600">{peopleCount} người × {money(peopleQuote.unitPrice)} = {money(peopleQuote.total)}</p> : <p role="status" className="mt-3 text-sm">{peopleCount ? 'Số người chưa hợp lệ hoặc chưa có báo giá. Vui lòng chọn số người trong bảng giá hoặc liên hệ studio.' : 'Nhập số người để xem giá và chọn gói chụp.'}</p>}
-            </section>
-          )}
-
-          {/* PACKAGE */}
-
-          {selectedService && (!selectedService.collect_people || peopleQuote) && (
-
-            <section className={styles.panel}>
-
-              <Title>
-                Chọn gói chụp
-                <Required />
-              </Title>
-
-
-              <div className={`${styles.packageGrid} mt-3`}>
-
-                {servicePackages.length === 0 && <p className={styles.notice}>Thể loại này chưa có gói mở đặt lịch. Bạn có thể chọn thể loại khác.</p>}
-                {servicePackages.map(
-                  pkg => {
-
-                    const selected =
-                      selectedPackageId ===
-                      pkg.id
-
-                    return (
-                      <button
-                        key={pkg.id}
-                        aria-pressed={selected}
-                        type="button"
-                        onClick={() =>
-                          choosePackage(
-                            pkg.id
-                          )
-                        }
-                        className={`rounded-[16px] border p-4 text-left ${
-                          selected
-                            ? 'border-emerald-500 bg-emerald-500/10'
-                            : 'border-current/10'
-                        }`}
-                      >
-
-                        <div className="flex items-start justify-between gap-3">
-
-                          <div>
-
-                            <div className="text-sm font-semibold">
-                              {pkg.name}
-                            </div>
-
-
-                            {pkg.description && (
-
-                              <p className="mt-1.5 whitespace-pre-line text-[11px] leading-5 opacity-45">
-                                {pkg.description}
-                              </p>
-
-                            )}
-
-                          </div>
-
-
-                          <span
-                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                              selected
-                                ? 'border-emerald-600 bg-emerald-600 text-white'
-                                : 'border-current/20'
-                            }`}
-                          >
-
-                            {selected && (
-                              <Check className="h-3 w-3" />
-                            )}
-
+        <form onSubmit={submit} className={styles.layout} data-step={step}>
+          <div className={styles.main}>
+            {step === 0 && <>
+              <section className={styles.card} aria-labelledby="booking-service-title">
+                <CardTitle id="booking-service-title" index={1} title="Chọn thể loại chụp" required />
+                {loadError && <p role="alert" className={styles.notice}>Chưa tải đủ thông tin đặt lịch. <button type="button" onClick={() => window.location.reload()}>Tải lại</button></p>}
+                {!loadError && !loading && services.length === 0 && <p className={styles.notice}>Hiện chưa có thể loại chụp mở đặt lịch.</p>}
+                {loading ? (
+                  <div className={styles.serviceGrid} aria-busy="true" aria-label="Đang tải thể loại">
+                    {[0, 1, 2].map(item => <div key={item} className={styles.skeleton} />)}
+                  </div>
+                ) : (
+                  <div className={styles.serviceGrid}>
+                    {services.map(service => {
+                      const selected = service.id === selectedServiceId
+                      const cover = driveImage(service.cover_url, 800)
+                      return (
+                        <button
+                          key={service.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => chooseService(service.id)}
+                          className={styles.serviceCard}
+                        >
+                          <span className={styles.serviceCover}>
+                            {cover
+                              ? <img src={cover} alt="" draggable={false} loading="lazy" referrerPolicy="no-referrer" />
+                              : <UserRound className="h-7 w-7 opacity-20" />}
+                            {selected && <span className={styles.selectedBadge}><Check className="h-3.5 w-3.5" /></span>}
                           </span>
-
-                        </div>
-
-
-                        <div className="mt-3 font-serif text-xl text-emerald-600">
-                          {money(quoteSessions(selectedService.collect_people ? peopleQuote?.total || 0 : pkg.price, sessionPercentages, sessionCount)?.total)}
-                        </div>
-
-                      </button>
-                    )
-                  }
+                          <span className={styles.serviceName}>{service.name}</span>
+                          {service.description && <span className={styles.serviceDesc}>{service.description}</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
                 )}
-
-              </div>
-
-            </section>
-
-          )}
-
-
-          {selectedService?.collect_sessions && selectedPackage && (!selectedService.collect_people || peopleQuote) && (
-            <section className={styles.panel}>
-              <Title>Chọn số buổi<Required /></Title>
-              <label htmlFor="booking-sessions" className="mt-3 block text-sm">Số buổi chụp</label>
-              <select id="booking-sessions" value={sessionCount} className="mt-2 w-full rounded-xl border border-current/20 bg-transparent p-3" onChange={e => { setSessionCount(Number(e.target.value)); setPaymentOption('later'); setErrorText('') }}>
-                {Array.from({ length: sessionPercentages.length + 1 }, (_, index) => <option key={index} value={index + 1}>{index + 1} buổi</option>)}
-              </select>
-              {selectedPackage && sessionQuote && <p className="mt-3 font-semibold text-emerald-600">{money(basePrice)} + {new Intl.NumberFormat('vi-VN').format(sessionQuote.extra)} ₫ = {money(totalPrice)}</p>}
-            </section>
-          )}
-
-          </>}
-          {step === 1 && <>
-          {/* BUỔI CHỤP */}
-
-          <section id="booking-session" className={styles.panel}>
-
-            <Title>
-              Thông tin buổi chụp
-            </Title>
-
-
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-
-              <div>
-
-                <Label htmlFor="event-date">
-                  Ngày chụp dự kiến
-                  <Required />
-                </Label>
-
-                <div className="relative">
-
-                  <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-30" />
-
-                  <input id="event-date"
-                    required
-                    type="date"
-                    value={
-                      form.event_date
-                    }
-                    onChange={e =>
-                      setForm({
-                        ...form,
-                        event_date:
-                          e.target.value,
-                      })
-                    }
-                    className={`${inputClass(
-                      isDarkMode
-                    )} pl-9`}
-                  />
-
-                </div>
-
-              </div>
-
-
-              <div>
-
-                <Label htmlFor="location">
-                  Địa chỉ liên hệ
-                  <Required />
-                </Label>
-
-                <div className="relative">
-
-                  <MapPin className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-30" />
-
-                  <input id="location"
-                    required
-                    value={
-                      form.location
-                    }
-                    onChange={e =>
-                      setForm({
-                        ...form,
-                        location:
-                          e.target.value,
-                      })
-                    }
-                    placeholder="Số nhà, đường, xã/phường, quận/huyện..."
-                    className={`${inputClass(
-                      isDarkMode
-                    )} pl-9`}
-                  />
-
-                </div>
-
-              </div>
-
-            </div>
-
-
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-
-              <div>
-
-                <Label htmlFor="session-title">
-                  Tiêu đề buổi chụp
-                </Label>
-
-                <input id="session-title" placeholder="Ví dụ: Ảnh gia đình cuối năm"
-                  value={form.title}
-                  onChange={e =>
-                    setForm({
-                      ...form,
-                      title:
-                        e.target.value,
-                    })
-                  }
-                  className={inputClass(
-                    isDarkMode
-                  )}
-                />
-
-              </div>
-
-
-              <div>
-
-                <Label htmlFor="notes">
-                  Nội dung / yêu cầu
-                </Label>
-
-                <textarea id="notes"
-                  rows={2}
-                  placeholder="Ý tưởng, phong cách hoặc điều bạn muốn trao đổi…"
-                  value={form.note}
-                  onChange={e =>
-                    setForm({
-                      ...form,
-                      note:
-                        e.target.value,
-                    })
-                  }
-                  className={inputClass(
-                    isDarkMode
-                  )}
-                />
-
-              </div>
-
-            </div>
-
-          </section>
-
-
-          {/* KHÁCH */}
-
-          <section id="booking-contact" className={styles.panel}>
-
-            <Title>
-              Thông tin khách hàng
-            </Title>
-
-
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-
-              <InputField
-                title="Họ và tên" autoComplete="name"
-                required
-                value={
-                  form.full_name
-                }
-                dark={isDarkMode}
-                setValue={value =>
-                  setForm({
-                    ...form,
-                    full_name:
-                      value,
-                  })
-                }
-              />
-
-
-              <InputField
-                title="Số điện thoại" type="tel" autoComplete="tel"
-                required
-                value={form.phone}
-                dark={isDarkMode}
-                setValue={value =>
-                  setForm({
-                    ...form,
-                    phone:
-                      value,
-                  })
-                }
-              />
-
-
-              <InputField
-                title="Zalo (không bắt buộc)"
-                value={form.zalo}
-                dark={isDarkMode}
-                setValue={value =>
-                  setForm({
-                    ...form,
-                    zalo:
-                      value,
-                  })
-                }
-              />
-
-
-              <InputField
-                title="Email" type="email" autoComplete="email"
-                value={form.email}
-                required
-                dark={isDarkMode}
-                setValue={value =>
-                  setForm({
-                    ...form,
-                    email:
-                      value,
-                  })
-                }
-              />
-
-            </div>
-
-          </section>
-
-
-          </>}
-          <input
-            className="hidden"
-            tabIndex={-1}
-            value={form.website}
-            onChange={e =>
-              setForm({
-                ...form,
-                website:
-                  e.target.value,
-              })
-            }
-          />
-
-          {errorText && <p role="alert" className={styles.stepError}>{errorText}</p>}
-          <div className={styles.stepActions}>
-            {step > 0 && <button type="button" onClick={() => { setStep(step - 1); setErrorText('') }}>Quay lại</button>}
-            <button type="submit" disabled={loading || loadError || !services.length} className={styles.nextStep}>Tiếp tục <ChevronRight size={16} /></button>
-          </div>
-        </div>}
-
-
-        {/* TÓM TẮT */}
-
-
-        {step === 2 && <aside className={styles.aside}>
-          <button type="button" disabled={sending} className={styles.backStep} onClick={() => { setStep(1); setErrorText('') }}>← Quay lại thông tin</button>
-
-          {/* PAYMENT CARD */}
-
-          {selectedPackage &&
-            bankReady &&
-            payment && (
-
-            <div
-              className={`studio-panel rounded-[20px] border p-4 ${
-                isDarkMode
-                  ? 'border-white/10 bg-white/[0.025]'
-                  : 'border-black/[0.07] bg-[#fbfcfa]'
-              }`}
-            >
-
-              <div className="text-[8px] font-bold uppercase tracking-[0.18em] opacity-35">
-                Thanh toán
-              </div>
-
-              <h2 className="mt-1 font-serif text-xl">
-                Phương thức thanh toán
-              </h2>
-
-
-              <button
-                type="button"
-                onClick={toggleTransfer}
-                className={`mt-4 flex w-full items-center justify-between rounded-[13px] border p-3 text-left ${
-                  paymentOption !== 'later'
-                    ? 'border-emerald-500 bg-emerald-500/10'
-                    : 'border-current/10'
-                }`}
-              >
-
-                <div className="flex items-center gap-2.5">
-
-                  <CreditCard className="h-4 w-4 text-emerald-600" />
-
-                  <div>
-
-                    <div className="text-xs font-semibold">
-                      Chuyển khoản
-                    </div>
-
-                    <div className="mt-0.5 text-[9px] opacity-40">
-                      Thanh toán trước cho Booking
-                    </div>
-
-                  </div>
-
-                </div>
-
-                <CheckBox
-                  checked={
-                    paymentOption !== 'later'
-                  }
-                />
-
-              </button>
-
-
-              {paymentOption !== 'later' && (
-
-                <>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-
-                    <PaymentChoice
-                      active={
-                        paymentOption === 'deposit'
-                      }
-                      title="Cọc trước"
-                      sub={`${depositPercent}%`}
-                      price={
-                        money(depositAmount)
-                      }
-                      onClick={() =>
-                        setPaymentOption(
-                          'deposit'
-                        )
-                      }
+              </section>
+
+              {selectedService?.collect_people && (
+                <section className={styles.card} aria-labelledby="booking-people-title">
+                  <CardTitle id="booking-people-title" index={2} title="Số người tham gia" required />
+                  <div className={styles.counter}>
+                    <button type="button" aria-label="Bớt 1 người" disabled={!Number(peopleCount) || Number(peopleCount) <= 1} onClick={() => changePeople(Number(peopleCount) - 1)}><Minus className="h-4 w-4" /></button>
+                    <input
+                      id="booking-people"
+                      aria-labelledby="booking-people-title"
+                      required
+                      type="number"
+                      inputMode="numeric"
+                      min="1"
+                      max="2147483647"
+                      step="1"
+                      value={peopleCount}
+                      placeholder="Số người"
+                      onChange={event => changePeople(event.target.value)}
                     />
+                    <button type="button" aria-label="Thêm 1 người" onClick={() => changePeople((Number(peopleCount) || 0) + 1)}><Plus className="h-4 w-4" /></button>
+                  </div>
+                  {peopleQuote
+                    ? <p className={styles.quote}>{peopleCount} người × {money(peopleQuote.unitPrice)} = <b>{money(peopleQuote.total)}</b></p>
+                    : <p role="status" className={styles.hint}>{peopleCount ? 'Số người chưa có trong bảng giá. Vui lòng nhập số khác hoặc liên hệ studio.' : 'Nhập số người để xem giá và chọn gói chụp.'}</p>}
+                </section>
+              )}
 
-                    <PaymentChoice
-                      active={
-                        paymentOption === 'full'
-                      }
-                      title="Toàn bộ"
-                      sub="100%"
-                      price={
-                        money(
-                          totalPrice
-                        )
-                      }
-                      onClick={() =>
-                        setPaymentOption(
-                          'full'
-                        )
-                      }
-                    />
+              {selectedService && (!selectedService.collect_people || peopleQuote) && (
+                <section className={styles.card} aria-labelledby="booking-package-title">
+                  <CardTitle id="booking-package-title" index={selectedService.collect_people ? 3 : 2} title="Chọn gói chụp" required />
+                  {servicePackages.length === 0 && <p className={styles.notice}>Thể loại này chưa có gói mở đặt lịch. Bạn có thể chọn thể loại khác.</p>}
+                  <div className={styles.packageList}>
+                    {servicePackages.map(pkg => {
+                      const selected = selectedPackageId === pkg.id
+                      const price = quoteSessions(selectedService.collect_people ? peopleQuote?.total || 0 : pkg.price, sessionPercentages, sessionCount)?.total
+                      return (
+                        <button
+                          key={pkg.id}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => choosePackage(pkg.id)}
+                          className={styles.packageCard}
+                        >
+                          <span className={styles.radio} aria-hidden="true">{selected && <Check className="h-3 w-3" />}</span>
+                          <span className={styles.packageBody}>
+                            <span className={styles.packageName}>{pkg.name}</span>
+                            {pkg.description && <span className={styles.packageDesc}>{pkg.description}</span>}
+                          </span>
+                          <span className={styles.packagePrice}>{money(price)}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
 
+              {selectedService?.collect_sessions && selectedPackage && (!selectedService.collect_people || peopleQuote) && (
+                <section className={styles.card} aria-labelledby="booking-sessions-title">
+                  <CardTitle id="booking-sessions-title" index={selectedService.collect_people ? 4 : 3} title="Số buổi chụp" required />
+                  <div className={styles.segments} role="group" aria-labelledby="booking-sessions-title">
+                    {Array.from({ length: sessionPercentages.length + 1 }, (_, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        aria-pressed={sessionCount === index + 1}
+                        onClick={() => { setSessionCount(index + 1); setPaymentOption('later'); setErrorText('') }}
+                      >
+                        {index + 1} buổi
+                      </button>
+                    ))}
+                  </div>
+                  {sessionQuote && sessionCount > 1 && <p className={styles.quote}>{money(basePrice)} + {new Intl.NumberFormat('vi-VN').format(sessionQuote.extra)} ₫ = <b>{money(totalPrice)}</b></p>}
+                </section>
+              )}
+            </>}
+
+            {step === 1 && <>
+              <section className={styles.card} aria-labelledby="booking-session-title">
+                <CardTitle id="booking-session-title" title="Thông tin buổi chụp" />
+                <div className={styles.fieldGrid}>
+                  <Field id="event-date" label="Ngày chụp dự kiến" required icon={<CalendarDays className="h-4 w-4" />}>
+                    <input id="event-date" required type="date" value={form.event_date} onChange={event => updateForm('event_date', event.target.value)} />
+                  </Field>
+                  <Field id="location" label="Địa chỉ liên hệ" required icon={<MapPin className="h-4 w-4" />}>
+                    <input id="location" required autoComplete="street-address" value={form.location} onChange={event => updateForm('location', event.target.value)} placeholder="Số nhà, đường, phường/xã…" />
+                  </Field>
+                  <Field id="session-title" label="Tiêu đề buổi chụp" wide>
+                    <input id="session-title" placeholder="Ví dụ: Ảnh gia đình cuối năm" value={form.title} onChange={event => updateForm('title', event.target.value)} />
+                  </Field>
+                  <Field id="notes" label="Nội dung / yêu cầu" wide>
+                    <textarea id="notes" rows={3} placeholder="Ý tưởng, phong cách hoặc điều bạn muốn trao đổi…" value={form.note} onChange={event => updateForm('note', event.target.value)} />
+                  </Field>
+                </div>
+              </section>
+
+              <section className={styles.card} aria-labelledby="booking-contact-title">
+                <CardTitle id="booking-contact-title" title="Thông tin liên hệ" />
+                <div className={styles.fieldGrid}>
+                  <Field id="full-name" label="Họ và tên" required>
+                    <input id="full-name" required autoComplete="name" value={form.full_name} onChange={event => updateForm('full_name', event.target.value)} />
+                  </Field>
+                  <Field id="phone" label="Số điện thoại" required>
+                    <input id="phone" required type="tel" inputMode="tel" autoComplete="tel" value={form.phone} onChange={event => updateForm('phone', event.target.value)} />
+                  </Field>
+                  <Field id="email" label="Email" required>
+                    <input id="email" required type="email" inputMode="email" autoComplete="email" value={form.email} onChange={event => updateForm('email', event.target.value)} />
+                  </Field>
+                  <Field id="zalo" label="Zalo (không bắt buộc)">
+                    <input id="zalo" inputMode="tel" value={form.zalo} onChange={event => updateForm('zalo', event.target.value)} />
+                  </Field>
+                </div>
+              </section>
+            </>}
+
+            {step === 2 && <>
+              <section className={styles.card} aria-labelledby="booking-review-title">
+                <div className={styles.cardHead}>
+                  <CardTitle id="booking-review-title" title="Thông tin của bạn" />
+                  <button type="button" className={styles.editLink} disabled={sending} onClick={() => goToStep(1)}>Sửa</button>
+                </div>
+                <dl className={styles.reviewList}>
+                  <ReviewRow label="Ngày chụp" value={formatDate(form.event_date)} />
+                  <ReviewRow label="Địa chỉ" value={form.location} />
+                  {form.title && <ReviewRow label="Tiêu đề" value={form.title} />}
+                  {form.note && <ReviewRow label="Yêu cầu" value={form.note} />}
+                  <ReviewRow label="Họ và tên" value={form.full_name} />
+                  <ReviewRow label="Điện thoại" value={form.phone} />
+                  <ReviewRow label="Email" value={form.email} />
+                  {form.zalo && <ReviewRow label="Zalo" value={form.zalo} />}
+                </dl>
+              </section>
+
+              {selectedPackage && bankReady && payment && (
+                <section className={styles.card} aria-labelledby="booking-payment-title">
+                  <CardTitle id="booking-payment-title" title="Thanh toán" />
+                  <div className={styles.payOptions} role="radiogroup" aria-labelledby="booking-payment-title">
+                    <PayOption active={paymentOption === 'later'} title="Thanh toán sau" sub="Studio liên hệ xác nhận trước" onClick={() => setPaymentOption('later')} />
+                    <PayOption active={paymentOption === 'deposit'} title={`Cọc ${depositPercent}%`} sub="Chuyển khoản giữ lịch" price={money(depositAmount)} onClick={() => setPaymentOption('deposit')} />
+                    <PayOption active={paymentOption === 'full'} title="Thanh toán toàn bộ" sub="Chuyển khoản 100%" price={money(totalPrice)} onClick={() => setPaymentOption('full')} />
                   </div>
 
-
-                  <div
-                    className={`mt-3 rounded-[14px] border p-3 ${
-                      isDarkMode
-                        ? 'border-white/10 bg-white/[0.025]'
-                        : 'border-black/[0.07] bg-[#f3f6f7]'
-                    }`}
-                  >
-
-                    <div className="grid gap-3">
-
-                      <PaymentRow
-                        label="Ngân hàng"
-                        value={
-                          payment.bank_name
-                        }
-                      />
-
-
-                      <div>
-
-                        <div className="text-[8px] font-bold uppercase tracking-[0.12em] opacity-35">
-                          Số tài khoản
+                  {paymentOption !== 'later' && (
+                    <div className={styles.bankBox}>
+                      {payment.qr_url && (
+                        <figure className={styles.qr}>
+                          <img src={driveImage(payment.qr_url)} alt="QR chuyển khoản" draggable={false} referrerPolicy="no-referrer" />
+                          <figcaption>Quét QR để chuyển khoản</figcaption>
+                        </figure>
+                      )}
+                      <dl className={styles.bankRows}>
+                        <ReviewRow label="Ngân hàng" value={payment.bank_name} />
+                        <div>
+                          <dt>Số tài khoản</dt>
+                          <dd className={styles.accountRow}>
+                            <b>{payment.account_number}</b>
+                            <button type="button" onClick={() => void copyAccount()}>
+                              {copiedAccount ? <><Check className="h-3.5 w-3.5" /> Đã sao chép</> : <><Copy className="h-3.5 w-3.5" /> Sao chép</>}
+                            </button>
+                          </dd>
                         </div>
-
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-
-                          <div className="text-xs font-semibold">
-                            {payment.account_number}
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              void copyAccount()
-                            }
-                            className="inline-flex items-center gap-1 rounded-lg border border-current/10 px-2 py-1 text-[9px] font-semibold"
-                          >
-
-                            {copiedAccount ? (
-                              <>
-                                <Check className="h-3 w-3 text-emerald-600" />
-                                Đã sao chép
-                              </>
-                            ) : (
-                              <>
-                                <Copy className="h-3 w-3" />
-                                Sao chép
-                              </>
-                            )}
-
-                          </button>
-
-                        </div>
-
-                      </div>
-
-
-                      <PaymentRow
-                        label="Chủ tài khoản"
-                        value={
-                          payment.account_holder
-                        }
-                      />
-
-
-                      <PaymentRow
-                        label={
-                          paymentOption === 'deposit'
-                            ? 'Số tiền cọc'
-                            : 'Số tiền chuyển'
-                        }
-                        value={
-                          money(paymentAmount)
-                        }
-                      />
-
-
-                      <PaymentRow
-                        label="Nội dung"
-                        value={
-                          transferContent
-                        }
-                      />
-
+                        <ReviewRow label="Chủ tài khoản" value={payment.account_holder} />
+                        <ReviewRow label={paymentOption === 'deposit' ? 'Số tiền cọc' : 'Số tiền chuyển'} value={money(paymentAmount)} strong />
+                        <ReviewRow label="Nội dung chuyển khoản" value={transferContent} />
+                      </dl>
+                      {payment.note && <p className={styles.hint}>{payment.note}</p>}
                     </div>
-
-
-                    {payment.qr_url && (
-
-                      <div className="mx-auto mt-4 max-w-[210px]">
-
-                        <div className="overflow-hidden rounded-xl bg-white p-1.5">
-
-                          <img
-                            src={
-                              driveImage1500(
-                                payment.qr_url
-                              )
-                            }
-                            alt="QR chuyển khoản"
-                            draggable={false}
-                            className="aspect-square w-full select-none object-contain"
-                          />
-
-                        </div>
-
-                        <div className="mt-2 text-center text-[8px] uppercase tracking-[0.12em] opacity-40">
-                          QR chuyển khoản
-                        </div>
-
-                      </div>
-
-                    )}
-
-                  </div>
-
-                </>
-              )}
-
-            </div>
-          )}
-
-
-          {/* SUMMARY CARD */}
-
-
-          <div
-            className={`studio-panel rounded-[20px] border p-5 ${
-              isDarkMode
-                ? 'border-white/10 bg-white/[0.025]'
-                : 'border-black/[0.07] bg-[#fbfcfa]'
-            }`}
-          >
-
-            <div className="text-[8px] font-bold uppercase tracking-[0.18em] opacity-35">
-              KIỂM TRA TRƯỚC KHI GỬI
-            </div>
-
-            <h2 className="mt-1 font-serif text-2xl">
-              Buổi chụp của bạn
-            </h2>
-
-
-            <div className="mt-5 space-y-3">
-
-              <Summary
-                label="Thể loại"
-                value={
-                  selectedService?.name ||
-                  'Chưa chọn'
-                }
-              />
-
-
-              <Summary
-                label="Gói chụp"
-                value={
-                  selectedPackage?.name ||
-                  'Chưa chọn'
-                }
-              />
-
-
-              {selectedService?.collect_sessions && <Summary label="Số buổi" value={`${sessionCount} buổi · ${sessionQuote?.percent || 100}% giá gốc`} />}
-              {selectedPackage && sessionCount > 1 && sessionQuote && <Summary label="Giá buổi đầu / phần cộng thêm" value={`${money(basePrice)} + ${new Intl.NumberFormat('vi-VN').format(sessionQuote.extra)} ₫`} />}
-              {peopleQuote && <Summary label="Số người / đơn giá" value={`${peopleCount} người × ${money(peopleQuote.unitPrice)}`} />}
-              {selectedPackage && (
-
-                <Summary
-                  label="Giá"
-                  value={
-                    money(
-                      totalPrice
-                    )
-                  }
-                  strong
-                />
-
-              )}
-
-
-              {paymentOption ===
-                'deposit' && (
-
-                <Summary
-                  label={`Cọc ${depositPercent}%`}
-                  value={
-                    money(
-                      depositAmount
-                    )
-                  }
-                  strong
-                />
-
-              )}
-
-
-              {paymentOption ===
-                'full' && (
-
-                <Summary
-                  label="Chuyển toàn bộ"
-                  value={
-                    money(
-                      totalPrice
-                    )
-                  }
-                  strong
-                />
-
-              )}
-
-
-              <Summary
-                label="Ngày chụp"
-                value={
-                  form.event_date ||
-                  'Chưa chọn'
-                }
-              />
-
-
-              <Summary
-                label="Địa chỉ liên hệ"
-                value={
-                  form.location ||
-                  'Chưa nhập'
-                }
-              />
-
-            </div>
-
-
-            {errorText && (
-
-              <div role="alert" className="mt-4 rounded-xl bg-red-500/10 p-2.5 text-[11px] text-red-500">
-                {errorText}
-              </div>
-
-            )}
-
-
-            <button
-              type="submit"
-              disabled={sending || loading || loadError || !services.length}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-[13px] bg-emerald-600 px-4 py-3 text-xs font-bold text-white disabled:opacity-50"
-            >
-
-              {sending
-                ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )
-                : (
-                  <>
-                    Gửi yêu cầu đặt lịch
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </>
-                )
-              }
-
-            </button>
-
-
-            {(payment?.admin_contact_phone ||
-              payment?.admin_contact_email ||
-              payment?.admin_contact_zalo_url ||
-              payment?.admin_contact_facebook_url) && (
-
-              <div className="mt-5 border-t border-current/10 pt-4">
-
-                <div className="text-[8px] font-bold uppercase tracking-[0.15em] opacity-35">
-                  Liên hệ Dinh Thong Gallery
-                </div>
-
-                <div className="mt-2 flex flex-wrap gap-2">
-
-                  {payment.admin_contact_phone && (
-                    <a
-                      href={`tel:${payment.admin_contact_phone}`}
-                      className="rounded-full border border-current/10 px-3 py-1.5 text-[9px]"
-                    >
-                      Điện thoại
-                    </a>
                   )}
+                </section>
+              )}
+            </>}
 
-                  {payment.admin_contact_zalo_url && (
-                    <a
-                      href={payment.admin_contact_zalo_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-full border border-current/10 px-3 py-1.5 text-[9px]"
-                    >
-                      Zalo
-                    </a>
-                  )}
-
-                  {payment.admin_contact_facebook_url && (
-                    <a
-                      href={payment.admin_contact_facebook_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-full border border-current/10 px-3 py-1.5 text-[9px]"
-                    >
-                      Facebook
-                    </a>
-                  )}
-
-                  {payment.admin_contact_email && (
-                    <a
-                      href={`mailto:${payment.admin_contact_email}`}
-                      className="rounded-full border border-current/10 px-3 py-1.5 text-[9px]"
-                    >
-                      Email
-                    </a>
-                  )}
-
-                </div>
-
-              </div>
-            )}
-
+            <input
+              className="hidden"
+              tabIndex={-1}
+              aria-hidden="true"
+              autoComplete="off"
+              value={form.website}
+              onChange={event => updateForm('website', event.target.value)}
+            />
           </div>
 
-        </aside>}
+          <aside className={styles.aside} aria-label="Tóm tắt đặt lịch">
+            <div className={styles.summary}>
+              <div className={styles.cardHead}>
+                <h2>Tóm tắt</h2>
+                {step > 0 && <button type="button" className={styles.editLink} disabled={sending} onClick={() => goToStep(0)}>Đổi gói</button>}
+              </div>
+              <dl className={styles.summaryList}>
+                <ReviewRow label="Thể loại" value={selectedService?.name || 'Chưa chọn'} muted={!selectedService} />
+                <ReviewRow label="Gói chụp" value={selectedPackage?.name || 'Chưa chọn'} muted={!selectedPackage} />
+                {peopleQuote && <ReviewRow label="Số người" value={`${peopleCount} người × ${money(peopleQuote.unitPrice)}`} />}
+                {selectedService?.collect_sessions && selectedPackage && <ReviewRow label="Số buổi" value={`${sessionCount} buổi`} />}
+                {step > 0 && <ReviewRow label="Ngày chụp" value={formatDate(form.event_date) || 'Chưa chọn'} muted={!form.event_date} />}
+              </dl>
+              <div className={styles.total}>
+                <span>Tổng chi phí</span>
+                <b>{selectedPackage ? money(totalPrice) : '—'}</b>
+              </div>
+              {step === 2 && paymentOption !== 'later' && (
+                <div className={styles.totalSub}>
+                  <span>{paymentOption === 'deposit' ? `Cọc trước ${depositPercent}%` : 'Chuyển khoản ngay'}</span>
+                  <b>{money(paymentAmount)}</b>
+                </div>
+              )}
+            </div>
 
-      </form>
+            <div className={styles.actionBar}>
+              {errorText && <p role="alert" className={styles.error}>{errorText}</p>}
+              <div className={styles.actionRow}>
+                <div className={styles.barTotal}>
+                  <span>{!selectedPackage ? 'Chưa chọn gói' : step === 2 && paymentOption !== 'later' ? (paymentOption === 'deposit' ? `Cọc ${depositPercent}%` : 'Cần chuyển') : 'Tổng chi phí'}</span>
+                  <b>{selectedPackage ? money(step === 2 && paymentOption !== 'later' ? paymentAmount : totalPrice) : '—'}</b>
+                </div>
+                {step > 0 && (
+                  <button type="button" className={styles.backButton} disabled={sending} onClick={() => goToStep(step - 1)} aria-label="Quay lại bước trước">
+                    <ChevronLeft className="h-4 w-4" /><span>Quay lại</span>
+                  </button>
+                )}
+                <button type="submit" className={styles.primaryButton} disabled={!canSubmit || sending}>
+                  {sending ? <><Loader2 className="h-4 w-4 animate-spin" /> Đang gửi…</> : <><span className={styles.labelLong}>{nextLabel[0]}</span><span className={styles.labelShort}>{nextLabel[1]}</span><ChevronRight className="h-4 w-4" /></>}
+                </button>
+              </div>
+            </div>
 
+            {hasContact && payment && (
+              <div className={styles.contact}>
+                <span>Cần tư vấn? Liên hệ studio</span>
+                <div>
+                  {payment.admin_contact_phone && <a href={`tel:${payment.admin_contact_phone}`}><Phone className="h-3.5 w-3.5" /> Gọi</a>}
+                  {payment.admin_contact_zalo_url && <a href={payment.admin_contact_zalo_url} target="_blank" rel="noreferrer"><MessageCircle className="h-3.5 w-3.5" /> Zalo</a>}
+                  {payment.admin_contact_facebook_url && <a href={payment.admin_contact_facebook_url} target="_blank" rel="noreferrer">Facebook</a>}
+                  {payment.admin_contact_email && <a href={`mailto:${payment.admin_contact_email}`}><Mail className="h-3.5 w-3.5" /> Email</a>}
+                </div>
+              </div>
+            )}
+          </aside>
+        </form>
+      </div>
     </main>
   )
+
+  function changePeople(value: string | number) {
+    const next = typeof value === 'number' ? String(Math.max(1, value)) : value
+    setPeopleCount(next)
+    setSelectedPackageId('')
+    setSessionCount(1)
+    setPaymentOption('later')
+    setErrorText('')
+  }
+}
+
+
+function formatDate(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return value
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  const weekday = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'][date.getDay()]
+  return `${weekday}, ${match[3]}/${match[2]}/${match[1]}`
 }
 
 
@@ -1802,280 +1188,71 @@ function ResultPage({
   text: string
   success?: boolean
 }) {
-
   return (
     <main
       data-site-theme={dark ? 'dark' : 'light'}
-      className={`site-page-surface studio-booking min-h-screen ${
-        dark
-          ? 'bg-[#06140f] text-white'
-          : 'bg-white text-[#202520]'
-      }`}
+      className={`site-page-surface studio-booking min-h-screen ${dark ? 'bg-[#06140f] text-white' : 'bg-white text-[#202520]'}`}
     >
-
       <div className="flex min-h-screen items-center justify-center px-5 text-center">
-
         <div className="max-w-md">
-
-          {success && (
-            <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-600" />
-          )}
-
-          {!success && (
-            <CreditCard className="mx-auto h-10 w-10 text-amber-500" />
-          )}
-
-          <h1 className="mt-5 font-serif text-3xl">
-            {title}
-          </h1>
-
-          <p className="mt-3 text-sm leading-7 opacity-50">
-            {text}
-          </p>
-
-          <Link
-            href="/"
-            className="mt-6 inline-flex rounded-full border border-current/15 px-5 py-2.5 text-xs"
-          >
+          {success
+            ? <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" />
+            : <CreditCard className="mx-auto h-12 w-12 text-amber-500" />}
+          <h1 className="mt-5 font-serif text-3xl">{title}</h1>
+          <p className="mt-3 text-[15px] leading-7 opacity-70">{text}</p>
+          <Link href="/" className="mt-6 inline-flex min-h-11 items-center rounded-full border border-current/15 px-6 text-sm font-semibold">
             Trở về Gallery
           </Link>
-
         </div>
-
       </div>
-
     </main>
   )
 }
 
 
-function Title({
-  children,
-}: {
-  children: ReactNode
-}) {
-
+function CardTitle({ id, index, title, required = false }: { id: string; index?: number; title: string; required?: boolean }) {
   return (
-    <h2 className="text-base font-semibold sm:text-lg">
-      {children}
+    <h2 id={id} className={styles.cardTitle}>
+      {index && <span className={styles.cardIndex}>{index}</span>}
+      {title}
+      {required && <span className={styles.required} aria-hidden="true">*</span>}
     </h2>
   )
 }
 
 
-function Required() {
-
+function Field({ id, label, required = false, wide = false, icon, children }: { id: string; label: string; required?: boolean; wide?: boolean; icon?: ReactNode; children: ReactNode }) {
   return (
-    <span className="ml-1 text-red-500">
-      *
-    </span>
-  )
-}
-
-
-function Label({
-  htmlFor, children,
-}: {
-  htmlFor: string
-  children: ReactNode
-}) {
-
-  return (
-    <label htmlFor={htmlFor} className="mb-1.5 block text-[10px] font-semibold opacity-60">
-      {children}
-    </label>
-  )
-}
-
-
-function InputField({
-  title,
-  value,
-  setValue,
-  dark,
-  required = false, type = 'text', autoComplete,
-}: {
-  title: string
-  value: string
-  setValue: (
-    value: string
-  ) => void
-  dark: boolean
-  required?: boolean
-  type?: string
-  autoComplete?: string
-}) {
-  const id = useId()
-
-  return (
-    <div>
-
-      <Label htmlFor={id}>
-        {title}
-        {required && (
-          <Required />
-        )}
-      </Label>
-
-      <input id={id} type={type} autoComplete={autoComplete}
-        required={required}
-        value={value}
-        onChange={e =>
-          setValue(
-            e.target.value
-          )
-        }
-        className={
-          inputClass(dark)
-        }
-      />
-
+    <div className={`${styles.field} ${wide ? styles.wide : ''}`}>
+      <label htmlFor={id}>{label}{required && <span className={styles.required} aria-hidden="true">*</span>}</label>
+      <div className={icon ? styles.withIcon : undefined}>
+        {icon && <span className={styles.fieldIcon} aria-hidden="true">{icon}</span>}
+        {children}
+      </div>
     </div>
   )
 }
 
 
-function inputClass(
-  dark: boolean
-) {
-
-  return `h-10 w-full rounded-[11px] border px-3 text-xs outline-none ${
-    dark
-      ? 'border-white/10 bg-white/[0.045]'
-      : 'border-transparent bg-[#eef2f4]'
-  }`
-}
-
-
-function CheckBox({
-  checked,
-}: {
-  checked: boolean
-}) {
-
+function PayOption({ active, title, sub, price, onClick }: { active: boolean; title: string; sub: string; price?: string; onClick: () => void }) {
   return (
-    <span
-      className={`flex h-5 w-5 items-center justify-center rounded-md border ${
-        checked
-          ? 'border-emerald-600 bg-emerald-600 text-white'
-          : 'border-current/20'
-      }`}
-    >
-
-      {checked && (
-        <Check className="h-3.5 w-3.5" />
-      )}
-
-    </span>
-  )
-}
-
-
-function PaymentChoice({
-  active,
-  title,
-  sub,
-  price,
-  onClick,
-}: {
-  active: boolean
-  title: string
-  sub: string
-  price: string
-  onClick: () => void
-}) {
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-[16px] border p-4 text-left ${
-        active
-          ? 'border-emerald-500 bg-emerald-500/10'
-          : 'border-current/10'
-      }`}
-    >
-
-      <div className="flex items-start justify-between">
-
-        <div>
-
-          <div className="text-sm font-semibold">
-            {title}
-          </div>
-
-          <div className="mt-1 text-[10px] opacity-45">
-            {sub}
-          </div>
-
-        </div>
-
-        {active && (
-          <Check className="h-4 w-4 text-emerald-600" />
-        )}
-
-      </div>
-
-      <div className="mt-3 font-serif text-xl text-emerald-600">
-        {price}
-      </div>
-
+    <button type="button" role="radio" aria-checked={active} onClick={onClick} className={styles.payOption}>
+      <span className={styles.radio} aria-hidden="true">{active && <Check className="h-3 w-3" />}</span>
+      <span className={styles.packageBody}>
+        <span className={styles.packageName}>{title}</span>
+        <span className={styles.packageDesc}>{sub}</span>
+      </span>
+      {price && <span className={styles.packagePrice}>{price}</span>}
     </button>
   )
 }
 
 
-function PaymentRow({
-  label,
-  value,
-}: {
-  label: string
-  value: string
-}) {
-
+function ReviewRow({ label, value, strong = false, muted = false }: { label: string; value: string; strong?: boolean; muted?: boolean }) {
   return (
     <div>
-
-      <div className="text-[8px] font-bold uppercase tracking-[0.12em] opacity-35">
-        {label}
-      </div>
-
-      <div className="mt-1 text-xs font-semibold">
-        {value || '—'}
-      </div>
-
-    </div>
-  )
-}
-
-
-function Summary({
-  label,
-  value,
-  strong = false,
-}: {
-  label: string
-  value: string
-  strong?: boolean
-}) {
-
-  return (
-    <div className="border-b border-current/10 pb-3">
-
-      <div className="text-[9px] opacity-40">
-        {label}
-      </div>
-
-      <div
-        className={`mt-0.5 ${
-          strong
-            ? 'text-base font-bold text-emerald-600'
-            : 'text-xs'
-        }`}
-      >
-        {value}
-      </div>
-
+      <dt>{label}</dt>
+      <dd className={strong ? styles.strong : muted ? styles.muted : undefined}>{value || '—'}</dd>
     </div>
   )
 }
