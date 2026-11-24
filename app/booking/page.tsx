@@ -13,7 +13,6 @@ import type {
 
 import { type PeoplePriceTier, quotePeople, quoteSessions } from '@/lib/booking-pricing'
 import Link from 'next/link'
-import { SITE_BANNER_URL } from '@/lib/site-assets'
 import styles from './booking.module.css'
 
 import {
@@ -850,13 +849,10 @@ export default function BookingPage() {
       </header>
 
       <div className={styles.shell}>
+        <div className={styles.top}>
         <section className={styles.intro} aria-labelledby="booking-title">
-          <img src={SITE_BANNER_URL} alt="" className={styles.introPhoto} />
-          <div>
-            <p className={styles.kicker}>ĐẶT LỊCH CHỤP</p>
-            <h1 id="booking-title">Đặt lịch chụp ảnh</h1>
-            <p className={styles.introText}>3 bước đơn giản · Studio sẽ liên hệ xác nhận lịch với bạn.</p>
-          </div>
+          <h1 id="booking-title">Đặt lịch chụp ảnh</h1>
+          <p className={styles.introText}>Chọn dịch vụ, điền thông tin · Studio sẽ liên hệ xác nhận lịch với bạn.</p>
         </section>
 
         <nav id="booking-steps" aria-label="Các bước đặt lịch" className={styles.stepper}>
@@ -869,14 +865,14 @@ export default function BookingPage() {
                   disabled={index > step || sending}
                   onClick={() => goToStep(index)}
                 >
-                  <span className={styles.stepDot}>{index < step ? <Check className="h-3.5 w-3.5" /> : index + 1}</span>
+                  <span className={styles.stepDot}>{index < step ? <Check className="h-3.5 w-3.5" /> : String(index + 1).padStart(2, '0')}</span>
                   <span className={styles.stepLabel}>{label}</span>
                 </button>
               </li>
             ))}
           </ol>
-          <div className={styles.progress} aria-hidden="true"><span style={{ width: `${((step + 1) / steps.length) * 100}%` }} /></div>
         </nav>
+        </div>
 
         <form onSubmit={submit} className={styles.layout} data-step={step}>
           <div className={styles.main}>

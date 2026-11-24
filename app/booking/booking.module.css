@@ -3,25 +3,23 @@
 .page { --bar-h: 0px; color: var(--studio-ink); }
 .shell { width: min(1360px, calc(100% - 64px)); margin: 0 auto; padding: 22px 0 48px; }
 
-/* Intro */
-.intro { display: flex; align-items: center; gap: 18px; }
-.introPhoto { width: 84px; height: 84px; flex: none; border-radius: 18px; object-fit: cover; object-position: center 40%; }
-.kicker { font-size: 10px; font-weight: 700; letter-spacing: .22em; color: var(--studio-accent); }
-.intro h1 { margin: 4px 0 2px; font: 500 clamp(26px, 3.4vw, 36px)/1.15 Georgia, serif; letter-spacing: -.02em; }
+/* Title with the three steps beside it */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 16px 40px; margin-bottom: 22px; }
+.intro { min-width: 0; }
+.intro h1 { margin: 0 0 4px; font: 500 clamp(26px, 3vw, 34px)/1.15 Georgia, serif; letter-spacing: -.02em; }
 .introText { color: var(--studio-muted); font-size: 14px; }
-
-/* Stepper */
-.stepper { margin: 20px 0 18px; scroll-margin-top: 70px; }
-.stepper ol { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; list-style: none; margin: 0; padding: 0; }
-.stepper button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0; color: var(--studio-muted); font-size: 14px; text-align: left; }
+.stepper { flex: none; scroll-margin-top: 70px; }
+.stepper ol { display: flex; align-items: center; list-style: none; margin: 0; padding: 0; }
+.stepper li { display: flex; align-items: center; }
+.stepper li + li::before { content: ''; width: 36px; height: 1.5px; margin: 0 12px; background: var(--studio-line); }
+.stepper li[data-state='done'] + li::before, .stepper li[data-state='current']::before { background: var(--studio-accent); }
+.stepper button { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0; color: var(--studio-muted); font-size: 14px; white-space: nowrap; }
 .stepper button:disabled { cursor: default; }
-.stepDot { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border: 1.5px solid var(--studio-line); border-radius: 50%; font-size: 13px; font-weight: 700; background: var(--studio-panel); }
-.stepper li[data-state='current'] button { color: var(--studio-ink); font-weight: 600; }
+.stepDot { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border: 1.5px solid var(--studio-line); border-radius: 50%; font-size: 13px; font-weight: 600; background: var(--studio-panel); }
+.stepper li[data-state='current'] button { color: var(--studio-accent); font-weight: 600; }
 .stepper li[data-state='current'] .stepDot { border-color: var(--studio-accent); background: var(--studio-accent); color: var(--studio-panel); }
 .stepper li[data-state='done'] button { color: var(--studio-ink); }
 .stepper li[data-state='done'] .stepDot { border-color: var(--studio-accent); color: var(--studio-accent); }
-.progress { height: 3px; margin-top: 10px; border-radius: 3px; background: var(--studio-line); overflow: hidden; }
-.progress span { display: block; height: 100%; background: var(--studio-accent); transition: width 300ms ease; }
 
 /* Layout */
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
@@ -42,18 +40,16 @@
 .quote { margin-top: 12px; color: var(--studio-muted); font-size: 14px; }
 .quote b { color: var(--studio-accent); font-size: 16px; }
 
-/* Services */
-.serviceGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; }
-.serviceCard { display: grid; grid-template-columns: 132px minmax(0, 1fr); grid-template-rows: auto 1fr; column-gap: 16px; align-items: start; min-width: 0; padding: 10px; border: 1.5px solid var(--studio-line); border-radius: 16px; background: var(--studio-panel); text-align: left; transition: border-color 150ms, box-shadow 150ms; }
-.serviceCard[aria-pressed='true'] { border-color: var(--studio-accent); box-shadow: 0 0 0 1px var(--studio-accent); background: var(--studio-soft); }
-.serviceCover { grid-row: 1 / span 2; position: relative; display: grid; place-items: center; aspect-ratio: 1; overflow: hidden; border-radius: 11px; background: var(--studio-soft); }
-.serviceCover img { width: 100%; height: 100%; object-fit: cover; }
-.selectedBadge { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--studio-accent); color: var(--studio-panel); }
-.serviceCard[aria-pressed='false'] { align-items: center; }
-.serviceCard[aria-pressed='false'] .serviceName { grid-row: 1 / span 2; }
-.serviceName { padding: 4px 4px 0 0; font-size: 16px; font-weight: 700; }
-.serviceDesc { margin-top: 6px; padding-right: 4px; color: var(--studio-muted); font-size: 13px; line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
-.skeleton { height: 152px; border-radius: 16px; background: var(--studio-soft); animation: pulse 1.2s ease-in-out infinite alternate; }
+/* Services: vertical cards, photo on top */
+.serviceGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 14px; }
+.serviceCard { display: flex; flex-direction: column; min-width: 0; padding: 7px 7px 12px; border: 1.5px solid var(--studio-line); border-radius: 14px; background: var(--studio-panel); text-align: left; transition: border-color 150ms, box-shadow 150ms; }
+.serviceCard[aria-pressed='true'] { border-color: var(--studio-accent); box-shadow: 0 0 0 1px var(--studio-accent); }
+.serviceCover { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 9px; background: var(--studio-soft); }
+.serviceCover img { width: 100%; height: 100%; object-fit: cover; object-position: center 25%; }
+.selectedBadge { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 26px; height: 26px; border: 2px solid #fff; border-radius: 50%; background: var(--studio-accent); color: #fff; }
+.serviceName { padding: 10px 5px 0; font: 600 18px/1.3 Georgia, serif; }
+.serviceDesc { margin-top: 4px; padding: 0 5px; color: var(--studio-muted); font-size: 13px; line-height: 1.55; white-space: pre-line; overflow-wrap: anywhere; }
+.skeleton { aspect-ratio: 16 / 13; border-radius: 14px; background: var(--studio-soft); animation: pulse 1.2s ease-in-out infinite alternate; }
 @keyframes pulse { to { opacity: .5; } }
 
 /* People counter */
@@ -140,6 +136,10 @@
 
 /* Tablet and phone: one column, price + button stuck to the bottom. */
 @media (max-width: 959px) {
+  .top { flex-direction: column; align-items: stretch; }
+  .stepper ol { justify-content: space-between; }
+  .stepper li:not(:first-child) { flex: 1; }
+  .stepper li + li::before { flex: 1; width: auto; }
   .shell { width: min(760px, calc(100% - 32px)); padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
   .layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .aside { position: static; }
@@ -162,15 +162,17 @@
 
 @media (max-width: 600px) {
   .shell { width: calc(100% - 24px); padding-top: 14px; }
-  .intro { gap: 12px; }
-  .introPhoto { width: 60px; height: 60px; border-radius: 14px; }
   .introText { font-size: 13px; }
-  .stepper { margin: 14px 0 12px; }
-  .stepper button { flex-direction: column; justify-content: center; gap: 4px; font-size: 12px; text-align: center; }
+  .stepper li + li::before { width: 14px; margin: 0 6px; }
+  .stepper button { gap: 6px; font-size: 13px; }
+  .stepDot { width: 30px; height: 30px; font-size: 12px; }
+  .stepper li:not([data-state='current']) .stepLabel { display: none; }
   .card, .summary { padding: 16px; border-radius: 16px; }
   .cardTitle { font-size: 17px; margin-bottom: 14px; }
-  .serviceCard { grid-template-columns: 88px minmax(0, 1fr); column-gap: 12px; padding: 8px; }
-  .serviceName { font-size: 15px; }
+  .serviceGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .serviceCard { padding: 5px 5px 10px; }
+  .serviceName { font-size: 16px; }
+  .serviceDesc { font-size: 12px; }
   .fieldGrid { grid-template-columns: minmax(0, 1fr); }
   .field :is(input, textarea), .counter input { font-size: 16px; }
   .counter { max-width: none; }
