@@ -249,6 +249,18 @@ export default function BookingPage() {
           a.position - b.position
       )
 
+  // A package named for a group size ("GÓI 1-2 NGƯỜI", "GÓI 8+ NGƯỜI") only
+  // fits that many people; packages without a size always show.
+  const packagesForPeople = (count: number) => {
+    if (!selectedService?.collect_people || !(count > 0)) return servicePackages
+    const fitting = servicePackages.filter(pkg => {
+      const range = packagePeopleRange(pkg.name)
+      return !range || (count >= range[0] && count <= range[1])
+    })
+    return fitting.length ? fitting : servicePackages
+  }
+  const visiblePackages = packagesForPeople(Number(peopleCount))
+
 
   const peopleQuote = selectedService?.collect_people
     ? quotePeople(selectedService.people_price_tiers || [], Number(peopleCount))
@@ -942,9 +954,9 @@ export default function BookingPage() {
               {selectedService && (!selectedService.collect_people || peopleQuote) && (
                 <section className={styles.card} aria-labelledby="booking-package-title">
                   <CardTitle id="booking-package-title" index={selectedService.collect_people ? 3 : 2} title="Chọn gói chụp" required />
-                  {servicePackages.length === 0 && <p className={styles.notice}>Thể loại này chưa có gói mở đặt lịch. Bạn có thể chọn thể loại khác.</p>}
+                  {visiblePackages.length === 0 && <p className={styles.notice}>Thể loại này chưa có gói mở đặt lịch. Bạn có thể chọn thể loại khác.</p>}
                   <div className={styles.packageList}>
-                    {servicePackages.map(pkg => {
+                    {visiblePackages.map(pkg => {
                       const selected = selectedPackageId === pkg.id
                       const price = quoteSessions(selectedService.collect_people ? peopleQuote?.total || 0 : pkg.price, sessionPercentages, sessionCount)?.total
                       return (
@@ -1156,11 +1168,29 @@ export default function BookingPage() {
   function changePeople(value: string | number) {
     const next = typeof value === 'number' ? String(Math.max(1, value)) : value
     setPeopleCount(next)
-    setSelectedPackageId('')
+    // Exactly one package fits this many people: choose it for the guest.
+    const fitting = packagesForPeople(Number(next)).filter(pkg => packagePeopleRange(pkg.name))
+    setSelectedPackageId(fitting.length === 1 && selectedService?.collect_people && quotePeople(selectedService.people_price_tiers || [], Number(next)) ? fitting[0].id : '')
     setSessionCount(1)
     setPaymentOption('later')
     setErrorText('')
   }
+}
+
+
+/** People range from a package name: "1-2 người" → [1, 2], "8+ người" → [8, ∞], "2 người" → [2, 2]. */
+function packagePeopleRange(name: string): [number, number] | null {
+  const text = String(name || '').toLowerCase()
+  const range = text.match(/(\d+)\s*(?:-|–|—|đến|tới|~)\s*(\d+)\s*(?:người|ng\b|khách|pax)?/)
+  if (range) {
+    const low = Number(range[1]), high = Number(range[2])
+    return low <= high ? [low, high] : [high, low]
+  }
+  const atLeast = text.match(/(?:từ|trên)?\s*(\d+)\s*\+|(?:từ|trên)\s*(\d+)\s*người/)
+  if (atLeast) return [Number(atLeast[1] || atLeast[2]), Number.POSITIVE_INFINITY]
+  const single = text.match(/(\d+)\s*người/)
+  if (single) return [Number(single[1]), Number(single[1])]
+  return null
 }
 
 
